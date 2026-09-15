@@ -15,3 +15,38 @@ jobs:
           node-version: '20'
       - run: npm ci
       - run: npm test
+
+  # ------------------------------------------------------------------
+  # Varredura de dependências vulneráveis.
+  #
+  # Por que é um job SEPARADO do `test`: uma vulnerabilidade nova é
+  # publicada sem que ninguém aqui tenha mexido em nada. Se isso derrubasse
+  # o job de teste, a leitura do vermelho no PR seria "quebrei o código" —
+  # quando a verdade é "apareceu um aviso no mundo lá fora". Separado, o
+  # sinal diz o que realmente é.
+  #
+  # --omit=dev: só o que vai para o servidor. As dependências de
+  # desenvolvimento (vitest e sua árvore) não são instaladas em produção —
+  # o deploy roda `npm ci --omit=dev`. Auditá-las aqui encheria o PR de
+  # alertas sobre código que nunca sai da máquina de quem programa, e o
+  # custo disso é as pessoas aprenderem a ignorar o vermelho.
+  #
+  # --audit-level=high: quebra em `high` e `critical`. Os níveis `low` e
+  # `moderate` viram aviso no log, não bloqueio — mesma razão acima.
+  # ------------------------------------------------------------------
+  auditoria:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - name: Vulnerabilidades em dependências de produção
+        run: npm audit --omit=dev --audit-level=high
+      - name: Relatório completo (não bloqueia)
+        if: always()
+        run: npm audit --omit=dev || true
