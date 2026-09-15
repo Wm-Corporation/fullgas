@@ -68,6 +68,34 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .brand.big { font-size: 26px; }
 .brand.white, .brand.white .g-badge { color: var(--ink); border-color: var(--ink); }
 
+/* ---------- easter egg do "F" (tela de acesso) ----------
+   Reusa o padrão visual do .modal-back, mas sem a moldura branca com header
+   de formulário: aqui é só o vídeo, centralizado, com um X discreto por
+   cima. z-index acima do .modal-back (90) — não que os dois coexistam hoje,
+   mas para o dia em que alguém abrir um modal de verdade por cima. */
+.egg-back {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, .82); z-index: 95;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+/* min-width/min-height: 0 são o que impede o vídeo de VAZAR da tela em
+   celular. Item de flex tem `min-width:auto` por padrão, que para um
+   elemento substituído (vídeo, imagem) resolve para o tamanho INTRÍNSECO —
+   576px de largura neste vídeo vertical — e isso vence o max-width, porque
+   min sempre tem prioridade sobre max no cálculo do flexbox. Sem zerar o
+   min, o vídeo ficava mais largo que o celular e saía cortado dos dois
+   lados, mesmo com max-width:92vw escrito bem ali do lado. */
+.egg-box { position: relative; max-width: 92vw; max-height: 88vh; min-width: 0; min-height: 0; }
+.egg-video {
+  display: block; max-width: 92vw; max-height: 88vh; min-width: 0; min-height: 0;
+  border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, .5);
+}
+.egg-x {
+  position: absolute; top: -14px; right: -14px; width: 32px; height: 32px;
+  border-radius: 50%; border: none; background: #fff; color: var(--ink);
+  font-size: 20px; line-height: 1; cursor: pointer; box-shadow: var(--shadow);
+}
+.egg-x:hover { background: var(--red); color: #fff; }
+
 /* ---------- botões ---------- */
 .btn {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer;

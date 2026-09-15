@@ -6,13 +6,13 @@
   <title>FULLGAS B2B — Acesso</title>
   <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
   <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
-  <link rel="stylesheet" href="css/styles.css?v=20260831a">
+  <link rel="stylesheet" href="css/styles.css?v=20260915a">
 </head>
 <body>
   <div class="auth-wrap">
     <div class="auth-card">
       <div class="head">
-        <span class="brand big"><span class="g-badge">F</span> FULLGAS</span>
+        <span class="brand big"><span class="g-badge" id="logo-f">F</span> FULLGAS</span>
         <div class="sub">Portal B2B do concessionário</div>
         <div class="auth-tabs">
           <button id="tab-login" class="on" type="button">Entrar</button>
@@ -160,9 +160,21 @@
          database/fullgas_seeds.sql, que não é aplicado em produção. -->
   </div>
 
+  <!-- EASTER EGG — clicar no "F" do logo abre este vídeo. Sem pista visual
+       nenhuma de propósito (nada de cursor:pointer, nada de título "clique
+       aqui"): é para ser achado, não anunciado. Ver #logo-f em js/auth.js. -->
+  <div id="egg-back" class="egg-back hidden">
+    <div class="egg-box">
+      <button class="egg-x" id="egg-x" type="button" aria-label="Fechar">×</button>
+      <video id="egg-video" class="egg-video" playsinline controls>
+        <source src="media/easter-egg-f.mp4?v=20260915a" type="video/mp4">
+      </video>
+    </div>
+  </div>
+
   <script src="js/config.js?v=20260727a"></script>
   <script src="js/store.js?v=20260727a"></script>
   <script src="js/api-adapter.js?v=20260827a"></script>
-  <script src="js/auth.js?v=20260806b"></script>
+  <script src="js/auth.js?v=20260915a"></script>
 </body>
 </html>
