@@ -246,4 +246,30 @@
   }
   document.getElementById('btn-cad').addEventListener('click', doRegister);
   formCad.addEventListener('keydown', function (e) { if (e.key === 'Enter') doRegister(); });
+
+  /* ---------- easter egg: clicar no "F" do logo ----------
+     Sem cursor:pointer nem qualquer pista visual — é para ser achado, não
+     anunciado. O vídeo PAUSA e VOLTA AO INÍCIO ao fechar (currentTime = 0):
+     sem isso, quem reabre encontra o vídeo do jeito que deixou, tocando ou
+     parado no meio — o easter egg tem de recomeçar toda vez. */
+  var eggBack = document.getElementById('egg-back');
+  var eggVideo = document.getElementById('egg-video');
+
+  function abrirEgg() {
+    eggBack.classList.remove('hidden');
+    eggVideo.play().catch(function () { /* autoplay bloqueado: controls cobrem */ });
+  }
+  function fecharEgg() {
+    eggBack.classList.add('hidden');
+    eggVideo.pause();
+    eggVideo.currentTime = 0;
+  }
+  document.getElementById('logo-f').addEventListener('click', abrirEgg);
+  document.getElementById('egg-x').addEventListener('click', fecharEgg);
+  // Clique no fundo escuro fecha; clique DENTRO do vídeo não deve propagar
+  // para o fundo (senão tocar/pausar pelo próprio player fecharia o modal).
+  eggBack.addEventListener('click', function (e) { if (e.target === eggBack) fecharEgg(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !eggBack.classList.contains('hidden')) fecharEgg();
+  });
 })();
