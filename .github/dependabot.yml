@@ -1,0 +1,51 @@
+# ============================================================================
+# Dependabot — atualização automática de dependências
+# ----------------------------------------------------------------------------
+# O `npm audit` do CI AVISA que existe uma vulnerabilidade. Ele não conserta.
+# Sem alguém abrindo o PR de atualização, o aviso vira ruído permanente no
+# vermelho do CI — e a reação natural, depois da terceira vez, é parar de
+# olhar. O Dependabot fecha esse ciclo: abre o PR com a correção, e o CI
+# (testes + auditoria) diz se pode entrar.
+#
+# Foi assim que o `multer` ficou na 1.4.5 (fim de vida, com CVEs de negação de
+# serviço de 2025) até a auditoria de setembro encontrar à mão.
+#
+# Frequência semanal, não diária: o volume de PR precisa caber na rotina de
+# quem revisa, senão eles se acumulam sem ninguém ler.
+# ============================================================================
+version: 2
+updates:
+  # --- Dependências da API (Node) ---
+  - package-ecosystem: npm
+    directory: /api
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+      prefix-development: deps-dev
+    groups:
+      # Correções de patch e minor entram JUNTAS, num PR só. São as que
+      # raramente quebram, e revisar quinze PRs de bump de patch é o caminho
+      # mais curto para ninguém revisar nenhum.
+      producao-menores:
+        dependency-type: production
+        update-types: [minor, patch]
+      desenvolvimento:
+        dependency-type: development
+    # Atualização MAIOR fica de fora do agrupamento de propósito: ela quebra
+    # API (foi o caso do multer 1.x → 2.x) e merece PR próprio, lido com calma.
+
+  # --- As próprias GitHub Actions usadas no CI ---
+  # actions/checkout e actions/setup-node também recebem correção de
+  # segurança, e ficam esquecidas por anos porque ninguém pensa nelas
+  # como dependência.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
