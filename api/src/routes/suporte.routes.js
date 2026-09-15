@@ -2,8 +2,8 @@
 // Rotas do Suporte Técnico (helpdesk por chamados)
 //   - GET   /suporte/categorias              lista de categorias de ajuda
 //   - GET   /suporte/resumo                  contadores do pop-up flutuante
-//   - GET   /suporte/chamados                lista (cliente: da sua empresa;
-//                                            admin: de todas)
+//   - GET   /suporte/chamados                lista (cliente: os que ele mesmo
+//                                            abriu; admin: os de todos)
 //   - POST  /suporte/chamados                revendedor abre (multipart, anexo
 //                                            opcional)
 //   - GET   /suporte/chamados/:id            detalhe + conversa (marca como
@@ -115,6 +115,26 @@ function toIso(d) { return d instanceof Date ? d.toISOString() : (d || null); }
    `colunaLida` entra em SQL por interpolação, e isso é seguro: o valor sai
    DESTE objeto, nunca do pedido. Nome de coluna não pode ser parâmetro.
    ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   DE QUEM É O CHAMADO
+   ------------------------------------------------------------------
+   Um chamado de suporte pertence à PESSOA que o abriu, não à
+   concessionária dela. Duas contas da mesma empresa — inclusive a conta
+   interna/gestora — não enxergam a conversa uma da outra: o que se fala com o
+   suporte pode ser sobre cobrança, acesso ou a própria equipe.
+
+   `dono` é o UsuarioId de quem está pedindo, ou null para o administrador da
+   Fullgas — que precisa ver todos os chamados para conseguir atendê-los. É o
+   mesmo formato de antes (null = "sem filtro"), então as consultas continuam
+   com um parâmetro só.
+
+   A empresa continua gravada no chamado (EmpresaId): ela dá o nome na fila do
+   atendente e o vínculo do protocolo. O que deixou de fazer é dar ACESSO.
+   ------------------------------------------------------------------ */
+export function escopoSuporte(user) {
+  return { dono: user.papel === 'admin' ? null : user.id };
+}
+
 // Exportado: o /api/pulso (pulso.routes.js) conta as mesmas mensagens não
 // lidas de 10 em 10 segundos. Duas cópias desta escolha de coluna dariam dois
 // contadores discordando sobre o mesmo chamado.
@@ -232,14 +252,13 @@ function avisarMensagem(c, autor, texto, temAnexo, user) {
     });
 }
 
-// Busca o chamado conferindo o escopo: cliente só alcança os da própria
-// empresa; admin alcança todos. Devolve a linha crua ou null.
+// Busca o chamado conferindo o escopo: cliente só alcança os que ELE abriu;
+// admin alcança todos. Devolve a linha crua ou null.
 async function buscarChamado(id, user) {
-  const eid = user.papel === 'admin' ? null : user.empresaId;
   const rows = await query(
     selectChamados(ladosDa(user)) +
-    ' WHERE c.ChamadoId = @id AND (@eid IS NULL OR c.EmpresaId = @eid)',
-    { id, eid }
+    ' WHERE c.ChamadoId = @id AND (@dono IS NULL OR c.UsuarioId = @dono)',
+    { id, ...escopoSuporte(user) }
   );
   return rows[0] || null;
 }
@@ -255,18 +274,17 @@ router.get('/suporte/categorias', requireAuth, (_req, res) => {
 router.get('/suporte/resumo', requireAuth, async (req, res, next) => {
   try {
     const lado = ladosDa(req.user);
-    const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
     const rows = await query(
       `SELECT
          (SELECT COUNT(*) FROM dbo.SuporteChamado c
-           WHERE (@eid IS NULL OR c.EmpresaId = @eid)
+           WHERE (@dono IS NULL OR c.UsuarioId = @dono)
              AND c.Status NOT IN ('Resolvido', 'Fechado')) AS Abertos,
          (SELECT COUNT(*) FROM dbo.SuporteMensagem m
             JOIN dbo.SuporteChamado c ON c.ChamadoId = m.ChamadoId
-           WHERE (@eid IS NULL OR c.EmpresaId = @eid)
+           WHERE (@dono IS NULL OR c.UsuarioId = @dono)
              AND m.Autor <> '${lado.eu}'
              AND m.${lado.colunaLida} IS NULL) AS NaoLidas`,
-      { eid }
+      escopoSuporte(req.user)
     );
     res.json({
       abertos: Number(rows[0]?.Abertos || 0),
@@ -275,18 +293,17 @@ router.get('/suporte/resumo', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// GET /api/suporte/chamados[?status=] — cliente vê os da própria empresa;
-// admin vê os de todas. Ordem: o que se mexeu por último vem primeiro.
+// GET /api/suporte/chamados[?status=] — cliente vê os chamados que ELE abriu;
+// admin vê os de todo mundo. Ordem: o que se mexeu por último vem primeiro.
 router.get('/suporte/chamados', requireAuth, async (req, res, next) => {
   try {
-    const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
     const status = statusValido(req.query.status) ? req.query.status : null;
     const rows = await query(
       selectChamados(ladosDa(req.user)) +
-      ` WHERE (@eid IS NULL OR c.EmpresaId = @eid)
+      ` WHERE (@dono IS NULL OR c.UsuarioId = @dono)
            AND (@status IS NULL OR c.Status = @status)
          ORDER BY c.AtualizadoEm DESC, c.ChamadoId DESC`,
-      { eid, status }
+      { status, ...escopoSuporte(req.user) }
     );
     res.json(rows.map(toChamado));
   } catch (e) { next(e); }
