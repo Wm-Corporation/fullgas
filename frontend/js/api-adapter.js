@@ -798,8 +798,8 @@
     return apiGet('/empresas').then(function (l) { _empresas = l || []; return _empresas; });
   };
 
-  // Cadastra um chassi novo (SÓ ADMIN): { niv, modeloId, cor?, numeroMotor?,
-  // empresaId? }. Recarrega o cache de veículos no sucesso.
+  // Cadastra um chassi novo (SÓ ADMIN): { niv, modeloId, empresaId? } — sem
+  // empresaId ele nasce na Fábrica. Recarrega o cache de veículos no sucesso.
   FG.criarVeiculo = function (dados) {
     return req('POST', '/veiculos', dados).then(function (r) {
       if (!r.ok) return r;
@@ -808,8 +808,9 @@
   };
 
   // Transfere o chassi para outra concessionária (SÓ ADMIN). `destino` pode
-  // ser o NOME (string) ou { empresaId } vindo do autocomplete. Recarrega o
-  // cache de veículos no sucesso.
+  // ser o NOME (string), { empresaId } vindo do autocomplete ou
+  // { fabrica: true } para devolvê-lo à Fábrica. Recarrega o cache de
+  // veículos no sucesso.
   FG.transferirVeiculo = function (niv, destino) {
     var body = typeof destino === 'object' ? destino : { empresa: destino };
     return req('PUT', '/veiculos/' + encodeURIComponent(niv) + '/transferir', body).then(function (r) {

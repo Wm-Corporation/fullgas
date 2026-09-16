@@ -20,7 +20,7 @@
   var view = document.getElementById('view');
   var esc = FG.esc;
 
-  document.getElementById('sh-user').textContent = sess.nome + '  -  ' + sess.empresa + '  ›';
+  document.getElementById('sh-user').innerHTML = FG.esc(sess.nome) + '  -  ' + FG.empresaDaSessao(sess) + '  ›';
 
   /* ---------- ícones de categoria (line-art próprio) ---------- */
   var ICONS = {

@@ -16,8 +16,15 @@
   var esc = FG.esc;
 
   /* ---------- cabeçalho ---------- */
-  document.getElementById('user-who').textContent =
-    sess.nome + ' (' + sess.email + ') - ' + sess.empresa + ', ' + (sess.papel === 'admin' ? 'Administrador' : 'Concessionário');
+  // Administrador aparece como Fábrica, não com o nome da empresa em que a
+  // conta está pendurada (ver api/src/fabrica.js).
+  function desenharQuem() {
+    var who = document.getElementById('user-who');
+    if (!who) return;
+    who.innerHTML = esc(sess.nome) + ' (' + esc(sess.email) + ') - ' + FG.empresaDaSessao(sess) +
+      (sess.papel === 'admin' ? ' Administrador' : ', Concessionário');
+  }
+  desenharQuem();
 
   document.getElementById('btn-sair').addEventListener('click', function (e) { e.preventDefault(); FG.logout(); });
   document.getElementById('btn-notif').addEventListener('click', function () { location.hash = '#notificacoes'; });
@@ -1291,20 +1298,23 @@
   }
 
   // Modal (SÓ ADMIN) para transferir o chassi para outra concessionária,
-  // digitando o nome dela (razão social ou nome fantasia).
+  // digitando o nome dela (razão social ou nome fantasia) — ou devolvê-lo à
+  // Fábrica, quando ele já está numa concessionária.
   function modalTransferir(v, onDone) {
     var back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML =
       '<div class="modal"><header><h3>Transferir revendedor — ' + esc(v.niv) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
-      '<p class="muted" style="margin-top:0;">O chassi passa a pertencer à concessionária informada. ' +
-      'Comece a digitar e escolha na lista.</p>' +
+      '<p class="muted" style="margin-top:0;">Hoje está ' + (v.fabrica ? 'na ' + FG.seloFabrica() : 'em <b>' + esc(v.empresa) + '</b>') +
+      '. O chassi passa a pertencer à concessionária informada. Comece a digitar e escolha na lista.</p>' +
       '<div class="field"><label>Concessionária de destino *</label>' +
       '<div class="ac-wrap"><input id="tf-emp" type="text" placeholder="Digite o nome da concessionária" autocomplete="off">' +
       '<div class="ac-list hidden" id="tf-emp-ac"></div></div></div>' +
       '</div>' +
-      '<div class="modal-foot"><button class="btn-line" id="tf-canc">Cancelar</button>' +
+      '<div class="modal-foot">' +
+      (v.fabrica ? '' : '<button class="btn-line" id="tf-fab" style="margin-right:auto;">Devolver à Fábrica</button>') +
+      '<button class="btn-line" id="tf-canc">Cancelar</button>' +
       '<button class="btn red" id="tf-ok">Transferir</button></div></div>';
     document.body.appendChild(back);
 
@@ -1313,6 +1323,17 @@
     back.querySelector('#tf-canc').addEventListener('click', fechar);
     // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
     document.getElementById('tf-emp').focus();
+
+    var bFab = document.getElementById('tf-fab');
+    if (bFab) bFab.addEventListener('click', async function () {
+      if (!confirm('Devolver o chassi ' + v.niv + ' à Fábrica?\n' + v.empresa + ' deixa de vê-lo.')) return;
+      bFab.disabled = true;
+      var r = await FG.transferirVeiculo(v.niv, { fabrica: true });
+      if (!r.ok) { bFab.disabled = false; FG.toast(r.msg || 'Não foi possível devolver.', 'erro'); return; }
+      fechar();
+      FG.toast('Chassi devolvido à Fábrica.');
+      if (onDone) onDone();
+    });
 
     // Sugestões enquanto digita (front próprio — nada de datalist nativo).
     FG.bindAutocomplete('tf-emp', function (termo) {
@@ -1379,7 +1400,8 @@
 
     var admin = sess.papel === 'admin';
     box.innerHTML = lista.map(function (h) {
-      var rodape = [h.empresa, h.usuario].filter(Boolean).map(esc).join(' · ');
+      var rodape = [h.fabrica ? FG.seloFabrica() : esc(h.empresa), esc(h.usuario)]
+        .filter(Boolean).join(' · ');
       return '<div class="hist-item hist-' + esc(h.tipo) + '">' +
         '<div class="hist-ico" title="' + esc(HIST_ROTULO[h.tipo] || h.tipo) + '">' +
         (HIST_ICONE[h.tipo] || '•') + '</div>' +
@@ -1489,8 +1511,8 @@
         '<div class="veh-grid">' +
         '<div><b>NIV</b>' + v.niv + '</div>' +
         '<div><b>Modelo</b>' + esc(modelName(v.modeloId)) + '</div>' +
-        '<div><b>Cor</b>' + esc(v.cor) + '</div>' +
         '<div><b>Status</b>' + esc(v.status) + '</div>' +
+        '<div><b>Localização</b>' + (v.fabrica ? FG.seloFabrica() : esc(v.empresa || '—')) + '</div>' +
         '<div><b>Entrada no estoque</b>' + FG.fmtDate(v.entrada) + '</div>' +
         (v.venda ? '<div><b>Venda</b>' + FG.fmtDate(v.venda.data) + ' — ' + esc(v.venda.cliente) + '</div>' +
           (v.venda.cpf ? '<div><b>CPF</b>' + esc(v.venda.cpf) + '</div>' : '') +
@@ -1546,21 +1568,30 @@
   function renderEstoque() {
     setCrumb(['Estoque do revendedor']); setTabOn('estoque');
     var vehs = FG.all('vehicles');
+    // O admin vê os chassis de todas as concessionárias e os da Fábrica: para
+    // ele a tabela ganha a coluna de localização. A concessionária só vê os
+    // próprios, então a coluna não diria nada.
+    var admin = sess.papel === 'admin';
+    function local(v) { return v.fabrica ? 'Fábrica' : (v.empresa || ''); }
     view.innerHTML =
       '<h2>Estoque do revendedor</h2>' +
       '<div class="toolbar"><button class="tool" id="es-csv">📄 Export. p/ Excel</button></div>' +
-      '<table class="table"><thead><tr><th class="filt">NIV</th><th class="filt">Modelo</th><th>Cor</th>' +
+      '<table class="table"><thead><tr><th class="filt">NIV</th><th class="filt">Modelo</th>' +
+      (admin ? '<th>Localização</th>' : '') +
       '<th class="filt">Status</th><th>Entrada</th><th></th></tr></thead><tbody>' +
       vehs.map(function (v) {
-        return '<tr><td>' + v.niv + '</td><td>' + esc(modelName(v.modeloId)) + '</td><td>' + esc(v.cor) + '</td>' +
+        return '<tr><td>' + v.niv + '</td><td>' + esc(modelName(v.modeloId)) + '</td>' +
+          (admin ? '<td>' + (v.fabrica ? FG.seloFabrica() : esc(v.empresa || '—')) + '</td>' : '') +
           '<td>' + (v.status === 'Disponível' ? '<span class="stock-ok">Disponível</span>' : esc(v.status)) + '</td>' +
           '<td>' + FG.fmtDate(v.entrada) + '</td>' +
           '<td><a href="#acoes/' + v.niv + '">Ações &rsaquo;</a></td></tr>';
       }).join('') +
       '</tbody></table>';
     document.getElementById('es-csv').addEventListener('click', function () {
-      var linhas = [['NIV', 'Modelo', 'Cor', 'Status', 'Entrada']];
-      vehs.forEach(function (v) { linhas.push([v.niv, modelName(v.modeloId), v.cor, v.status, FG.fmtDate(v.entrada)]); });
+      var linhas = [['NIV', 'Modelo'].concat(admin ? ['Localização'] : [], ['Status', 'Entrada'])];
+      vehs.forEach(function (v) {
+        linhas.push([v.niv, modelName(v.modeloId)].concat(admin ? [local(v)] : [], [v.status, FG.fmtDate(v.entrada)]));
+      });
       FG.exportCSV('estoque', linhas);
     });
   }
@@ -1963,9 +1994,7 @@
               s.email = r.email;
               localStorage.setItem('fullgas_session_v1', JSON.stringify(s));
             } catch (e) { /* sessão intacta se falhar */ }
-            var who = document.getElementById('user-who');
-            if (who) who.textContent = sess.nome + ' (' + sess.email + ') - ' + sess.empresa +
-              ', ' + (sess.papel === 'admin' ? 'Administrador' : 'Concessionário');
+            desenharQuem();
             FG.toast('Dados salvos. Seu e-mail de acesso agora é ' + r.email + '.');
           } else {
             FG.toast('Dados da empresa salvos.');

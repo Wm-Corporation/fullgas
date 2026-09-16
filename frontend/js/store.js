@@ -579,6 +579,20 @@
     maskIe: function (v) {
       return String(v).toUpperCase().replace(/[^0-9A-Z./ -]/g, '').slice(0, 20);
     },
+    // Selo "Fábrica" — o mesmo desenho em todas as telas (.selo-fabrica no
+    // styles.css). Vai no lugar do nome da concessionária quando o chassi, o
+    // evento ou a conta são da Fábrica.
+    seloFabrica: function () {
+      return '<span class="selo-fabrica" title="Fullgas — Fábrica">' +
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" ' +
+        'd="M2 22V11l6 3v-3l6 3V9h2V2h4v20zM5 17h2v2H5zm4 0h2v2H9zm4 0h2v2h-2z"/></svg>' +
+        'Fábrica</span>';
+    },
+    // Empresa da sessão para os cabeçalhos, já em HTML: administrador é da
+    // Fábrica e aparece com o selo, não com a empresa em que a conta está.
+    empresaDaSessao: function (s) {
+      return s && s.papel === 'admin' ? FG.seloFabrica() : esc((s && s.empresa) || '');
+    },
     // Autocomplete PRÓPRIO (visual .ac-wrap/.ac-list — nada de datalist
     // nativo do navegador). Requer o markup:
     //   <div class="ac-wrap"><input id="X"><div class="ac-list hidden" id="X-ac"></div></div>

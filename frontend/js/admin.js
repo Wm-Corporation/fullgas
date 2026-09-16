@@ -15,7 +15,8 @@
   var h1 = document.getElementById('adm-h1');
   var esc = FG.esc;
 
-  document.getElementById('adm-user').textContent = sess.nome;
+  // Todo administrador é da Fábrica — o selo fica ao lado do nome.
+  document.getElementById('adm-user').innerHTML = esc(sess.nome) + ' ' + FG.seloFabrica();
   document.getElementById('adm-sair').addEventListener('click', function () { FG.logout(); });
 
   // Ampliar qualquer miniatura (.fnd-thumb) em lightbox — vale para as fotos
@@ -311,7 +312,8 @@
             dd('Complemento', e.complemento) + dd('Bairro', e.bairro) +
             dd('Cidade', e.cidade) + dd('UF', e.uf) +
             '</div>' : '<p class="muted" style="margin:4px 0 0;">Sem endereço cadastrado.</p>');
-        return '<tr><td>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) + '</td>' +
+        return '<tr><td>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) +
+          (u.fabrica ? ' ' + FG.seloFabrica() : '') + '</td>' +
           '<td>' + (u.cnpj ? esc(u.cnpj) : '<span class="muted">—</span>') + '</td>' +
           '<td style="font-size:12px;">' + endTxt +
           ' <button class="btn-line btn-mini usr-exp" data-exp="' + u.id + '">Expandir ▾</button></td>' +
@@ -347,7 +349,7 @@
     var f = filtros.admins;
     var admins = todos.filter(function (u) {
       if (f.status && u.status !== f.status) return false;
-      return casaBusca('admins', [u.nome, u.email, u.empresa]);
+      return casaBusca('admins', [u.nome, u.email, u.empresa, 'Fábrica']);
     });
     var ativos = todos.filter(function (u) { return u.status === 'aprovado'; }).length;
 
@@ -361,13 +363,13 @@
       barraFiltro('admins', [
         { k: 'status', rotulo: 'Status', opcoes: [['aprovado', 'Ativo'], ['bloqueado', 'Bloqueado'], ['pendente', 'Pendente']] }
       ], 'Buscar por nome ou e-mail') +
-      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>Status</th>' +
+      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Vínculo</th><th>Status</th>' +
       '<th>Criado em</th><th>Ações</th></tr></thead><tbody>' +
       (admins.length ? admins.map(function (u) {
         return '<tr><td>' + esc(u.nome) +
           (String(u.id) === String(sess.id) ? ' <span class="pill-status ps-voce">você</span>' : '') +
           '</td><td>' + esc(u.email) + '</td>' +
-          '<td>' + (u.empresa ? esc(u.empresa) : '<span class="muted">—</span>') + '</td>' +
+          '<td>' + FG.seloFabrica() + '</td>' +
           '<td>' + pill(u.status) + '</td>' +
           '<td class="nowrap">' + (u.criadoEm ? FG.fmtDate(u.criadoEm) : '<span class="muted">—</span>') + '</td>' +
           '<td>' + acoesUsuario(u) + '</td></tr>';
@@ -486,7 +488,8 @@
       ehAdmin ? 'Rebaixar para cliente' : 'Promover a administrador',
       ehAdmin
         ? 'Tira o acesso a este painel. A conta passa a usar só o portal e migra para a aba Clientes.'
-        : 'Dá acesso total a este painel: pedidos, catálogo, chassis, clientes e Tiny. A conta migra para a aba Administradores.',
+        : 'Dá acesso total a este painel: pedidos, catálogo, chassis, clientes e Tiny. A conta migra para a aba Administradores ' +
+          'e a empresa dela (' + esc(u.empresa || '—') + ') passa a contar como Fábrica: sai da lista de concessionárias.',
       ehAdmin ? 'Tornar cliente' : 'Tornar admin', '']);
 
     cards.push(['bloq', u.status === 'bloqueado' ? '🔓' : '🚫',
@@ -513,8 +516,10 @@
         ? '<span class="pill-status ps-interna">Conta interna</span>'
         : '<span class="pill-status ps-gestor">Conta principal</span>')) +
       '</div>' +
-      '<div class="usr-ficha-emp">' + esc(u.empresa || '—') +
-      (u.cnpj ? ' <span class="muted">· ' + esc(u.cnpj) + '</span>' : '') + '</div>' +
+      '<div class="usr-ficha-emp">' + (ehAdmin
+        ? FG.seloFabrica()
+        : esc(u.empresa || '—') + (u.fabrica ? ' ' + FG.seloFabrica() : '') +
+          (u.cnpj ? ' <span class="muted">· ' + esc(u.cnpj) + '</span>' : '')) + '</div>' +
       '</div></div>' +
       /* ---- ações ---- */
       '<div class="usr-acoes">' +
@@ -662,7 +667,11 @@
   }
 
   /* =========================================================
-     CHASSIS (VINs) — cadastro e atribuição a concessionárias
+     CHASSIS (VINs) — cadastro na Fábrica e atribuição a concessionárias
+     ---------------------------------------------------------
+     Chassi sem concessionária está na Fábrica. A lista de destino
+     (FG.empresas) já vem sem a empresa dos administradores — a API não
+     aceita a Fábrica como concessionária.
      ========================================================= */
 
   // Autocomplete de concessionária (front próprio, estilo .ac-wrap).
@@ -678,20 +687,30 @@
     });
   }
 
-  // Modal para atribuir/transferir um chassi a uma concessionária.
+  // Onde o chassi está: a concessionária ou o selo da Fábrica.
+  function localChassi(v) {
+    return v.fabrica ? FG.seloFabrica() : esc(v.empresa || '—');
+  }
+
+  // Modal para atribuir/transferir um chassi a uma concessionária — ou,
+  // se ele já está numa, devolvê-lo à Fábrica.
   function modalAtribuir(v) {
+    var naFabrica = !!v.fabrica;
     var back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML =
-      '<div class="modal"><header><h3>' + (v.empresa ? 'Transferir' : 'Atribuir') + ' chassi — ' + esc(v.niv) + '</h3>' +
+      '<div class="modal"><header><h3>' + (naFabrica ? 'Atribuir' : 'Transferir') + ' chassi — ' + esc(v.niv) + '</h3>' +
       '<button class="x">×</button></header>' +
       '<div class="modal-body">' +
-      (v.empresa ? '<p class="muted" style="margin-top:0;">Hoje pertence a <b>' + esc(v.empresa) + '</b>.</p>' : '') +
+      '<p class="muted" style="margin-top:0;">Hoje está ' + (naFabrica ? 'na ' : 'em <b>') + localChassi(v) +
+      (naFabrica ? '' : '</b>') + '.</p>' +
       '<div class="field"><label>Concessionária de destino *</label>' +
       '<div class="ac-wrap"><input id="ch-emp" type="text" placeholder="Digite o nome da concessionária" autocomplete="off">' +
       '<div class="ac-list hidden" id="ch-emp-ac"></div></div></div>' +
       '</div>' +
-      '<div class="modal-foot"><button class="btn-line" id="ch-canc">Cancelar</button>' +
+      '<div class="modal-foot">' +
+      (naFabrica ? '' : '<button class="btn-line" id="ch-fab" style="margin-right:auto;">Devolver à Fábrica</button>') +
+      '<button class="btn-line" id="ch-canc">Cancelar</button>' +
       '<button class="btn-orange" id="ch-ok">Confirmar</button></div></div>';
     document.body.appendChild(back);
 
@@ -700,6 +719,18 @@
     back.querySelector('#ch-canc').addEventListener('click', fechar);
     document.getElementById('ch-emp').focus();
     bindAcEmpresas('ch-emp');
+
+    var bFab = document.getElementById('ch-fab');
+    if (bFab) bFab.addEventListener('click', function () {
+      if (!confirm('Devolver o chassi ' + v.niv + ' à Fábrica?\n' + v.empresa + ' deixa de vê-lo.')) return;
+      bFab.disabled = true;
+      FG.transferirVeiculo(v.niv, { fabrica: true }).then(function (r) {
+        if (!r.ok) { bFab.disabled = false; FG.toast(r.msg || 'Não foi possível devolver.', 'erro'); return; }
+        fechar();
+        FG.toast('Chassi ' + v.niv + ' devolvido à Fábrica.');
+        renderChassis();
+      });
+    });
 
     document.getElementById('ch-ok').addEventListener('click', function () {
       var el = document.getElementById('ch-emp');
@@ -723,10 +754,10 @@
     var vehs = todos.filter(function (v) {
       if (f.status && v.status !== f.status) return false;
       if (f.modelo && String(v.modeloId) !== f.modelo) return false;
-      if (f.atrib === 'sim' && !v.empresa) return false;
-      if (f.atrib === 'nao' && v.empresa) return false;
+      if (f.atrib === 'sim' && v.fabrica) return false;
+      if (f.atrib === 'nao' && !v.fabrica) return false;
       var m = FG.model(v.modeloId);
-      return casaBusca('chassis', [v.niv, v.cor, v.numeroMotor, v.empresa, m ? m.label : v.modeloId]);
+      return casaBusca('chassis', [v.niv, v.fabrica ? 'Fábrica' : v.empresa, m ? m.label : v.modeloId]);
     });
 
     view.innerHTML =
@@ -739,15 +770,13 @@
       '<option value="">— escolha o modelo —</option>' +
       modelos.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.label) + '</option>'; }).join('') +
       '</select></div>' +
-      '<div class="field"><label for="ch-cor">Cor</label><input id="ch-cor" type="text" maxlength="40" placeholder="Ex.: Vermelho"></div>' +
-      '<div class="field"><label for="ch-motor">Nº do motor</label><input id="ch-motor" type="text" maxlength="40" placeholder="opcional"></div>' +
       '<div class="field"><label for="ch-nova-emp">Concessionária (opcional)</label>' +
-      '<div class="ac-wrap"><input id="ch-nova-emp" type="text" placeholder="Deixe vazio p/ cadastrar sem atribuir" autocomplete="off">' +
+      '<div class="ac-wrap"><input id="ch-nova-emp" type="text" placeholder="Vazio = fica na Fábrica" autocomplete="off">' +
       '<div class="ac-list hidden" id="ch-nova-emp-ac"></div></div></div>' +
       '<div class="field" style="align-self:end;"><button class="btn-orange" id="ch-criar">Cadastrar chassi</button></div>' +
       '</div>' +
-      '<p class="muted" style="font-size:12px;margin:8px 0 0;">Sem concessionária, o chassi fica <b>não atribuído</b> ' +
-      '— nenhum cliente o vê até você atribuir. A atribuição pode ser feita (ou trocada) a qualquer momento na tabela abaixo.</p>' +
+      '<p class="muted" style="font-size:12px;margin:8px 0 0;">Sem concessionária, o chassi fica na ' + FG.seloFabrica() +
+      ' — nenhuma concessionária o vê até você atribuir. A atribuição pode ser feita (ou trocada) a qualquer momento na tabela abaixo.</p>' +
       '</div></div>' +
 
       /* ---- lista ---- */
@@ -755,21 +784,19 @@
       barraFiltro('chassis', [
         { k: 'status', rotulo: 'Status', opcoes: [['Disponível', 'Disponível'], ['Vendido', 'Vendido']] },
         { k: 'modelo', rotulo: 'Modelo', opcoes: modelos.map(function (m) { return [m.id, m.label]; }) },
-        { k: 'atrib', rotulo: 'Atribuição', opcoes: [['sim', 'Atribuído'], ['nao', 'Não atribuído']] }
-      ], 'Buscar por NIV, cor, nº do motor ou concessionária') +
-      '<table class="tbl"><thead><tr><th>NIV</th><th>Modelo</th><th>Cor</th><th>Nº motor</th>' +
-      '<th>Status</th><th>Concessionária</th><th>Entrada</th><th>Ações</th></tr></thead><tbody>' +
+        { k: 'atrib', rotulo: 'Localização', opcoes: [['nao', 'Na Fábrica'], ['sim', 'Em concessionária']] }
+      ], 'Buscar por NIV, modelo ou concessionária') +
+      '<table class="tbl"><thead><tr><th>NIV</th><th>Modelo</th>' +
+      '<th>Status</th><th>Localização</th><th>Entrada</th><th>Ações</th></tr></thead><tbody>' +
       (vehs.length ? vehs.map(function (v) {
         var m = FG.model(v.modeloId);
         return '<tr><td>' + esc(v.niv) + '</td><td>' + esc(m ? m.label : v.modeloId) + '</td>' +
-          '<td>' + (v.cor ? esc(v.cor) : '<span class="muted">—</span>') + '</td>' +
-          '<td>' + (v.numeroMotor ? esc(v.numeroMotor) : '<span class="muted">—</span>') + '</td>' +
           '<td>' + pill(v.status) + '</td>' +
-          '<td>' + (v.empresa ? esc(v.empresa) : '<span class="ch-livre">não atribuído</span>') + '</td>' +
+          '<td>' + localChassi(v) + '</td>' +
           '<td>' + FG.fmtDate(v.entrada) + '</td>' +
           '<td><button class="btn-line btn-mini" data-atr="' + esc(v.niv) + '">' +
-          (v.empresa ? 'Transferir' : 'Atribuir') + '</button></td></tr>';
-      }).join('') : vazioFiltro(8, todos.length
+          (v.fabrica ? 'Atribuir' : 'Transferir') + '</button></td></tr>';
+      }).join('') : vazioFiltro(6, todos.length
         ? 'Nenhum chassi com esse filtro.'
         : 'Nenhum chassi cadastrado ainda.')) +
       '</tbody></table></div></div>';
@@ -784,19 +811,17 @@
       var dados = {
         niv: document.getElementById('ch-niv').value.trim().toUpperCase(),
         modeloId: document.getElementById('ch-modelo').value,
-        cor: document.getElementById('ch-cor').value.trim(),
-        numeroMotor: document.getElementById('ch-motor').value.trim(),
         empresaId: idSel ? Number(idSel) : null
       };
       if (!/^[A-Z0-9]{11,17}$/.test(dados.niv)) { FG.toast('NIV inválido — use 11 a 17 letras/números.', 'erro'); return; }
       if (!dados.modeloId) { FG.toast('Escolha o modelo da moto.', 'erro'); return; }
-      if (empEl.value.trim() && !idSel) { FG.toast('Escolha a concessionária na lista de sugestões (ou deixe vazio).', 'erro'); return; }
+      if (empEl.value.trim() && !idSel) { FG.toast('Escolha a concessionária na lista de sugestões (ou deixe vazio para ficar na Fábrica).', 'erro'); return; }
       var b = document.getElementById('ch-criar');
       b.disabled = true;
       FG.criarVeiculo(dados).then(function (r) {
         b.disabled = false;
         if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível cadastrar o chassi.', 'erro'); return; }
-        FG.toast('Chassi ' + dados.niv + ' cadastrado.');
+        FG.toast('Chassi ' + dados.niv + ' cadastrado' + (dados.empresaId ? '.' : ' na Fábrica.'));
         renderChassis();
       });
     });
@@ -1707,7 +1732,7 @@
             '<td><span class="muted">' + esc(m.id) + '</span></td>' +
             '<td><b>' + esc(m.nome) + '</b> ' + m.ano + '</td>' +
             '<td>' + esc(m.label) + '</td>' +
-            '<td class="fnd-arvore">' + esc((m.arvore || []).join(' > ')) + '</td>' +
+            '<td class="fnd-arvore">' + esc((m.arvore || []).join(' › ')) + '</td>' +
             '<td>' + (m.ativo
               ? '<span class="pill-status aprovado">Ativo</span>'
               : '<span class="pill-status bloqueado">Inativo</span>') + '</td>' +
@@ -1718,12 +1743,12 @@
         }).join('') : '<tr><td colspan="7" class="muted">Nenhum modelo. Crie o primeiro.</td></tr>') +
         '</tbody></table></div></div>';
 
-      document.getElementById('fm-novo').addEventListener('click', function () { modalModelo(null); });
+      document.getElementById('fm-novo').addEventListener('click', function () { modalModelo(null, modelos); });
       Array.prototype.forEach.call(view.querySelectorAll('[data-ac]'), function (b) {
         b.addEventListener('click', function () {
           var m = modelos.find(function (x) { return x.id === b.getAttribute('data-id'); });
           if (!m) return;
-          if (b.getAttribute('data-ac') === 'edit') { modalModelo(m); return; }
+          if (b.getAttribute('data-ac') === 'edit') { modalModelo(m, modelos); return; }
           if (!confirm('Excluir o modelo ' + m.label + '?\nSeções, peças e áreas do diagrama serão apagadas juntas.')) return;
           FG.finderExcluirModelo(m.id).then(function (r) {
             if (fndErro(r, 'Falha ao excluir.')) return;
@@ -1736,35 +1761,66 @@
     });
   }
 
-  function modalModelo(m) {
+  // Código do modelo = nome + ano ("FG 125", 2025 → "fg125-2025"). Espelho de
+  // slugModelo em api/src/utils/modelo-moto.js, só para a prévia do modal —
+  // quem grava o código é a API.
+  function slugModelo(nome, ano) {
+    var base = String(nome || '')
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    if (!base) return '';
+    var sufixo = '-' + String(ano || '').trim();
+    return base.slice(0, 40 - sufixo.length).replace(/-+$/, '') + sufixo;
+  }
+
+  // `modelos` é a lista já carregada: alimenta as sugestões de marca,
+  // modalidade e categoria, para a árvore não se partir em "Enduro" e "enduro".
+  function modalModelo(m, modelos) {
     var novo = !m;
+    function val(campo, padrao) { return m && m[campo] ? esc(m[campo]) : (padrao || ''); }
+    function campoAc(id, rotulo, campo, ph, padrao) {
+      return '<div class="field"><label for="' + id + '">' + rotulo + ' *</label>' +
+        '<div class="ac-wrap"><input id="' + id + '" type="text" maxlength="' + (campo === 'categoria' ? 40 : 60) + '"' +
+        ' placeholder="' + ph + '" autocomplete="off" value="' + val(campo, padrao) + '">' +
+        '<div class="ac-list hidden" id="' + id + '-ac"></div></div></div>';
+    }
     var back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML =
       '<div class="modal"><header><h3>' + (novo ? 'Novo modelo' : 'Editar ' + esc(m.label)) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
-      '<div class="field"><label>Código (slug — não muda depois) *</label>' +
-      '<input id="fm-cod" type="text" placeholder="fg125-2025"' + (novo ? '' : ' disabled') + ' value="' + (m ? esc(m.id) : '') + '"></div>' +
+      '<p class="muted" style="margin-top:0;font-size:12px;">A árvore de seleção do finder é montada com ' +
+      '<b>Marca › Modalidade › Categoria › Nome › Ano</b>. O código sai do nome e do ano, e muda junto quando você edita.</p>' +
       '<div class="fnd-2col">' +
-      '<div class="field"><label>Nome *</label><input id="fm-nome" type="text" placeholder="FG 125" value="' + (m ? esc(m.nome) : '') + '"></div>' +
-      '<div class="field"><label>Ano *</label><input id="fm-ano" type="number" min="1990" max="2100" value="' + (m ? m.ano : new Date().getFullYear()) + '"></div>' +
-      '</div>' +
-      '<div class="field"><label>Etiqueta (label mostrado no finder)</label>' +
-      '<input id="fm-label" type="text" placeholder="FG 125 2025 &lt;2025&gt;&lt;BR&gt;&lt;F0103Y1&gt;" value="' + (m ? esc(m.label) : '') + '"></div>' +
-      '<div class="field"><label>Árvore de seleção (níveis separados por &gt;)</label>' +
-      '<input id="fm-arv" type="text" placeholder="Fullgas > Offroad > Enduro > E1 > 2 tempos > FG 125 > FG 125 2025" value="' + (m ? esc((m.arvore || []).join(' > ')) : '') + '"></div>' +
-      '<div class="fnd-2col">' +
-      '<div class="field"><label>Cilindrada</label><input id="fm-cil" type="text" placeholder="125" value="' + (m && m.cilindrada ? esc(m.cilindrada) : '') + '"></div>' +
-      '<div class="field"><label>Tipo de motor</label><input id="fm-tm" type="text" placeholder="2 tempos" value="' + (m && m.tipoMotor ? esc(m.tipoMotor) : '') + '"></div>' +
+      campoAc('fm-marca', 'Marca', 'marca', 'Fullgas', 'Fullgas') +
+      campoAc('fm-modal', 'Modalidade', 'modalidade', 'Off-road', 'Off-road') +
       '</div>' +
       '<div class="fnd-2col">' +
-      '<div class="field"><label>Categoria</label><input id="fm-cat" type="text" placeholder="Enduro" value="' + (m && m.categoria ? esc(m.categoria) : '') + '"></div>' +
+      campoAc('fm-cat', 'Categoria', 'categoria', 'Enduro, Cross-country…') +
       '<div class="field"><label>Situação</label><select id="fm-ativo">' +
       '<option value="1"' + (!m || m.ativo ? ' selected' : '') + '>Ativo (aparece no finder)</option>' +
       '<option value="0"' + (m && !m.ativo ? ' selected' : '') + '>Inativo (oculto)</option></select></div>' +
       '</div>' +
+      '<div class="fnd-2col">' +
+      '<div class="field"><label for="fm-nome">Nome da moto *</label><input id="fm-nome" type="text" maxlength="80" placeholder="FG 125" value="' + val('nome') + '"></div>' +
+      '<div class="field"><label for="fm-ano">Ano *</label><input id="fm-ano" type="number" min="1990" max="2100" value="' + (m ? m.ano : new Date().getFullYear()) + '"></div>' +
+      '</div>' +
+      '<div class="fnd-previa">' +
+      '<div><span class="rot">Árvore de seleção</span><b id="fm-prev-arv"></b></div>' +
+      '<div><span class="rot">Código</span><code id="fm-prev-cod"></code>' +
+      (novo ? '' : ' <small id="fm-prev-muda" class="hidden">muda ao salvar — era <code>' + esc(m.id) + '</code></small>') +
+      '</div></div>' +
+      '<div class="field"><label for="fm-label">Etiqueta (label mostrado no finder)</label>' +
+      '<input id="fm-label" type="text" placeholder="FG 125 2025 &lt;2025&gt;&lt;BR&gt;&lt;F0103Y1&gt;" value="' + (m ? esc(m.label) : '') + '"></div>' +
+      '<div class="fnd-2col">' +
+      '<div class="field"><label for="fm-cil">Cilindrada <span class="muted">(fora da árvore)</span></label><input id="fm-cil" type="text" placeholder="125" value="' + val('cilindrada') + '"></div>' +
+      '<div class="field"><label for="fm-tm">Tipo de motor <span class="muted">(fora da árvore)</span></label><input id="fm-tm" type="text" placeholder="2 tempos" value="' + val('tipoMotor') + '"></div>' +
+      '</div>' +
       '<div class="field"><label>Documentação técnica (link http)</label>' +
-      '<input id="fm-doc" type="url" placeholder="https://..." value="' + (m && m.docTecnica ? esc(m.docTecnica) : '') + '"></div>' +
+      '<input id="fm-doc" type="url" placeholder="https://..." value="' + val('docTecnica') + '"></div>' +
       '<div class="field"><label>Foto do modelo (botão "Show Image" do finder)</label>' +
       '<div class="fnd-foto-row">' + thumbCell(m && m.imagem, 'foto') +
       '<input id="fm-foto" type="file" accept="image/*">' +
@@ -1780,6 +1836,37 @@
     document.getElementById('fm-canc').addEventListener('click', fechar);
     // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
 
+    function ler(id) { return document.getElementById(id).value.trim(); }
+
+    // Prévia ao vivo: o admin vê a árvore e o código antes de salvar.
+    function atualizarPrevia() {
+      var niveis = [ler('fm-marca') || 'Fullgas', ler('fm-modal') || 'Off-road',
+        ler('fm-cat'), ler('fm-nome'), ler('fm-ano')];
+      document.getElementById('fm-prev-arv').innerHTML = niveis.map(function (n) {
+        return n ? esc(n) : '<i class="muted">?</i>';
+      }).join(' <span class="muted">›</span> ');
+      var cod = slugModelo(ler('fm-nome'), ler('fm-ano'));
+      document.getElementById('fm-prev-cod').textContent = cod || '—';
+      var muda = document.getElementById('fm-prev-muda');
+      if (muda) muda.classList.toggle('hidden', !cod || cod === m.id);
+    }
+    ['fm-marca', 'fm-modal', 'fm-cat', 'fm-nome', 'fm-ano'].forEach(function (id) {
+      document.getElementById(id).addEventListener('input', atualizarPrevia);
+    });
+    atualizarPrevia();
+
+    // Sugestões com os valores já usados em outros modelos.
+    [['fm-marca', 'marca'], ['fm-modal', 'modalidade'], ['fm-cat', 'categoria']].forEach(function (par) {
+      FG.bindAutocomplete(par[0], function (termo) {
+        var t = termo.toLowerCase(), vistos = {};
+        return (modelos || []).map(function (x) { return x[par[1]]; }).filter(function (v) {
+          if (!v || vistos[v.toLowerCase()] || v.toLowerCase().indexOf(t) === -1) return false;
+          vistos[v.toLowerCase()] = true;
+          return true;
+        }).sort().map(function (v) { return { id: v, label: v }; });
+      }, atualizarPrevia);
+    });
+
     var btnDel = document.getElementById('fm-foto-del');
     if (btnDel) btnDel.addEventListener('click', function () {
       FG.finderRemoverImagemModelo(m.id).then(function (r) {
@@ -1790,29 +1877,33 @@
 
     document.getElementById('fm-ok').addEventListener('click', function () {
       var dados = {
-        codigo: document.getElementById('fm-cod').value.trim().toLowerCase(),
-        nome: document.getElementById('fm-nome').value.trim(),
-        ano: Number(document.getElementById('fm-ano').value),
-        label: document.getElementById('fm-label').value.trim(),
-        arvore: document.getElementById('fm-arv').value.trim(),
-        cilindrada: document.getElementById('fm-cil').value.trim(),
-        tipoMotor: document.getElementById('fm-tm').value.trim(),
-        categoria: document.getElementById('fm-cat').value.trim(),
-        docTecnica: document.getElementById('fm-doc').value.trim(),
+        marca: ler('fm-marca'),
+        modalidade: ler('fm-modal'),
+        categoria: ler('fm-cat'),
+        nome: ler('fm-nome'),
+        ano: Number(ler('fm-ano')),
+        label: ler('fm-label'),
+        cilindrada: ler('fm-cil'),
+        tipoMotor: ler('fm-tm'),
+        docTecnica: ler('fm-doc'),
         ativo: document.getElementById('fm-ativo').value === '1'
       };
-      if (!dados.nome || !dados.ano || (novo && !dados.codigo)) { FG.toast('Preencha código, nome e ano.'); return; }
+      if (!dados.categoria || !dados.nome || !dados.ano) { FG.toast('Preencha categoria, nome e ano.', 'erro'); return; }
+      var btn = document.getElementById('fm-ok');
+      btn.disabled = true;
       var salvar = novo ? FG.finderCriarModelo(dados) : FG.finderEditarModelo(m.id, dados);
       salvar.then(function (r) {
-        if (fndErro(r, 'Falha ao salvar o modelo.')) return;
-        var codigo = novo ? dados.codigo : m.id;
+        if (fndErro(r, 'Falha ao salvar o modelo.')) { btn.disabled = false; return; }
+        // O código pode ter mudado (renomeou o modelo): segue o que a API devolveu.
+        var codigo = r.id;
         var arquivo = document.getElementById('fm-foto').files[0];
         var fotoOk = arquivo
           ? FG.finderUploadImagemModelo(codigo, arquivo)
           : Promise.resolve({ ok: true });
         fotoOk.then(function (rf) {
           if (rf.ok === false) FG.toast('Modelo salvo, mas a foto falhou: ' + (rf.msg || ''), 'erro');
-          else FG.toast(novo ? 'Modelo criado.' : 'Modelo salvo.');
+          else FG.toast(novo ? 'Modelo criado.' : 'Modelo salvo.' +
+            (codigo !== m.id ? ' Novo código: ' + codigo + '.' : ''));
           fechar(); renderFinderModelos();
         });
       });
