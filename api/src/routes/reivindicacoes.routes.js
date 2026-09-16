@@ -40,8 +40,13 @@ const URL_BASE = '/uploads/reivindicacoes/';
 // Antes eram 200 MB por arquivo — número que nunca valeu na prática: o Nginx
 // da produção corta o corpo em 64 MB, então o revendedor levava um 413 seco do
 // servidor em vez de uma mensagem explicando. 60 MB alinha os dois e ainda
-// limita o estrago de um envio abusivo (10 arquivos = 600 MB no pior caso).
+// limita o estrago de um envio abusivo (5 arquivos = 300 MB no pior caso).
 const LIMITE_BYTES = 60 * 1024 * 1024;
+// Fotos/vídeos por envio (veículo e varejo). Eram 10; 5 bastam para mostrar a
+// peça, e é o mesmo teto do formulário (MAX_MIDIA em frontend/js/portal.js).
+// Vale por envio: se a reivindicação for devolvida pedindo mais imagens, o
+// reenvio pode trazer outras 5.
+const MAX_ANEXOS_POR_ENVIO = 5;
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
@@ -49,15 +54,18 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: LIMITE_BYTES, files: 10 },
+  limits: { fileSize: LIMITE_BYTES, files: MAX_ANEXOS_POR_ENVIO },
   fileFilter: filtroMidia()
 });
 // Wrapper que transforma erros do multer em 400 com mensagem clara.
 function uploadFotos(req, res, next) {
-  upload.array('fotos', 10)(req, res, (err) => {
+  upload.array('fotos', MAX_ANEXOS_POR_ENVIO)(req, res, (err) => {
     if (err) {
+      // UNEXPECTED_FILE no campo "fotos" = passou do maxCount do array().
+      const excesso = err.code === 'LIMIT_FILE_COUNT' ||
+        (err.code === 'LIMIT_UNEXPECTED_FILE' && err.field === 'fotos');
       const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo muito grande (máximo 60 MB por arquivo).'
-        : err.code === 'LIMIT_FILE_COUNT' ? 'Máximo de 10 arquivos por envio.'
+        : excesso ? `Máximo de ${MAX_ANEXOS_POR_ENVIO} fotos ou vídeos por envio.`
           : (err.message || 'Falha no upload.');
       return res.status(400).json({ erro: msg });
     }

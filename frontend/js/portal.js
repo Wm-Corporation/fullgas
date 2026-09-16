@@ -104,6 +104,19 @@
     if (q) location.hash = '#busca/' + encodeURIComponent(q);
   });
 
+  /* ---------- telas que carregam dados na hora ----------
+     Suporte, Minha conta, detalhe do pedido... desenham quando a resposta
+     chega. Se nesse meio-tempo o usuário já trocou de aba, a resposta
+     atrasada NÃO pode desenhar por cima da tela nova: a aba acesa deixaria de
+     bater com o conteúdo, e clicar de novo na aba não faria nada (o endereço
+     já é aquele) — a página parecia travada até recarregar. Cada troca de
+     tela ganha um número; quem busca guarda o seu e confere na volta. */
+  var telaSeq = 0;
+  function telaVigente() {
+    var minha = telaSeq;
+    return function () { return minha === telaSeq; };
+  }
+
   /* ---------- util ---------- */
   function setCrumb(partes) {
     // Fora da home, o botão VOLTAR abre a trilha (bem visível — volta um
@@ -461,6 +474,145 @@
     });
   }
 
+  /* ---------------------------------------------------------
+     FOTOS E VÍDEOS DA REIVINDICAÇÃO
+     ---------------------------------------------------------
+     Um seletor para os dois formulários (veículo e varejo). O <input
+     type="file"> sozinho tinha três defeitos: cada nova escolha APAGAVA a
+     anterior, não havia como tirar um arquivo escolhido por engano e a
+     miniatura não abria. Aqui a lista é nossa: cada escolha soma à lista (até
+     MAX_MIDIA), cada miniatura tem um X e abre em tela cheia. A API confere o
+     mesmo limite (api/src/routes/reivindicacoes.routes.js).
+     --------------------------------------------------------- */
+  var MAX_MIDIA = 5;
+  var RE_VIDEO = /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i;
+  function ehVideo(f) { return (f.type || '').indexOf('video/') === 0 || RE_VIDEO.test(f.name || ''); }
+
+  // Foto/vídeo em tela cheia, por cima do formulário (que continua aberto e
+  // intacto embaixo). Fecha só no X, como os demais pop-ups do portal.
+  function abrirVisualizador(url, video, nome) {
+    var tela = document.createElement('div');
+    tela.className = 'midia-viewer';
+    tela.setAttribute('role', 'dialog');
+    tela.setAttribute('aria-label', nome || 'Visualizar arquivo');
+    var caixa = document.createElement('div');
+    caixa.className = 'midia-viewer-box';
+    var midia = document.createElement(video ? 'video' : 'img');
+    if (video) { midia.controls = true; midia.autoplay = true; } else midia.alt = nome || '';
+    midia.src = url;
+    var x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'midia-viewer-x';
+    x.textContent = '×';
+    x.setAttribute('aria-label', 'Fechar');
+    x.addEventListener('click', function () {
+      if (video) midia.pause();
+      tela.remove();
+    });
+    caixa.appendChild(midia);
+    caixa.appendChild(x);
+    tela.appendChild(caixa);
+    document.body.appendChild(tela);
+    x.focus();
+  }
+
+  // Liga o seletor aos elementos do formulário. Devolve arquivos() para o
+  // envio e liberar() para soltar as URLs de blob quando o formulário fecha.
+  function montarSeletorMidia(input, galeria, contador, dica) {
+    var itens = [];   // { arquivo: File, url: URL de blob da prévia }
+    function chave(f) { return f.name + '|' + f.size + '|' + f.lastModified; }
+
+    function desenhar() {
+      galeria.innerHTML = '';
+      itens.forEach(function (it, i) {
+        var video = ehVideo(it.arquivo);
+        var abrir = function () { abrirVisualizador(it.url, video, it.arquivo.name); };
+        var cel = document.createElement('div');
+        cel.className = 'media-item' + (video ? ' is-video' : '');
+        cel.title = it.arquivo.name + ' — clique para ampliar';
+        cel.tabIndex = 0;
+        cel.setAttribute('role', 'button');
+        var m = document.createElement(video ? 'video' : 'img');
+        if (video) { m.muted = true; m.preload = 'metadata'; } else m.alt = it.arquivo.name;
+        m.src = it.url;
+        cel.appendChild(m);
+        if (video) {
+          var pl = document.createElement('span');
+          pl.className = 'play';
+          pl.textContent = '▶';
+          cel.appendChild(pl);
+        }
+        var x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'midia-x';
+        x.textContent = '×';
+        x.title = 'Remover este arquivo';
+        x.setAttribute('aria-label', 'Remover ' + it.arquivo.name);
+        x.addEventListener('click', function (e) {
+          e.stopPropagation();          // não abre o visualizador
+          URL.revokeObjectURL(it.url);
+          itens.splice(i, 1);
+          desenhar();
+        });
+        cel.appendChild(x);
+        cel.addEventListener('click', abrir);
+        cel.addEventListener('keydown', function (e) {
+          if (e.target === cel && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); abrir(); }
+        });
+        galeria.appendChild(cel);
+      });
+      contador.textContent = '(' + itens.length + ' de ' + MAX_MIDIA + ')';
+      var cheio = itens.length >= MAX_MIDIA;
+      input.disabled = cheio;
+      dica.textContent = cheio
+        ? 'Limite atingido. Para trocar um arquivo, remova-o no ×.'
+        : 'Até ' + MAX_MIDIA + ' fotos ou vídeos. Clique na miniatura para ampliar.';
+    }
+
+    input.addEventListener('change', function () {
+      var novos = Array.prototype.slice.call(input.files || []);
+      // Zera o campo: a lista de verdade é `itens`, e assim dá para escolher
+      // de novo um arquivo que acabou de ser removido.
+      input.value = '';
+      var vistos = {};
+      itens.forEach(function (it) { vistos[chave(it.arquivo)] = true; });
+      var foraDoLimite = 0;
+      novos.forEach(function (f) {
+        if (vistos[chave(f)]) return;   // o mesmo arquivo escolhido duas vezes
+        if (itens.length >= MAX_MIDIA) { foraDoLimite++; return; }
+        vistos[chave(f)] = true;
+        itens.push({ arquivo: f, url: URL.createObjectURL(f) });
+      });
+      if (foraDoLimite) {
+        FG.toast('Limite de ' + MAX_MIDIA + ' fotos ou vídeos por envio — ' +
+          foraDoLimite + ' arquivo(s) ficaram de fora.', 'erro');
+      }
+      desenhar();
+    });
+    desenhar();
+
+    return {
+      arquivos: function () { return itens.map(function (it) { return it.arquivo; }); },
+      liberar: function () {
+        itens.forEach(function (it) { URL.revokeObjectURL(it.url); });
+        itens = [];
+      }
+    };
+  }
+
+  // Campo de fotos/vídeos dos dois formulários. `p` é o prefixo dos ids.
+  function campoMidiaHtml(p) {
+    return '<div class="field"><label for="' + p + '-fotos">Fotos e vídeos da peça defeituosa ' +
+      '<span class="midia-cont" id="' + p + '-fotos-cont"></span></label>' +
+      '<input id="' + p + '-fotos" type="file" accept="image/*,video/*" multiple>' +
+      '<div class="muted midia-dica" id="' + p + '-fotos-dica"></div>' +
+      '<div id="' + p + '-fotos-prev" class="media-gallery"></div></div>';
+  }
+  function seletorMidiaDe(p) {
+    return montarSeletorMidia(document.getElementById(p + '-fotos'), document.getElementById(p + '-fotos-prev'),
+      document.getElementById(p + '-fotos-cont'), document.getElementById(p + '-fotos-dica'));
+  }
+
   function modalClaim(tipoPadrao, ctx) {
     var vehs = FG.all('vehicles');
     var pre = ctx && (ctx.rasc || ctx.claim);
@@ -508,15 +660,14 @@
       '<div class="field" id="nc-km-campo"><label>Quilometragem (km)</label><input id="nc-km" type="number" min="0" step="1" placeholder="ex.: 3500"></div>' +
       '</div>' +
       '<div class="field"><label>Descrição do problema *</label><textarea id="nc-desc" rows="4" placeholder="Descreva o defeito constatado..."></textarea></div>' +
-      '<div class="field"><label>Fotos e vídeos da peça defeituosa</label>' +
-      '<input id="nc-fotos" type="file" accept="image/*,video/*" multiple>' +
-      '<div id="nc-fotos-prev" class="media-gallery"></div></div>' +
+      campoMidiaHtml('nc') +
       '</div>' +
       '<div class="modal-foot"><button class="btn" id="nc-rasc">Salvar como esboço</button>' +
       '<button class="btn red" id="nc-env">Enviar reivindicação</button></div></div>';
     document.body.appendChild(back);
+    var midia = seletorMidiaDe('nc');
 
-    function fechar() { back.remove(); }
+    function fechar() { midia.liberar(); back.remove(); }
     // Só o X fecha o formulário — clicar no fundo escuro NÃO fecha, para o
     // cliente não perder o que preencheu por um clique fora sem querer.
     back.querySelector('.x').addEventListener('click', fechar);
@@ -688,26 +839,6 @@
       renderPecas();
     });
 
-    // Preview das fotos escolhidas.
-    var inpFotos = document.getElementById('nc-fotos');
-    var prev = document.getElementById('nc-fotos-prev');
-    inpFotos.addEventListener('change', function () {
-      prev.innerHTML = '';
-      Array.prototype.forEach.call(inpFotos.files, function (f) {
-        var url = URL.createObjectURL(f);
-        var video = f.type.indexOf('video/') === 0 || /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i.test(f.name || '');
-        var item = document.createElement('div');
-        item.className = 'media-item' + (video ? ' is-video' : '');
-        var media = document.createElement(video ? 'video' : 'img');
-        if (video) { media.muted = true; media.preload = 'metadata'; }
-        media.src = url;
-        media.onload = media.onloadeddata = function () { URL.revokeObjectURL(url); };
-        item.appendChild(media);
-        if (video) { var pl = document.createElement('span'); pl.className = 'play'; pl.textContent = '▶'; item.appendChild(pl); }
-        prev.appendChild(item);
-      });
-    });
-
     // Coleta os campos do formulário no formato da API. No modo pré-entrega,
     // horas e quilometragem vão vazias (a moto não rodou) e a origem acompanha
     // — quem confere a regra "sem venda registrada" é a API, não esta tela.
@@ -764,8 +895,9 @@
         c = await FG.createClaim(d);
       }
       if (!c) { cortina.remove(); return; }   // a API já avisou o erro; o form fica intacto
-      if (inpFotos.files && inpFotos.files.length) {
-        var up = await FG.uploadClaimFotos(c.id, inpFotos.files);
+      var arquivos = midia.arquivos();
+      if (arquivos.length) {
+        var up = await FG.uploadClaimFotos(c.id, arquivos);
         if (!up.ok) FG.toast(up.msg || 'Salvo, mas falhou o envio das fotos.', 'erro');
       }
       await minimo;
@@ -840,14 +972,13 @@
       '<div id="vj-qtd-max" class="muted" style="font-size:11px;margin-top:4px;"></div>' +
       '<div id="vj-pecas-list" class="pecas-list"></div></div>' +
       '<div class="field"><label>Descrição do problema *</label><textarea id="vj-desc" rows="4" placeholder="Descreva o defeito constatado..."></textarea></div>' +
-      '<div class="field"><label>Fotos e vídeos da peça defeituosa</label>' +
-      '<input id="vj-fotos" type="file" accept="image/*,video/*" multiple>' +
-      '<div id="vj-fotos-prev" class="media-gallery"></div></div>' +
+      campoMidiaHtml('vj') +
       '</div>' +
       '<div class="modal-foot"><button class="btn red" id="vj-env">Enviar reivindicação</button></div></div>';
     document.body.appendChild(back);
+    var midia = seletorMidiaDe('vj');
 
-    function fechar() { back.remove(); }
+    function fechar() { midia.liberar(); back.remove(); }
     // Só o X fecha (não perde o preenchimento por clique fora) — igual ao veículo.
     back.querySelector('.x').addEventListener('click', fechar);
 
@@ -945,26 +1076,6 @@
       renderPecas();
     });
 
-    // Preview das fotos/vídeos (mesmo comportamento do modal de veículo).
-    var inpFotos = document.getElementById('vj-fotos');
-    var prev = document.getElementById('vj-fotos-prev');
-    inpFotos.addEventListener('change', function () {
-      prev.innerHTML = '';
-      Array.prototype.forEach.call(inpFotos.files, function (f) {
-        var url = URL.createObjectURL(f);
-        var video = f.type.indexOf('video/') === 0 || /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i.test(f.name || '');
-        var item = document.createElement('div');
-        item.className = 'media-item' + (video ? ' is-video' : '');
-        var media = document.createElement(video ? 'video' : 'img');
-        if (video) { media.muted = true; media.preload = 'metadata'; }
-        media.src = url;
-        media.onload = media.onloadeddata = function () { URL.revokeObjectURL(url); };
-        item.appendChild(media);
-        if (video) { var pl = document.createElement('span'); pl.className = 'play'; pl.textContent = '▶'; item.appendChild(pl); }
-        prev.appendChild(item);
-      });
-    });
-
     document.getElementById('vj-env').addEventListener('click', async function () {
       var numeroPedido = selPedido.value;
       var descricao = document.getElementById('vj-desc').value.trim();
@@ -985,8 +1096,9 @@
         status: 'Em processo'
       });
       if (!c) { cortina.remove(); return; }   // a API já avisou o erro; o form fica intacto
-      if (inpFotos.files && inpFotos.files.length) {
-        var up = await FG.uploadClaimFotos(c.id, inpFotos.files);
+      var arquivos = midia.arquivos();
+      if (arquivos.length) {
+        var up = await FG.uploadClaimFotos(c.id, arquivos);
         if (!up.ok) FG.toast(up.msg || 'Salvo, mas falhou o envio das fotos.', 'erro');
       }
       await minimo;
@@ -1194,7 +1306,9 @@
 
   function renderPedidoDetalhe(numero) {
     setCrumb(['Pedidos', numero]); setTabOn('pedidos');
+    var vigente = telaVigente();
     FG.pedidoDetalhe(numero).then(function (d) {
+    if (!vigente()) return;
     if (!d || !d.id) {
       // Sem botão de voltar aqui: o VOLTAR padrão da trilha já cobre.
       view.innerHTML = '<div class="empty-box">Pedido não encontrado.</div>';
@@ -1554,7 +1668,10 @@
         modalHistorico(v.niv, function (lista) { desenharHistorico(v.niv, lista); });
       });
 
-      FG.veiculoHistorico(v.niv).then(function (lista) { desenharHistorico(v.niv, lista); });
+      var vigente = telaVigente();
+      FG.veiculoHistorico(v.niv).then(function (lista) {
+        if (vigente()) desenharHistorico(v.niv, lista);
+      });
     }
 
     document.getElementById('av-go').addEventListener('click', buscar);
@@ -1905,7 +2022,9 @@
     setCrumb(['Minha conta']); setTabOn('conta');
     view.innerHTML = '<h2>Minha conta</h2><p class="muted">Carregando…</p>';
 
+    var vigente = telaVigente();
     FG.conta().then(function (c) {
+      if (!vigente()) return;
       if (!c) { view.innerHTML = '<h2>Minha conta</h2><p class="muted">Não foi possível carregar os dados. Tente de novo.</p>'; return; }
       var gestor = !!(sess.gestor || sess.papel === 'admin');
       var e = c.endereco || {};
@@ -2018,7 +2137,9 @@
     setCrumb(['Subdealers']); setTabOn('subdealers');
     view.innerHTML = '<h2>Subdealers</h2><p class="muted">Carregando…</p>';
 
+    var vigente = telaVigente();
     FG.conta().then(function (c) {
+      if (!vigente()) return;
       if (!c) { view.innerHTML = '<h2>Subdealers</h2><p class="muted">Não foi possível carregar os dados. Tente de novo.</p>'; return; }
 
       var internas = (c.usuarios || []).filter(function (u) { return !u.gestor; });
@@ -2228,7 +2349,9 @@
     setCrumb(['Suporte Técnico']); setTabOn('suporte');
     view.innerHTML = '<h2>Suporte Técnico</h2><p class="muted">Carregando chamados…</p>';
 
+    var vigente = telaVigente();
     FG.suporteChamados().then(function (todos) {
+      if (!vigente()) return;
       var lista = todos.filter(function (c) {
         if (supFiltro === 'todos') return true;
         return supFiltro === 'encerrados' ? supEncerrado(c.status) : !supEncerrado(c.status);
@@ -2277,6 +2400,7 @@
         });
       });
     }, function () {
+      if (!vigente()) return;
       view.innerHTML = '<h2>Suporte Técnico</h2>' +
         '<p class="muted">Não foi possível carregar seus chamados agora. Tente de novo em instantes.</p>';
     });
@@ -2286,7 +2410,11 @@
     setCrumb(['Suporte Técnico', 'Chamado']); setTabOn('suporte');
     view.innerHTML = '<p class="muted">Carregando chamado…</p>';
 
+    var vigente = telaVigente();
     FG.suporteChamado(id).then(function (c) {
+      // Saiu antes de abrir: não desenha e não se registra como chamado aberto
+      // (o batimento colaria mensagens numa tela que não é a dele).
+      if (!vigente()) return;
       if (!c) {
         view.innerHTML = '<h2>Chamado</h2><p class="muted">Chamado não encontrado.</p>' +
           '<p><a href="#suporte">Voltar para os chamados</a></p>';
@@ -2378,6 +2506,7 @@
         });
       });
     }, function () {
+      if (!vigente()) return;
       view.innerHTML = '<h2>Chamado</h2>' +
         '<p class="muted">Não foi possível carregar o chamado agora. Tente de novo em instantes.</p>' +
         '<p><a href="#suporte">Voltar para os chamados</a></p>';
@@ -2570,6 +2699,7 @@
     // Sair de um chamado (para onde for) apaga o alvo do batimento. Quem
     // continuar num chamado o preenche de novo ao terminar de desenhar.
     supAberto = null;
+    telaSeq++;   // respostas pendentes da tela anterior não desenham mais
 
     switch (rota) {
       case 'home': renderHome(); break;

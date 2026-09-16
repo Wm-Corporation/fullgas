@@ -20,6 +20,11 @@
   --yellow: #e0b400;
   --shadow: 0 2px 10px rgba(0, 0, 0, .12);
   --font: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Escala da interface (ver `body` logo abaixo). Fica numa variável porque o
+     zoom também AMPLIA as unidades vh: dentro do body, 100vh mede 115% da
+     janela. Quem precisa da altura real da tela divide por ela —
+     calc(100vh / var(--zoom-ui)). */
+  --zoom-ui: 1.15;
 }
 
 * { box-sizing: border-box; }
@@ -28,7 +33,7 @@ html, body { margin: 0; padding: 0; }
    de forma proporcional (o layout é quase todo em px, então `zoom` é o jeito
    confiável de ampliar tudo de uma vez no Chrome/Edge). A impressão e a geração
    de PDF resetam para 1 (ver @media print e baixarFaturaPDF). */
-body { font-family: var(--font); font-size: 14px; color: var(--ink); background: var(--bg); zoom: 1.15; }
+body { font-family: var(--font); font-size: 14px; color: var(--ink); background: var(--bg); zoom: var(--zoom-ui); }
 a { color: var(--red); text-decoration: none; }
 a:hover { text-decoration: underline; }
 img, svg { vertical-align: middle; }
@@ -281,20 +286,30 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .dot-legenda strong { color: var(--ink); font-size: 12px; }
 .dot-legenda > span { display: inline-flex; align-items: center; gap: 6px; }
 
-/* ---------- modal ---------- */
+/* ---------- modal ----------
+   Centralizado e SEMPRE dentro da tela, cresça o conteúdo o quanto crescer.
+   Antes o limite era `max-height: 85vh` com `padding: 6vh`, e o zoom do body
+   amplia vh: o pop-up passava da borda de baixo e o botão de enviar sumia
+   (bastava anexar algumas fotos na reivindicação). Agora não há vh aqui: o
+   fundo ocupa a janela pelo `inset: 0` e o modal usa no máximo 100% dele.
+   O conteúdo rola por dentro; cabeçalho e rodapé (com os botões) ficam presos. */
 .modal-back {
   position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 90;
-  display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px;
+  display: flex; align-items: center; justify-content: center; padding: 20px 16px;
 }
 .modal {
   background: #fff; width: 560px; max-width: 100%; box-shadow: var(--shadow);
-  border-top: 4px solid var(--red); max-height: 85vh; overflow: auto;
+  border-top: 4px solid var(--red); max-height: 100%; overflow: auto;
   position: relative; /* âncora da cortina de envio (.claim-envio) */
 }
 .modal header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.modal > header { position: sticky; top: 0; z-index: 2; background: #fff; }
 .modal header h3 { margin: 0; font-size: 16px; }
 .modal .modal-body { padding: 18px; }
-.modal .modal-foot { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; }
+.modal .modal-foot {
+  padding: 12px 18px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px;
+  position: sticky; bottom: 0; z-index: 2; background: #fff;
+}
 .modal .x { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--gray); }
 
 /* formulário em duas colunas dentro do modal (campos .full ocupam a linha) */
@@ -1061,6 +1076,38 @@ main.finder { padding: 8px 28px 70px; }
 .media-gallery.sm .media-item .play { font-size: 15px; }
 .media-gallery.sm .media-item.is-video::before { font-size: 7px; padding: 0 3px; }
 
+/* Seletor de fotos/vídeos do formulário de reivindicação (js/portal.js,
+   montarSeletorMidia): contador "2 de 5", miniatura que abre em tela cheia e
+   um X para tirar o arquivo escolhido por engano. */
+.midia-cont { font-weight: 400; color: var(--gray); margin-left: 4px; }
+.midia-dica { font-size: 11px; margin-top: 4px; }
+.media-item .midia-x {
+  position: absolute; top: 4px; right: 4px; z-index: 2;
+  width: 24px; height: 24px; border-radius: 50%; border: none; padding: 0;
+  background: rgba(0, 0, 0, .65); color: #fff; font-size: 16px; line-height: 24px;
+  cursor: pointer;
+}
+.media-item .midia-x:hover { background: #b91c1c; }
+
+/* Visualizador em tela cheia — mesmo desenho do .egg-back (fundo escuro, X
+   redondo no canto), acima do modal (90) e da cortina de envio (95). Os
+   `min-*: 0` evitam que foto/vídeo grande vaze da tela (ver .egg-box). */
+.midia-viewer {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, .85); z-index: 96;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.midia-viewer-box { position: relative; max-width: 100%; max-height: 100%; min-width: 0; min-height: 0; display: flex; }
+.midia-viewer-box img, .midia-viewer-box video {
+  display: block; max-width: 100%; max-height: calc(100vh / var(--zoom-ui) - 48px); min-width: 0; min-height: 0;
+  border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, .5); background: #111;
+}
+.midia-viewer-x {
+  position: absolute; top: -14px; right: -14px; width: 32px; height: 32px;
+  border-radius: 50%; border: none; background: #fff; color: var(--ink);
+  font-size: 20px; line-height: 1; cursor: pointer; box-shadow: var(--shadow);
+}
+.midia-viewer-x:hover { background: var(--red); color: #fff; }
+
 /* Reivindicação: adicionar peças (código + quantidade) e lista de peças */
 .peca-add { display: flex; gap: 8px; align-items: center; }
 .peca-add #nc-peca { width: 100%; }
@@ -1215,6 +1262,9 @@ main.finder { padding: 8px 28px 70px; }
 .sup-widget { position: fixed; right: 22px; bottom: 22px; z-index: 300; }
 /* Na loja o carrinho já mora no canto: o suporte sobe uma cadeira. */
 .sup-widget.sup-com-carrinho { bottom: 96px; }
+/* Com um pop-up aberto o botão sai de cena: ele fica acima do modal (300 x 90)
+   e, no celular, cobria o botão de enviar do rodapé. */
+body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
 
 .sup-fab {
   position: relative; width: 60px; height: 60px; border-radius: 50%;
