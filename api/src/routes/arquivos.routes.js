@@ -49,18 +49,21 @@ async function podeVer(tipo, nome, user) {
   }
 
   if (tipo === 'suporte') {
-    // O anexo pertence a uma mensagem de chamado, que pertence a uma empresa.
-    // Vale para os dois sentidos: a foto que o revendedor mandou e o arquivo
-    // que o suporte respondeu ficam visíveis para a empresa dona do chamado.
+    // O anexo pertence a uma mensagem de chamado, e o chamado pertence a QUEM
+    // O ABRIU — não à empresa dele. Vale para os dois sentidos: a foto que o
+    // revendedor mandou e o arquivo que o suporte respondeu só são visíveis
+    // para o dono do chamado (e para o administrador, que atende).
+    // Conferir aqui não é redundância: o anexo sai por uma URL própria, que
+    // circula fora da tela do chamado.
     const rows = await query(
-      `SELECT TOP 1 c.EmpresaId
+      `SELECT TOP 1 c.UsuarioId
          FROM dbo.SuporteMensagem m
          JOIN dbo.SuporteChamado c ON c.ChamadoId = m.ChamadoId
         WHERE m.AnexoUrl = @url`,
       { url }
     );
     if (!rows.length) return false;
-    return ehAdmin || rows[0].EmpresaId === user.empresaId;
+    return ehAdmin || rows[0].UsuarioId === user.id;
   }
 
   if (tipo === 'notificacoes') {

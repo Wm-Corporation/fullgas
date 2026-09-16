@@ -13,6 +13,7 @@
 // true/false, em vez de propagar.
 // ============================================================
 import { query } from './db.js';
+import { FABRICA, sqlNaFabrica } from './fabrica.js';
 
 // Tipos aceitos — espelham o CHECK da tabela (migração 033).
 export const TIPOS_HISTORICO = [
@@ -35,7 +36,7 @@ export const TIPOS_MANUAIS = ['recall', 'revisao', 'nota'];
  * @param {string} [ev.detalhe]   complemento livre
  * @param {object} [ev.user]      req.user — de onde saem id e e-mail
  * @param {string} [ev.usuarioNome] nome já resolvido (senão usa o e-mail)
- * @param {number} [ev.empresaId]
+ * @param {number} [ev.empresaId]   dono do chassi no momento; null = Fábrica
  * @param {string} [ev.empresaNome]
  * @param {string} [ev.referencia] nº da reivindicação/pedido/campanha
  * @param {boolean} [ev.manual]   lançado à mão pelo painel
@@ -83,15 +84,19 @@ export async function veiculoIdPorNiv(niv) {
   return rows[0]?.VeiculoId ?? null;
 }
 
-// Linha do banco → JSON do front.
+// Linha do banco → JSON do front. Evento gravado sem concessionária, ou com a
+// empresa de um administrador, aconteceu na Fábrica — e é assim que aparece,
+// mesmo nos registros antigos que guardaram o nome da empresa do admin.
 export function toEvento(r) {
+  const fabrica = !!r.NaFabrica;
   return {
     id: r.HistoricoId,
     tipo: r.Tipo,
     titulo: r.Titulo,
     detalhe: r.Detalhe || '',
     usuario: r.UsuarioNome || '',
-    empresa: r.EmpresaNome || '',
+    fabrica,
+    empresa: fabrica ? FABRICA : (r.EmpresaNome || ''),
     referencia: r.Referencia || '',
     manual: !!r.Manual,
     data: r.DataEvento
@@ -103,11 +108,12 @@ export function toEvento(r) {
 // a ordem de inserção.
 export async function historicoDoVeiculo(veiculoId) {
   const rows = await query(
-    `SELECT HistoricoId, Tipo, Titulo, Detalhe, UsuarioNome, EmpresaNome,
-            Referencia, Manual, DataEvento
-       FROM dbo.VeiculoHistorico
-      WHERE VeiculoId = @vid
-      ORDER BY DataEvento DESC, HistoricoId DESC`,
+    `SELECT h.HistoricoId, h.Tipo, h.Titulo, h.Detalhe, h.UsuarioNome, h.EmpresaNome,
+            h.Referencia, h.Manual, h.DataEvento,
+            ${sqlNaFabrica('h.EmpresaId')} AS NaFabrica
+       FROM dbo.VeiculoHistorico h
+      WHERE h.VeiculoId = @vid
+      ORDER BY h.DataEvento DESC, h.HistoricoId DESC`,
     { vid: veiculoId }
   );
   return rows.map(toEvento);

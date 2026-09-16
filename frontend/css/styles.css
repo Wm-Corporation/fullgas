@@ -209,6 +209,19 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .backorder-aviso ul { margin: 6px 0 0; padding-left: 18px; }
 .backorder-aviso li { margin: 2px 0; }
 
+/* ---------- selo "Fábrica" (compartilhado: admin, portal e finder) ----------
+   Marca o que é da Fullgas e não de uma concessionária: chassi que ainda não
+   saiu da fábrica, evento do histórico que aconteceu lá e as contas de
+   administrador. Gerado por FG.seloFabrica() (store.js) — um desenho só. */
+.selo-fabrica {
+  display: inline-flex; align-items: center; gap: 5px; vertical-align: middle;
+  padding: 2px 9px 2px 6px; border-radius: 3px; border: 1px solid var(--red);
+  background: #1f1b18; color: var(--red);
+  font-size: 11px; font-weight: 700; line-height: 1.5; letter-spacing: .5px;
+  text-transform: uppercase; white-space: nowrap;
+}
+.selo-fabrica svg { width: 13px; height: 13px; flex: none; fill: currentColor; }
+
 /* ---------- badges de status (compartilhado: admin e loja) ---------- */
 .pill-status { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 2px; background: #eee; color: #555; text-transform: uppercase; }
 .pill-status.Pendente { background: #fff3cd; color: #8a6d00; }
@@ -760,7 +773,6 @@ main.finder { padding: 8px 28px 70px; }
 .model-tree .leaf:hover { color: var(--red); }
 /* filtro em cascata (Fullgas › Categoria › Ano › ...) — substitui a árvore */
 .model-cascade { display: flex; flex-direction: column; gap: 8px; }
-.model-cascade .mc-root { font-size: 11px; font-weight: 700; color: var(--ink); text-transform: uppercase; letter-spacing: .6px; }
 .model-cascade select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); background: #fff; font-size: 13px; color: var(--ink); }
 .model-cascade select:disabled { background: #f2f2f2; color: #aaa; cursor: not-allowed; }
 .model-cascade select:focus { outline: none; border-color: var(--red); }

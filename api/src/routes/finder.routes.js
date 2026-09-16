@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { EXT_IMAGEM, nomeArquivo, filtroImagem } from '../middlewares/upload-comum.js';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin, requireArea } from '../auth.js';
+import { slugModelo, arvoreModelo, MARCA_PADRAO, MODALIDADE_PADRAO } from '../utils/modelo-moto.js';
 
 const router = Router();
 
@@ -76,20 +77,26 @@ function urlAbs(req, rel) {
    Mapeadores linha do banco → JSON do front
    ========================================================================= */
 function toModelo(req, r) {
-  return {
+  const m = {
     id: r.Codigo,
     modeloId: r.ModeloId,
+    marca: r.Marca || null,
+    modalidade: r.Modalidade || null,
+    categoria: r.Categoria || null,
     nome: r.Nome,
     ano: r.Ano,
     label: r.Etiqueta || (r.Nome + ' ' + r.Ano),
-    arvore: r.Arvore ? String(r.Arvore).split('>').map(s => s.trim()).filter(Boolean) : [r.Nome, String(r.Ano)],
     imagem: urlAbs(req, r.ImagemUrl),
     docTecnica: r.DocTecnicaUrl || null,
     cilindrada: r.Cilindrada || null,
     tipoMotor: r.TipoMotor || null,
-    categoria: r.Categoria || null,
     ativo: r.Ativo === undefined ? true : !!r.Ativo
   };
+  // Montada na hora a partir dos campos: editar a categoria (ou o nome, ou o
+  // ano) já muda a árvore. A coluna ModeloMoto.Arvore, digitada à mão até
+  // 16/09/2026, não é mais lida nem gravada.
+  m.arvore = arvoreModelo(m);
+  return m;
 }
 
 function toSecao(req, r) {
@@ -135,7 +142,7 @@ function toHotspot(r) {
 }
 
 const SELECT_MODELO =
-  `SELECT ModeloId, Codigo, Nome, Ano, Etiqueta, Arvore, ImagemUrl, DocTecnicaUrl,
+  `SELECT ModeloId, Codigo, Marca, Modalidade, Nome, Ano, Etiqueta, ImagemUrl, DocTecnicaUrl,
           Cilindrada, TipoMotor, Categoria, Ativo
      FROM dbo.ModeloMoto`;
 
@@ -201,9 +208,9 @@ router.get('/finder/busca', requireAuth, requireArea('finder'), async (req, res,
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
 
     const rows = await query(
-      `SELECT TOP 1 v.Niv, v.NumeroMotor, v.Cor, v.Status, m.ModeloId, m.Codigo, m.Nome, m.Ano,
-              m.Etiqueta, m.Arvore, m.ImagemUrl, m.DocTecnicaUrl, m.Cilindrada, m.TipoMotor,
-              m.Categoria, m.Ativo
+      `SELECT TOP 1 v.Niv, v.NumeroMotor, v.Cor, v.Status, m.ModeloId, m.Codigo, m.Marca,
+              m.Modalidade, m.Nome, m.Ano, m.Etiqueta, m.ImagemUrl, m.DocTecnicaUrl,
+              m.Cilindrada, m.TipoMotor, m.Categoria, m.Ativo
          FROM dbo.Veiculo v
          JOIN dbo.ModeloMoto m ON m.ModeloId = v.ModeloId
         WHERE ${vin ? 'v.Niv = @termo' : 'v.NumeroMotor = @termo'}
@@ -347,27 +354,30 @@ router.get('/finder/secoes/:id', requireAuth, requireArea('finder'), async (req,
    ========================================================================= */
 
 // Valida/normaliza o corpo de modelo. Devolve { dados } ou { erro }.
-function parseModelo(body, { criando }) {
+// O código NÃO vem do corpo: é sempre gerado do nome e do ano (ver
+// utils/modelo-moto.js), no cadastro e em toda edição.
+function parseModelo(body) {
   const dados = {};
-  if (criando) {
-    dados.codigo = String(body?.codigo || '').trim().toLowerCase();
-    if (!/^[a-z0-9][a-z0-9-]{1,38}$/.test(dados.codigo)) {
-      return { erro: 'Código inválido — use letras minúsculas, números e hífen (ex.: fg125-2025).' };
-    }
-  }
+  // Marca e modalidade têm padrão porque hoje só existe uma de cada; a
+  // categoria não tem — é ela que separa os modelos no finder.
+  dados.marca = String(body?.marca || '').trim() || MARCA_PADRAO;
+  dados.modalidade = String(body?.modalidade || '').trim() || MODALIDADE_PADRAO;
+  dados.categoria = String(body?.categoria || '').trim();
+  if (!dados.categoria) return { erro: 'Informe a categoria (ex.: Enduro, Cross-country).' };
+  if (dados.marca.length > 60) return { erro: 'Marca muito longa (máximo 60 caracteres).' };
+  if (dados.modalidade.length > 60) return { erro: 'Modalidade muito longa (máximo 60 caracteres).' };
+  if (dados.categoria.length > 40) return { erro: 'Categoria muito longa (máximo 40 caracteres).' };
   dados.nome = String(body?.nome || '').trim();
   if (!dados.nome) return { erro: 'Informe o nome do modelo.' };
+  if (dados.nome.length > 80) return { erro: 'Nome muito longo (máximo 80 caracteres).' };
   const ano = Number(body?.ano);
   if (!Number.isInteger(ano) || ano < 1990 || ano > 2100) return { erro: 'Ano inválido.' };
   dados.ano = ano;
+  dados.codigo = slugModelo(dados.nome, dados.ano);
+  if (!dados.codigo) return { erro: 'O nome do modelo precisa ter letras ou números.' };
   dados.etiqueta = String(body?.label || body?.etiqueta || '').trim() || null;
-  // Árvore chega como array de níveis ou string 'A > B > C'.
-  const arv = Array.isArray(body?.arvore)
-    ? body.arvore : String(body?.arvore || '').split('>');
-  dados.arvore = arv.map(s => String(s).trim()).filter(Boolean).join(' > ') || null;
   dados.cilindrada = String(body?.cilindrada || '').trim() || null;
   dados.tipoMotor = String(body?.tipoMotor || '').trim() || null;
-  dados.categoria = String(body?.categoria || '').trim() || null;
   dados.docTecnica = String(body?.docTecnica || '').trim() || null;
   if (dados.docTecnica && !/^https?:\/\//i.test(dados.docTecnica)) {
     return { erro: 'Link da documentação técnica deve começar com http(s)://.' };
@@ -376,22 +386,34 @@ function parseModelo(body, { criando }) {
   return { dados };
 }
 
+// Mesmo código = mesmo nome e ano. Devolve a mensagem de conflito, ou null.
+// `exceto` é o próprio modelo numa edição (manter o nome não é conflito).
+async function conflitoDeCodigo(dados, exceto) {
+  const outro = (await query(
+    'SELECT Nome, Ano FROM dbo.ModeloMoto WHERE Codigo = @cod AND ModeloId <> @id',
+    { cod: dados.codigo, id: exceto ?? 0 }))[0];
+  if (!outro) return null;
+  return 'Já existe o modelo ' + outro.Nome + ' ' + outro.Ano + ' (código ' + dados.codigo + '). ' +
+    'Nome e ano precisam ser diferentes de um modelo para outro.';
+}
+
 // POST /api/finder/modelos  (admin) — cria modelo.
 router.post('/finder/modelos', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    const { dados, erro } = parseModelo(req.body, { criando: true });
+    const { dados, erro } = parseModelo(req.body);
     if (erro) return res.status(400).json({ erro });
 
-    const ja = await query('SELECT 1 FROM dbo.ModeloMoto WHERE Codigo = @cod', { cod: dados.codigo });
-    if (ja.length) return res.status(409).json({ erro: 'Já existe um modelo com este código.' });
+    const conflito = await conflitoDeCodigo(dados, null);
+    if (conflito) return res.status(409).json({ erro: conflito });
 
     const rows = await query(
-      `INSERT INTO dbo.ModeloMoto (Codigo, Nome, Ano, Etiqueta, Arvore, Cilindrada, TipoMotor, Categoria, DocTecnicaUrl, Ativo)
+      `INSERT INTO dbo.ModeloMoto (Codigo, Marca, Modalidade, Nome, Ano, Etiqueta, Cilindrada, TipoMotor, Categoria, DocTecnicaUrl, Ativo)
        OUTPUT inserted.ModeloId
-       VALUES (@cod, @nome, @ano, @eti, @arv, @cil, @tm, @cat, @doc, @ativo)`,
+       VALUES (@cod, @marca, @modal, @nome, @ano, @eti, @cil, @tm, @cat, @doc, @ativo)`,
       {
-        cod: dados.codigo, nome: dados.nome, ano: dados.ano, eti: dados.etiqueta,
-        arv: dados.arvore, cil: dados.cilindrada, tm: dados.tipoMotor,
+        cod: dados.codigo, marca: dados.marca, modal: dados.modalidade,
+        nome: dados.nome, ano: dados.ano, eti: dados.etiqueta,
+        cil: dados.cilindrada, tm: dados.tipoMotor,
         cat: dados.categoria, doc: dados.docTecnica, ativo: dados.ativo
       }
     );
@@ -400,21 +422,29 @@ router.post('/finder/modelos', requireAuth, requireAdmin, async (req, res, next)
   } catch (e) { next(e); }
 });
 
-// PUT /api/finder/modelos/:codigo  (admin) — edita (código é imutável).
+// PUT /api/finder/modelos/:codigo  (admin) — edita. O código acompanha o
+// nome e o ano: renomear o modelo troca o código, e a resposta traz o novo
+// (`id`) — é por ele que o front segue (foto, links). Tudo o que pendura no
+// modelo (seções, chassis) usa o ModeloId numérico e não é afetado.
 router.put('/finder/modelos/:codigo', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const m = await acharModelo(req.params.codigo);
     if (!m) return res.status(404).json({ erro: 'Modelo não encontrado.' });
-    const { dados, erro } = parseModelo(req.body, { criando: false });
+    const { dados, erro } = parseModelo(req.body);
     if (erro) return res.status(400).json({ erro });
+
+    const conflito = await conflitoDeCodigo(dados, m.ModeloId);
+    if (conflito) return res.status(409).json({ erro: conflito });
 
     await query(
       `UPDATE dbo.ModeloMoto
-          SET Nome=@nome, Ano=@ano, Etiqueta=@eti, Arvore=@arv, Cilindrada=@cil,
-              TipoMotor=@tm, Categoria=@cat, DocTecnicaUrl=@doc, Ativo=@ativo
+          SET Codigo=@cod, Marca=@marca, Modalidade=@modal, Nome=@nome, Ano=@ano,
+              Etiqueta=@eti, Cilindrada=@cil, TipoMotor=@tm, Categoria=@cat,
+              DocTecnicaUrl=@doc, Ativo=@ativo
         WHERE ModeloId=@id`,
       {
-        nome: dados.nome, ano: dados.ano, eti: dados.etiqueta, arv: dados.arvore,
+        cod: dados.codigo, marca: dados.marca, modal: dados.modalidade,
+        nome: dados.nome, ano: dados.ano, eti: dados.etiqueta,
         cil: dados.cilindrada, tm: dados.tipoMotor, cat: dados.categoria,
         doc: dados.docTecnica, ativo: dados.ativo, id: m.ModeloId
       }

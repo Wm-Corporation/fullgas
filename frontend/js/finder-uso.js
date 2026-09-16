@@ -20,7 +20,7 @@
   FG.pronto.then(function () {
 
   var esc = FG.esc;
-  document.getElementById('uso-who').textContent = sess.email + ' - ' + sess.empresa;
+  document.getElementById('uso-who').innerHTML = FG.esc(sess.email) + ' - ' + FG.empresaDaSessao(sess);
 
   var elCartN = document.getElementById('uso-cart-n');
   if (elCartN) elCartN.textContent = FG.cartCount();

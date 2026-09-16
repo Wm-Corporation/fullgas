@@ -16,6 +16,7 @@ import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin, signToken, parsePermissoes, abrirSessao, invalidarCacheSessao } from '../auth.js';
 import { auditar, ACOES } from '../auditoria.js';
 import { erroSenha } from '../validacao.js';
+import { sqlNaFabrica } from '../fabrica.js';
 
 const router = Router();
 
@@ -31,6 +32,7 @@ function toUsuario(r) {
     gestor: !!r.Gestor,       // false = conta interna criada pelo gestor (sub-dealer)
     empresa: r.Empresa || '',
     empresaId: r.EmpresaId,
+    fabrica: !!r.Fabrica,     // a empresa é a Fábrica (tem administrador) — ver fabrica.js
     cnpj: r.Cnpj || '',
     inscricaoEstadual: r.InscricaoEstadual || '',
     telefone: r.Telefone || '',
@@ -46,6 +48,7 @@ function toUsuario(r) {
 const SELECT_USUARIO =
   `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.Gestor, u.CriadoEm, u.EmpresaId,
           e.RazaoSocial AS Empresa, e.Cnpj, e.InscricaoEstadual, e.Telefone, e.TinyContatoId,
+          ${sqlNaFabrica('u.EmpresaId')} AS Fabrica,
           en.Logradouro, en.Numero, en.Complemento, en.Bairro, en.Cidade, en.Uf, en.Cep
      FROM dbo.Usuario u
      JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId

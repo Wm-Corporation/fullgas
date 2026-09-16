@@ -215,6 +215,13 @@ body.admin .field input:focus, body.admin .field select:focus, body.admin .field
 
 .fnd-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 .fnd-arvore { font-size: 11px; color: #666; max-width: 260px; }
+/* Prévia da árvore e do código no modal do modelo (atualiza ao digitar). */
+.fnd-previa { background: #fbf7ea; border: 1px solid #efe2b3; border-left: 3px solid var(--adm-orange);
+  padding: 8px 12px; margin: 2px 0 12px; font-size: 13px; display: grid; gap: 4px; }
+.fnd-previa .rot { display: inline-block; min-width: 128px; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .3px; color: #8a7f77; }
+.fnd-previa code { background: #fff; border: 1px solid #e3e3e3; padding: 0 5px; font-size: 12px; }
+.fnd-previa small { color: #92600a; }
 
 .fnd-thumb { width: 48px; height: 48px; object-fit: contain; border: 1px solid #e0e0e0; background: #fff; display: inline-block; }
 /* Miniatura com foto: clicável para ampliar em lightbox (ver admin.js). */
@@ -325,10 +332,10 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .usr-del { color: #b91c1c; border-color: #d9a5a5; }
 .usr-del:hover { border-color: #b91c1c; background: #fdecec; }
 
-/* ---- aba Chassis: formulário de cadastro em grade + selo "não atribuído" */
+/* ---- aba Chassis: formulário de cadastro em grade (o selo da Fábrica é o
+   .selo-fabrica do styles.css) */
 .ch-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 14px; align-items: end; }
 .ch-form .field { margin: 0; }
-.ch-livre { color: #92600a; font-weight: 600; font-size: 12px; }
 
 /* Textos amarelos do admin: só NEGRITO (contorno removido a pedido do
    dono — ver o bloco "TEXTOS AMARELOS" no styles.css). */

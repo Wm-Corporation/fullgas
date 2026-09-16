@@ -35,16 +35,17 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { VISIVEL_PARA, escopo } from './notificacoes.routes.js';
-import { ladosDa } from './suporte.routes.js';
+import { ladosDa, escopoSuporte } from './suporte.routes.js';
 
 const router = Router();
 
 router.get('/pulso', requireAuth, async (req, res, next) => {
   try {
     const lado = ladosDa(req.user);
-    // `escopo` já devolve eid = null para admin, que é exatamente o que as
-    // consultas de suporte usam como "todas as empresas". Um parâmetro só
-    // serve aos dois lados.
+    // O escopo das NOTIFICAÇÕES é por empresa (@eid); o dos CHAMADOS é por
+    // dono (@dono, de escopoSuporte) — um chamado é da pessoa que o abriu, não
+    // da concessionária dela. São dois recortes diferentes e cada consulta usa
+    // o seu.
     const esc = escopo(req.user);
 
     // Não lida = NÃO EXISTE linha em NotificacaoLida para este usuário. É como
@@ -60,19 +61,19 @@ router.get('/pulso', requireAuth, async (req, res, next) => {
                                 AND l.UsuarioId = @uid)) AS Notificacoes,
 
          (SELECT COUNT(*) FROM dbo.SuporteChamado c
-           WHERE (@eid IS NULL OR c.EmpresaId = @eid)
+           WHERE (@dono IS NULL OR c.UsuarioId = @dono)
              AND c.Status NOT IN ('Resolvido', 'Fechado')) AS Abertos,
 
          (SELECT COUNT(*) FROM dbo.SuporteMensagem m
             JOIN dbo.SuporteChamado c ON c.ChamadoId = m.ChamadoId
-           WHERE (@eid IS NULL OR c.EmpresaId = @eid)
+           WHERE (@dono IS NULL OR c.UsuarioId = @dono)
              AND m.Autor <> '${lado.eu}'
              AND m.${lado.colunaLida} IS NULL) AS NaoLidas,
 
          (SELECT MAX(m.MensagemId) FROM dbo.SuporteMensagem m
             JOIN dbo.SuporteChamado c ON c.ChamadoId = m.ChamadoId
-           WHERE (@eid IS NULL OR c.EmpresaId = @eid)) AS UltimaMensagem`,
-      { uid: req.user.id, ...esc }
+           WHERE (@dono IS NULL OR c.UsuarioId = @dono)) AS UltimaMensagem`,
+      { uid: req.user.id, ...esc, ...escopoSuporte(req.user) }
     );
 
     const r = rows[0] || {};

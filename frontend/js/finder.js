@@ -24,7 +24,7 @@
   var esc = FG.esc;
   var USAGE_KEY = 'fullgas_finder_usage_v1';
 
-  document.getElementById('fd-who').textContent = sess.email + ' - ' + sess.empresa;
+  document.getElementById('fd-who').innerHTML = FG.esc(sess.email) + ' - ' + FG.empresaDaSessao(sess);
 
   /* carrinho da loja no topo — o finder envia peças à mesma cesta da loja,
      então o contador acompanha cada "ADD ITEM(S) TO BASKET" */
@@ -76,18 +76,18 @@
     spToggle.textContent = '▾ Search';
   });
 
-  /* ---------- filtro em cascata de modelos ------------------------------
-     Substitui a antiga árvore de seleção por seletores diretos e sempre
-     funcionais: Categoria › Ano › Tipo de motor › Cilindrada › Etiqueta
-     (raiz fixa "Fullgas"). Os quatro primeiros são atributos do modelo
-     (vindos da API); o último lista os modelos que sobraram e resolve o
+  /* ---------- árvore de seleção (filtro em cascata) ---------------------
+     Marca › Modalidade › Categoria › Modelo › Ano — os mesmos níveis que a
+     API devolve em `arvore`, lidos direto dos campos do modelo; editar um
+     modelo no painel já muda a árvore. Cilindrada e tipo de motor não
+     entram. O último nível lista os anos do modelo escolhido e resolve o
      código para navegar — respeitando o lado (Frame/Engine) escolhido. */
   var CASC = [
+    { id: 'mc-marca',      campo: 'marca',      ph: 'Marca' },
+    { id: 'mc-modalidade', campo: 'modalidade', ph: 'Modalidade' },
     { id: 'mc-categoria',  campo: 'categoria',  ph: 'Categoria' },
-    { id: 'mc-ano',        campo: 'ano',        ph: 'Ano' },
-    { id: 'mc-tipomotor',  campo: 'tipoMotor',  ph: 'Tipo de motor' },
-    { id: 'mc-cilindrada', campo: 'cilindrada', ph: 'Cilindrada' },
-    { id: 'mc-etiqueta',   campo: 'label',      ph: 'Modelo' } // final: escolhe o modelo
+    { id: 'mc-modelo',     campo: 'nome',       ph: 'Modelo' },
+    { id: 'mc-ano',        campo: 'ano',        ph: 'Ano' }   // final: escolhe o modelo
   ];
   var FINAL = CASC.length - 1;
   var sel = [null, null, null, null, null]; // valor escolhido por nível
@@ -99,10 +99,8 @@
     return (v === null || v === undefined || v === '') ? SEM : String(v);
   }
   function optEl(v, t) { var o = document.createElement('option'); o.value = v; o.textContent = t; return o; }
-  function rotulo(campo, v) {
-    if (v === SEM) return 'Não especificado';
-    if (campo === 'cilindrada' && /^\d+$/.test(v)) return v + ' cc';
-    return v;
+  function rotulo(v) {
+    return v === SEM ? 'Não especificado' : v;
   }
   // Modelos que casam com as escolhas dos níveis 0..i-1.
   function modelosAcima(i) {
@@ -128,8 +126,14 @@
     var base = modelosAcima(i);
     el.innerHTML = '';
     el.appendChild(optEl('', CASC[i].ph + '…'));
-    if (i === FINAL) base.forEach(function (m) { el.appendChild(optEl(m.id, m.label)); });
-    else valoresDistintos(base, CASC[i].campo).forEach(function (v) { el.appendChild(optEl(v, rotulo(CASC[i].campo, v))); });
+    if (i === FINAL) {
+      // Um ano por modelo: o código (nome + ano) é único. Recente primeiro.
+      base.slice().sort(function (a, b) { return b.ano - a.ano; }).forEach(function (m) {
+        el.appendChild(optEl(m.id, String(m.ano)));
+      });
+    } else {
+      valoresDistintos(base, CASC[i].campo).forEach(function (v) { el.appendChild(optEl(v, rotulo(v))); });
+    }
   }
   // Zera e desabilita os níveis de i até o fim.
   function limparAbaixo(i) {

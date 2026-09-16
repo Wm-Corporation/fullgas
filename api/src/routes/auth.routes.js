@@ -432,9 +432,12 @@ router.post('/identidade/voltar', requireAuth, async (req, res, next) => {
     if (!req.user.imp) {
       return res.status(400).json({ erro: 'Você não está em outra identidade.' });
     }
+    // u.TokenVersion é OBRIGATÓRIO aqui: sem ele o signToken assina tv = 0 e o
+    // revalidarSessao derruba a sessão recém-criada na requisição seguinte —
+    // o admin voltava para a própria conta e perdia o acesso a tudo.
     const rows = await query(
       `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.EmpresaId,
-              u.Gestor, u.Permissoes, e.RazaoSocial AS Empresa
+              u.Gestor, u.Permissoes, u.TokenVersion, e.RazaoSocial AS Empresa
          FROM dbo.Usuario u
          JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
         WHERE u.UsuarioId = @id`,

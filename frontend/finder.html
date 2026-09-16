@@ -6,7 +6,7 @@
   <title>Fullgas SpareParts Finder</title>
   <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
   <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
-  <link rel="stylesheet" href="css/styles.css?v=20260831a">
+  <link rel="stylesheet" href="css/styles.css?v=20260916a">
 </head>
 <body>
 
@@ -53,16 +53,15 @@
 
           <div>
             <label>Select Model</label>
-            <!-- Filtro em cascata (Fullgas › Categoria › Ano › Tipo de motor ›
-                 Cilindrada › Etiqueta). Substitui a antiga árvore de modelos:
-                 mesmas informações, porém diretas e sempre funcionais. -->
+            <!-- Árvore de seleção em cascata: Marca › Modalidade › Categoria ›
+                 Modelo › Ano. Os níveis saem dos campos do modelo (painel
+                 admin), então acompanham qualquer edição. -->
             <div class="model-cascade" id="model-cascade">
-              <div class="mc-root">Fullgas</div>
-              <select id="mc-categoria"><option value="">Categoria…</option></select>
+              <select id="mc-marca"><option value="">Marca…</option></select>
+              <select id="mc-modalidade" disabled><option value="">Modalidade…</option></select>
+              <select id="mc-categoria" disabled><option value="">Categoria…</option></select>
+              <select id="mc-modelo" disabled><option value="">Modelo…</option></select>
               <select id="mc-ano" disabled><option value="">Ano…</option></select>
-              <select id="mc-tipomotor" disabled><option value="">Tipo de motor…</option></select>
-              <select id="mc-cilindrada" disabled><option value="">Cilindrada…</option></select>
-              <select id="mc-etiqueta" disabled><option value="">Modelo (etiqueta)…</option></select>
             </div>
           </div>
         </div>
@@ -73,10 +72,10 @@
   </main>
 
   <script src="js/config.js?v=20260727a"></script>
-  <script src="js/store.js?v=20260727a"></script>
-  <script src="js/api-adapter.js?v=20260831a"></script>
+  <script src="js/store.js?v=20260916a"></script>
+  <script src="js/api-adapter.js?v=20260916a"></script>
   <script src="js/ao-vivo.js?v=20260831a"></script>
-  <script src="js/finder.js?v=20260810h"></script>
+  <script src="js/finder.js?v=20260916a"></script>
   <script src="js/suporte.js?v=20260831a"></script>
 </body>
 </html>

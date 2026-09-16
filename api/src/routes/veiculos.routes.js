@@ -7,21 +7,25 @@ import { requireAuth, requireAdmin, requireArea, requireAreaAny } from '../auth.
 import {
   registrarEvento, historicoDoVeiculo, TIPOS_MANUAIS
 } from '../historico-veiculo.js';
+import { FABRICA, sqlEhFabrica, sqlNaFabrica } from '../fabrica.js';
 
 const router = Router();
 
 // Mapeia uma linha do banco para o formato que o front (store.js) já espera:
-// { niv, modeloId (código do modelo), cor, status, entrada, venda?, garantia? }.
+// { niv, modeloId (código do modelo), status, entrada, fabrica, venda?, garantia? }.
+// Cor e nº do motor saíram da tela (16/09/2026); as colunas seguem no banco.
 function toVeiculo(r) {
+  const naFabrica = !!r.NaFabrica;
   const v = {
     niv: r.Niv,
     modeloId: r.ModeloCodigo,
-    cor: r.Cor || '',
     status: r.Status,
     entrada: r.EntradaEstoque,
-    numeroMotor: r.NumeroMotor || null,
-    empresaId: r.EmpresaId || null,
-    empresa: r.EmpresaNome || null    // concessionária dona do chassi (null = não atribuído)
+    // Na Fábrica não há concessionária: empresa/empresaId vêm null mesmo que o
+    // chassi aponte para a empresa de um administrador (ver fabrica.js).
+    fabrica: naFabrica,
+    empresaId: naFabrica ? null : r.EmpresaId,
+    empresa: naFabrica ? null : r.EmpresaNome
   };
   if (r.VendaData) v.venda = {
     data: r.VendaData,
@@ -36,13 +40,19 @@ function toVeiculo(r) {
 }
 
 const SELECT_VEIC =
-  `SELECT v.VeiculoId, v.Niv, v.Cor, v.Status, v.EntradaEstoque, v.VendaData,
+  `SELECT v.VeiculoId, v.Niv, v.Status, v.EntradaEstoque, v.VendaData,
           v.VendaCliente, v.ClienteCpf, v.ClienteEmail, v.ClienteTelefone,
-          v.ClienteEndereco, v.GarantiaAtivaEm, v.NumeroMotor, v.EmpresaId,
-          m.Codigo AS ModeloCodigo, e.RazaoSocial AS EmpresaNome
+          v.ClienteEndereco, v.GarantiaAtivaEm, v.EmpresaId,
+          m.Codigo AS ModeloCodigo, e.RazaoSocial AS EmpresaNome,
+          ${sqlNaFabrica('v.EmpresaId')} AS NaFabrica
      FROM dbo.Veiculo v
      JOIN dbo.ModeloMoto m ON m.ModeloId = v.ModeloId
      LEFT JOIN dbo.Empresa e ON e.EmpresaId = v.EmpresaId`;
+
+// Resposta para quem tenta pôr um chassi "na concessionária" do administrador.
+const ERRO_DESTINO_FABRICA =
+  'Esta empresa é a Fábrica (conta de administrador) e não recebe chassi como concessionária. ' +
+  'Para deixar o chassi na Fábrica, não escolha concessionária.';
 
 // Cliente vê SOMENTE veículos atribuídos à própria empresa; admin vê todos.
 // Todo chassi é inserido/atribuído por um administrador — enquanto um chassi
@@ -66,12 +76,14 @@ router.get('/veiculos/modelos', requireAuth, async (_req, res, next) => {
 });
 
 // GET /api/empresas — lista de concessionárias ativas (SÓ ADMIN). Alimenta o
-// autocomplete de atribuição/transferência de chassi no front.
+// autocomplete de atribuição/transferência de chassi e o destino das
+// notificações. A Fábrica não é concessionária e fica de fora.
 router.get('/empresas', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
     const rows = await query(
-      `SELECT EmpresaId, RazaoSocial, NomeFantasia FROM dbo.Empresa
-        WHERE Ativo = 1 ORDER BY RazaoSocial`
+      `SELECT e.EmpresaId, e.RazaoSocial, e.NomeFantasia FROM dbo.Empresa e
+        WHERE e.Ativo = 1 AND NOT ${sqlEhFabrica('e.EmpresaId')}
+        ORDER BY e.RazaoSocial`
     );
     res.json(rows.map(r => ({
       id: r.EmpresaId, nome: r.RazaoSocial, fantasia: r.NomeFantasia || ''
@@ -80,15 +92,13 @@ router.get('/empresas', requireAuth, requireAdmin, async (_req, res, next) => {
 });
 
 // POST /api/veiculos (SÓ ADMIN) — cadastra um chassi novo.
-//   { niv, modeloId (código do modelo), cor?, numeroMotor?, empresaId? }
+//   { niv, modeloId (código do modelo), empresaId? }
 // empresaId opcional: já nasce atribuído àquela concessionária; sem ele o
-// chassi fica "não atribuído" (nenhum cliente vê até o admin atribuir).
+// chassi nasce na Fábrica (nenhum cliente vê até o admin atribuir).
 router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const niv = String(req.body?.niv || '').trim().toUpperCase();
     const modeloCod = String(req.body?.modeloId || '').trim();
-    const cor = String(req.body?.cor || '').trim();
-    const numeroMotor = String(req.body?.numeroMotor || '').trim();
     const empresaId = req.body?.empresaId ? Number(req.body.empresaId) : null;
 
     if (!/^[A-Z0-9]{11,17}$/.test(niv))
@@ -96,32 +106,38 @@ router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
     if (!modeloCod) return res.status(400).json({ erro: 'Informe o modelo da moto.' });
 
     const mod = (await query(
-      'SELECT ModeloId FROM dbo.ModeloMoto WHERE Codigo = @cod', { cod: modeloCod }))[0];
+      'SELECT ModeloId, Nome, Ano, Etiqueta FROM dbo.ModeloMoto WHERE Codigo = @cod', { cod: modeloCod }))[0];
     if (!mod) return res.status(400).json({ erro: 'Modelo não encontrado.' });
 
     if (empresaId) {
       const emp = (await query(
-        'SELECT 1 FROM dbo.Empresa WHERE EmpresaId = @eid AND Ativo = 1', { eid: empresaId })).length;
+        `SELECT ${sqlNaFabrica('e.EmpresaId')} AS EhFabrica
+           FROM dbo.Empresa e WHERE e.EmpresaId = @eid AND e.Ativo = 1`,
+        { eid: empresaId }))[0];
       if (!emp) return res.status(400).json({ erro: 'Concessionária não encontrada.' });
+      if (emp.EhFabrica) return res.status(400).json({ erro: ERRO_DESTINO_FABRICA });
     }
 
     const jaExiste = (await query('SELECT 1 FROM dbo.Veiculo WHERE Niv = @niv', { niv })).length;
     if (jaExiste) return res.status(409).json({ erro: 'Já existe um chassi cadastrado com este NIV.' });
 
     await query(
-      `INSERT INTO dbo.Veiculo (Niv, ModeloId, Cor, Status, EntradaEstoque, NumeroMotor, EmpresaId)
-       VALUES (@niv, @mid, @cor, 'Disponível', SYSUTCDATETIME(), @motor, @eid)`,
-      { niv, mid: mod.ModeloId, cor: cor || null, motor: numeroMotor || null, eid: empresaId }
+      `INSERT INTO dbo.Veiculo (Niv, ModeloId, Status, EntradaEstoque, EmpresaId)
+       VALUES (@niv, @mid, 'Disponível', SYSUTCDATETIME(), @eid)`,
+      { niv, mid: mod.ModeloId, eid: empresaId }
     );
 
     const rows = await query(SELECT_VEIC + ' WHERE v.Niv = @niv', { niv });
     const veic = rows[0];
 
+    // O cadastro é sempre feito na Fábrica (empresaId null = Fábrica no
+    // histórico); a concessionária, quando já vem escolhida, entra no evento
+    // de atribuição logo abaixo. O detalhe guarda o nome do modelo, não o
+    // código: o código muda quando o modelo é renomeado.
     await registrarEvento({
-      veiculoId: veic.VeiculoId, tipo: 'cadastro', titulo: 'Chassi cadastrado',
-      detalhe: [veic.ModeloCodigo, cor && 'cor ' + cor, numeroMotor && 'motor ' + numeroMotor]
-        .filter(Boolean).join(' · '),
-      user: req.user, empresaId: veic.EmpresaId, empresaNome: veic.EmpresaNome
+      veiculoId: veic.VeiculoId, tipo: 'cadastro', titulo: 'Chassi cadastrado na Fábrica',
+      detalhe: mod.Etiqueta || (mod.Nome + ' ' + mod.Ano),
+      user: req.user, empresaId: null
     });
     // Nascer atribuído é um segundo fato: separá-lo do cadastro deixa claro,
     // meses depois, desde quando aquela concessionária responde pelo chassi.
@@ -245,27 +261,49 @@ router.post('/veiculos/:niv/venda', requireAuth, requireArea('acoes'), async (re
 // outra concessionária. Aceita { empresaId } (vindo do autocomplete do front)
 // ou { empresa } com o NOME (razão social ou fantasia; case-insensitive pela
 // collation). Nome ambíguo ou inexistente devolve erro com sugestões.
+// { fabrica: true } devolve o chassi à Fábrica (tira a concessionária).
 router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, res, next) => {
   try {
+    const paraFabrica = req.body?.fabrica === true;
     const empresaId = req.body?.empresaId ? Number(req.body.empresaId) : null;
     const nome = String(req.body?.empresa || '').trim();
-    if (!empresaId && !nome) return res.status(400).json({ erro: 'Informe a concessionária de destino.' });
+    if (!paraFabrica && !empresaId && !nome)
+      return res.status(400).json({ erro: 'Informe a concessionária de destino.' });
 
     const veic = await acharVeiculo(req.params.niv, req.user);
     if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
 
+    if (paraFabrica) {
+      if (veic.NaFabrica) return res.status(409).json({ erro: 'O chassi já está na Fábrica.' });
+      await query(
+        'UPDATE dbo.Veiculo SET EmpresaId = NULL, AtualizadoEm = SYSUTCDATETIME() WHERE VeiculoId = @id',
+        { id: veic.VeiculoId }
+      );
+      await registrarEvento({
+        veiculoId: veic.VeiculoId, tipo: 'transferencia', titulo: 'Devolvido à ' + FABRICA,
+        detalhe: 'Concessionária anterior: ' + (veic.EmpresaNome || '—'),
+        user: req.user, empresaId: null
+      });
+      const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
+      return res.json(toVeiculo(rows[0]));
+    }
+
+    // A empresa da Fábrica entra na busca só para o erro sair claro ("isso é a
+    // Fábrica"), em vez de um "não encontrada" que confundiria.
+    const colunas = `e.EmpresaId, e.RazaoSocial, ${sqlNaFabrica('e.EmpresaId')} AS EhFabrica`;
     const emp = await (empresaId
-      ? query('SELECT EmpresaId, RazaoSocial FROM dbo.Empresa WHERE Ativo = 1 AND EmpresaId = @eid', { eid: empresaId })
+      ? query(`SELECT ${colunas} FROM dbo.Empresa e WHERE e.Ativo = 1 AND e.EmpresaId = @eid`, { eid: empresaId })
       : query(
-        `SELECT EmpresaId, RazaoSocial FROM dbo.Empresa
-          WHERE Ativo = 1 AND (RazaoSocial = @n OR NomeFantasia = @n)`, { n: nome }));
+        `SELECT ${colunas} FROM dbo.Empresa e
+          WHERE e.Ativo = 1 AND (e.RazaoSocial = @n OR e.NomeFantasia = @n)`, { n: nome }));
     if (!emp.length && empresaId)
       return res.status(404).json({ erro: 'Concessionária não encontrada.' });
     if (!emp.length) {
       const parecidas = await query(
-        `SELECT TOP 5 RazaoSocial FROM dbo.Empresa
-          WHERE Ativo = 1 AND (RazaoSocial LIKE @p OR NomeFantasia LIKE @p)
-          ORDER BY RazaoSocial`, { p: '%' + nome + '%' });
+        `SELECT TOP 5 e.RazaoSocial FROM dbo.Empresa e
+          WHERE e.Ativo = 1 AND (e.RazaoSocial LIKE @p OR e.NomeFantasia LIKE @p)
+            AND NOT ${sqlEhFabrica('e.EmpresaId')}
+          ORDER BY e.RazaoSocial`, { p: '%' + nome + '%' });
       return res.status(404).json({
         erro: 'Concessionária não encontrada: "' + nome + '".' +
           (parecidas.length ? ' Parecidas: ' + parecidas.map(r => r.RazaoSocial).join(', ') + '.' : '')
@@ -273,6 +311,8 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
     }
     if (emp.length > 1)
       return res.status(409).json({ erro: 'Mais de uma concessionária com esse nome — informe a razão social exata.' });
+    if (emp[0].EhFabrica)
+      return res.status(400).json({ erro: ERRO_DESTINO_FABRICA });
     if (emp[0].EmpresaId === veic.EmpresaId)
       return res.status(409).json({ erro: 'O veículo já pertence a ' + emp[0].RazaoSocial + '.' });
 
@@ -281,9 +321,10 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
       { eid: emp[0].EmpresaId, id: veic.VeiculoId }
     );
 
-    // Um chassi que ainda não tinha dono está sendo ATRIBUÍDO; um que já tinha
-    // está sendo TRANSFERIDO. A distinção importa na leitura do histórico.
-    const primeiraVez = !veic.EmpresaId;
+    // Um chassi que sai da Fábrica está sendo ATRIBUÍDO; um que já estava numa
+    // concessionária está sendo TRANSFERIDO. A distinção importa na leitura do
+    // histórico.
+    const primeiraVez = !!veic.NaFabrica;
     await registrarEvento({
       veiculoId: veic.VeiculoId,
       tipo: primeiraVez ? 'atribuicao' : 'transferencia',

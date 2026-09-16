@@ -117,13 +117,23 @@ function toNotif(req, r) {
 export const VISIVEL_PARA = `(
   (@admin = 1 AND (n.Publico = 'admin' OR n.Origem = 'admin'))
   OR
-  (@admin = 0 AND n.Publico = 'cliente' AND (n.EmpresaId IS NULL OR n.EmpresaId = @eid))
+  (@admin = 0 AND n.Publico = 'cliente' AND (n.EmpresaId IS NULL OR n.EmpresaId = @eid)
+   AND (n.ChamadoId IS NULL
+        OR EXISTS (SELECT 1 FROM dbo.SuporteChamado c
+                    WHERE c.ChamadoId = n.ChamadoId AND c.UsuarioId = @uid)))
 )`;
+
+// O aviso de chamado carrega a PRÉVIA da mensagem no corpo. Ele é gravado com
+// Publico='cliente' + EmpresaId, o que o entregaria a todas as contas da
+// concessionária: a conversa ficaria privada na aba do suporte e vazaria na
+// caixa de notificações. Por isso o recorte por chamado acima — quem não é
+// dono do chamado não recebe o aviso dele. Notificação sem ChamadoId (o
+// comunicado que o administrador dispara) segue valendo para a empresa toda.
 
 // Parâmetros que a condição acima exige.
 export function escopo(user) {
   const admin = user.papel === 'admin';
-  return { admin: admin ? 1 : 0, eid: admin ? null : user.empresaId };
+  return { admin: admin ? 1 : 0, eid: admin ? null : user.empresaId, uid: user.id };
 }
 
 // GET /api/notificacoes — a caixa de quem pediu (ver VISIVEL_PARA).
