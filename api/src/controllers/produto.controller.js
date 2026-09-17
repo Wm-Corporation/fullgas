@@ -4,6 +4,7 @@
 // da imagem, que depende do host da requisição.
 // ============================================================
 import * as service from '../services/produto.service.js';
+import { miniaturaDe, prepararMiniaturas } from '../miniaturas.js';
 
 // URL relativa do banco (/uploads/...) → absoluta, usando o host da requisição.
 // URLs já absolutas (ex.: imagem hospedada no Tiny) passam intactas.
@@ -24,6 +25,8 @@ function toProduto(req, r) {
     descricao: r.Descricao || '',
     previsao: r.PrevisaoChegada || null,
     imagem: urlAbs(req, r.ImagemUrl),
+    // Cópia pequena para listas e miniaturas; null enquanto não foi gerada.
+    miniatura: urlAbs(req, miniaturaDe(r.ImagemUrl)),
     tinyAtivo: !!r.TinyAtivo,
     tinySincronizadoEm: r.TinySincronizadoEm || null
   };
@@ -67,6 +70,7 @@ export async function excluir(req, res, next) {
 export async function enviarImagem(req, res, next) {
   try {
     const rel = await service.definirImagem(req.params.sku, req.file.filename);
+    prepararMiniaturas();   // em segundo plano
     res.status(201).json({ ok: true, imagem: urlAbs(req, rel) });
   } catch (e) { next(e); }
 }

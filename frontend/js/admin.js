@@ -25,11 +25,13 @@
   document.body.addEventListener('click', function (e) {
     var img = e.target.closest('img.fnd-thumb');
     if (!img || !img.getAttribute('src')) return;
+    // A miniatura aponta a foto inteira em data-grande (ver fotoProduto).
+    var grande = img.getAttribute('data-grande') || img.src;
     var back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML = '<div class="modal modal-img"><header><h3>' + esc(img.alt || 'Foto da peça') + '</h3>' +
       '<button class="x">×</button></header><div class="modal-body">' +
-      '<img src="' + esc(img.src) + '" alt="' + esc(img.alt || '') + '"></div></div>';
+      '<img src="' + esc(grande) + '" alt="' + esc(img.alt || '') + '"></div></div>';
     document.body.appendChild(back);
     back.querySelector('.x').addEventListener('click', function () { back.remove(); });
     // Clicar fora NÃO fecha — pop-ups só fecham no X (padrão do painel).
@@ -852,6 +854,16 @@
   /* =========================================================
      CATÁLOGO DE PRODUTOS
      ========================================================= */
+  // Foto de produto em 48 px: usa a miniatura gerada pela API (≈4 KB, com
+  // cache) no lugar da foto inteira do Tiny, que chega a 170 KB e, em parte
+  // dos casos, o navegador é proibido de guardar. `loading="lazy"`: o
+  // Catálogo lista todos os produtos, e só as linhas na tela precisam da foto.
+  function fotoProduto(p) {
+    if (!p.imagem) return '<span class="fnd-thumb vazio">sem foto</span>';
+    return '<img class="fnd-thumb" src="' + esc(p.miniatura || p.imagem) + '" data-grande="' + esc(p.imagem) +
+      '" alt="" loading="lazy" decoding="async">';
+  }
+
   function renderProdutos() {
     h1.textContent = 'Catálogo de produtos'; setOn('produtos');
     var prods = FG.all('products');
@@ -916,9 +928,7 @@
       '<th class="r">Preço</th><th class="r">Estoque</th><th>Ações</th></tr></thead><tbody>' +
       (prodsF.length ? prodsF.map(function (p) {
         var c = FG.category(p.cat);
-        return '<tr><td>' + (p.imagem
-            ? '<img class="fnd-thumb" src="' + esc(p.imagem) + '" alt="">'
-            : '<span class="fnd-thumb vazio">sem foto</span>') + '</td>' +
+        return '<tr><td>' + fotoProduto(p) + '</td>' +
           '<td>' + p.artigo + '</td><td>' + esc(p.nome) +
           (p.tinyAtivo ? ' <span class="pill-status Tiny" title="Gerenciado pelo Tiny ERP">Tiny</span>' : '') +
           '</td><td>' + esc(c ? c.nome : p.cat) + '</td>' +
@@ -1070,7 +1080,7 @@
       '<div class="field"><label>Descrição</label><textarea id="mp-desc" rows="3"' + trava + '>' + (p ? esc(p.descricao) : '') + '</textarea></div>' +
       '<div class="field"><label>Foto da peça (miniatura no Parts Finder)</label>' +
       '<div class="fnd-foto-row">' +
-      (p && p.imagem ? '<img class="fnd-thumb" src="' + esc(p.imagem) + '" alt="">' : '<span class="fnd-thumb vazio">sem foto</span>') +
+      (p ? fotoProduto(p) : '<span class="fnd-thumb vazio">sem foto</span>') +
       '<input id="mp-foto" type="file" accept="image/*"' + trava + '>' +
       (p && p.imagem && !tiny ? '<button class="btn-line btn-mini" id="mp-foto-del" type="button">Remover foto</button>' : '') +
       '</div></div>' +
