@@ -384,22 +384,50 @@ inverso:
    prioritária: fura a fila do cron) e atualiza o espelho local. Se o Magento
    acabou de vender a última peça, o cliente é barrado na hora. Tiny fora do
    ar **não trava a venda** — segue com o estoque local.
-2. O pedido local é criado como sempre (baixa atômica, pré-venda etc.) e, na
-   **mesma transação**, nasce uma linha em `TinyPedidoExport` (escopo
-   `normal`, itens em estoque).
+2. O pedido local é criado como sempre (baixa atômica, pré-venda etc.), com a
+   fatura cheia. **Nada é exportado ainda.**
+
+### O que acontece no ENVIO — remessas (desde 17/09/2026)
+
+> Migração `040_pedido_remessas.sql`. Antes desta data o pedido inteiro ia ao
+> Tiny na **aprovação** (ao sair de 'Pendente'), mesmo sem nada ter saído da
+> prateleira; escolher a quantidade enviada de cada peça não exportava nada.
+> As linhas antigas (escopo `normal`) continuam sendo lidas — nenhuma nova é
+> criada.
+
+1. O admin ajusta a **quantidade enviada** de cada peça
+   (`PUT /api/pedidos/:numero/itens/:itemId/enviado`). Isso **não** exporta:
+   é rascunho da remessa, dá para corrigir à vontade.
+2. Fechada a remessa, ele clica em **Confirmar envio**
+   (`POST /api/pedidos/:numero/remessa`). O que está enviado e ainda não foi
+   ao Tiny (`QuantidadeEnviada - QuantidadeExportada`) vira **uma** linha em
+   `TinyPedidoExport` (escopo `remessa`, com o snapshot em `ItensJson`).
 3. Após o commit, a exportação roda em segundo plano: `pedido.incluir.php`
-   cria o pedido no Tiny (cliente = a concessionária + endereço de entrega;
-   `numero_pedido_ecommerce` = número do pedido Fullgas) e
+   cria o pedido no Tiny (cliente = a concessionária + endereço de entrega) e
    `pedido.alterar.situacao.php` o marca **'aprovado'** — é a aprovação que
    baixa o estoque no Tiny. ⚠ **Configure a conta do Tiny para "lançar
    estoque na aprovação do pedido".**
+4. **Numeração**: a 1ª remessa leva o número do pedido Fullgas; as seguintes,
+   `NNNN-R2`, `NNNN-R3`... (o `numero_pedido_ecommerce` precisa ser único no
+   Tiny). A observação diz de qual pedido a remessa saiu e quantas peças ainda
+   faltam.
+5. **Status do pedido**: sobrou peça para enviar → `Parcial` (e a fatura, que
+   é uma só e pelo valor cheio, **segue em aberto**); saiu tudo → `Enviado`.
+   `Parcial` não é escolhível no seletor do painel: quem o define é o envio.
+
+> **Efeito colateral aceito nesta decisão:** entre a compra e o envio, a peça
+> continua disponível no Tiny/Magento — o estoque de lá só baixa quando a
+> remessa é confirmada. O estoque do Fullgas continua baixando na compra, então
+> o site não vende a mesma peça duas vezes.
 
 ### Pré-venda (backorder)
 
-Itens sem estoque não vão no pedido do Tiny da compra. Quando o admin libera
-o envio do backorder (escopo `backorder` ou ajuste manual da quantidade
-enviada), cada liberação gera um **segundo pedido** no Tiny com o snapshot dos
-itens liberados (`ItensJson`), numerado `NNNN-PV<id>`.
+Itens sem estoque seguem com **fluxo próprio, inalterado pelas remessas**.
+Quando o admin libera o envio do backorder (escopo `backorder` ou ajuste
+manual da quantidade enviada), cada liberação gera um **pedido próprio** no
+Tiny com o snapshot dos itens liberados (`ItensJson`), numerado `NNNN-PV<id>`,
+na hora — sem passar pelo "Confirmar envio". Esses itens já saem marcados em
+`QuantidadeExportada`, então a remessa nunca os manda de novo.
 
 ### Falhas, retry e cancelamento
 

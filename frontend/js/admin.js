@@ -1157,7 +1157,10 @@
   /* =========================================================
      PEDIDOS
      ========================================================= */
-  var STATUS = ['Pendente', 'Em separação', 'Enviado', 'Entregue', 'Cancelado'];
+  // 'Parcial' (parte das peças já saiu) entra no FILTRO, mas não no seletor de
+  // status: ele é consequência do envio — quem o define é o "Confirmar envio".
+  var STATUS = ['Pendente', 'Em separação', 'Parcial', 'Enviado', 'Entregue', 'Cancelado'];
+  var STATUS_ESCOLHIVEIS = STATUS.filter(function (s) { return s !== 'Parcial'; });
   // Status terminais: uma vez aqui, o pedido não pode mais mudar de status.
   var STATUS_TERMINAIS = ['Entregue', 'Cancelado'];
 
@@ -1267,7 +1270,18 @@
     var preVenda = o.itens.filter(function (it) { return it.backorder; });
     // Pedido entregue ou cancelado está fechado: as peças não mudam mais.
     var editavel = STATUS_TERMINAIS.indexOf(o.status) < 0;
+    // Peças marcadas como enviadas que ainda NÃO foram para o Tiny: é o que a
+    // próxima remessa leva. Pré-venda fica de fora (tem fluxo próprio).
+    var aConfirmar = emEstoque.reduce(function (s, it) {
+      return s + Math.max(0, (it.qtdEnviada || 0) - (it.qtdExportada || 0));
+    }, 0);
     return '<div class="venda-det">' +
+      (editavel && aConfirmar
+        ? '<div class="adm-banner"><b>' + aConfirmar + ' peça(s)</b> marcadas como enviadas e ainda não confirmadas. ' +
+          'Confirmar fecha a remessa e envia ao Tiny <b>somente essas peças</b>; se ainda faltar peça, ' +
+          'o pedido fica como <b>Parcial</b> e a fatura segue em aberto. ' +
+          '<button class="btn-orange btn-mini vd-remessa" data-ped="' + esc(o.id) + '" style="margin-left:8px;">Confirmar envio</button></div>'
+        : '') +
       '<div class="venda-meta">' +
       '<div><span class="muted">Cliente</span><br><b>' + esc(o.empresa) + '</b><br><span class="muted">' + esc(o.usuario) + '</span></div>' +
       '<div><span class="muted">Data da compra</span><br><b>' + FG.fmtDateTime(o.data) + '</b></div>' +
@@ -1282,8 +1296,9 @@
       grupoItens('Pré-venda', preVenda, o, editavel) +
       '</tbody></table>' + LEGENDA_DOTS +
       (editavel
-        ? '<p class="muted" style="font-size:12px;margin:4px 0 0;">Ajuste a quantidade já despachada de cada peça e clique em <b>Salvar</b>. ' +
-          'Em peça de pré-venda, aumentar dá baixa no estoque de verdade.</p>'
+        ? '<p class="muted" style="font-size:12px;margin:4px 0 0;">Ajuste a quantidade já despachada de cada peça, clique em <b>Salvar</b> ' +
+          'e, quando a remessa estiver fechada, em <b>Confirmar envio</b> — é ele que manda as peças ao Tiny. ' +
+          'Em peça de pré-venda, aumentar dá baixa no estoque de verdade e já vai ao Tiny na hora (fluxo próprio).</p>'
         : '<p class="muted" style="font-size:12px;margin:4px 0 0;">Pedido ' + esc(o.status.toLowerCase()) +
           ' — as peças não podem mais ser alteradas.</p>') +
       '<div class="tiny-venda" data-ped="' + esc(o.id) + '"></div></div>';
@@ -1320,7 +1335,11 @@
           (STATUS_TERMINAIS.indexOf(o.status) >= 0
             ? '<br><span class="muted" style="font-size:11px;">Pedido ' + esc(o.status.toLowerCase()) + ' — status final.</span>'
             : '<br><select class="inline-status" data-id="' + o.id + '" style="margin-top:6px;">' +
-              STATUS.map(function (s) { return '<option' + (s === o.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
+              // Pedido em 'Parcial' mostra o próprio status como opção travada:
+              // dali ele sai enviando o restante, não pelo seletor.
+              (STATUS_ESCOLHIVEIS.indexOf(o.status) < 0
+                ? '<option selected disabled>' + esc(o.status) + '</option>' : '') +
+              STATUS_ESCOLHIVEIS.map(function (s) { return '<option' + (s === o.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
               '</select>') +
           '</td>' +
           '<td><button class="btn-line btn-mini od-open" data-i="' + i + '" data-ped="' + esc(o.id) + '">' +
@@ -1372,6 +1391,19 @@
       FG.toast('Envio da peça atualizado.');
       renderPedidos();   // pedAbertos mantém o detalhe aberto
     }
+    /* ---- fecha a remessa: só aqui o pedido vai ao Tiny ---- */
+    Array.prototype.forEach.call(view.querySelectorAll('.vd-remessa'), function (b) {
+      b.addEventListener('click', async function () {
+        b.disabled = true;
+        var r = await FG.confirmarRemessa(b.getAttribute('data-ped'));
+        b.disabled = false;
+        if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível confirmar o envio.', 'erro'); return; }
+        var n = (r.itens || []).reduce(function (s, i) { return s + i.qtd; }, 0);
+        FG.toast(n + ' peça(s) enviadas' + (r.parcial ? ' — pedido Parcial, fatura segue em aberto.' : ' — pedido concluído.'));
+        renderPedidos();
+      });
+    });
+
     Array.prototype.forEach.call(view.querySelectorAll('.it-save'), function (b) {
       b.addEventListener('click', function () { salvarItem(b, null); });
     });

@@ -8,10 +8,17 @@
 // "lançar estoque na aprovação do pedido" ligado).
 //
 // Fluxo:
-//   POST /api/pedidos  → grava linha em TinyPedidoExport (escopo
-//   'normal', na MESMA transação do pedido) → após o commit este
-//   módulo inclui o pedido no Tiny e o aprova. Se o Tiny estiver
-//   fora, a linha fica 'erro' e o cron (tiny-cron.js) tenta de novo.
+//   REMESSA (escopo 'remessa'): o admin decide o que vai nesta saída
+//   (quantidade enviada de cada peça) e clica em "Confirmar envio" —
+//   só então as peças daquela remessa viram um pedido no Tiny. Um
+//   pedido enviado em partes gera uma remessa por saída; o Tiny recebe
+//   exatamente o que saiu. Se o Tiny estiver fora, a linha fica 'erro'
+//   e o cron (tiny-cron.js) tenta de novo.
+//
+//   O escopo 'normal' (pedido inteiro exportado na APROVAÇÃO) é
+//   HISTÓRICO: até 17/09/2026 o pedido ia ao Tiny quando o admin o
+//   tirava de 'Pendente', antes de qualquer envio. As linhas antigas
+//   continuam sendo lidas; nenhuma nova é criada.
 //
 //   Pré-venda: quando o admin libera o envio do backorder, cada
 //   liberação gera um SEGUNDO pedido no Tiny (escopo 'backorder')
@@ -134,6 +141,29 @@ export async function montarPayload(exp) {
   if (!itens.length) return null;
 
   const backorder = exp.Escopo === 'backorder';
+  const remessa = exp.Escopo === 'remessa';
+
+  // Ordem desta remessa no pedido: a 1ª leva o número do pedido Fullgas (o
+  // caso comum, pedido que sai inteiro de uma vez); as seguintes ganham -R2,
+  // -R3... porque o número do pedido de e-commerce precisa ser único no Tiny.
+  // Exportações 'normal' (regra antiga) contam na ordem: se um pedido já foi
+  // ao Tiny inteiro, uma remessa posterior nunca reusa aquele número.
+  let ordem = 1;
+  if (remessa) {
+    ordem = (await query(
+      `SELECT COUNT(*) AS n FROM dbo.TinyPedidoExport
+        WHERE PedidoId = @pid AND Escopo IN ('normal', 'remessa')
+          AND Status <> 'cancelado' AND ExportId <= @eid`,
+      { pid: exp.PedidoId, eid: exp.ExportId }
+    ))[0].n || 1;
+  }
+  // Ainda falta peça neste pedido? Entra na observação, para quem abrir o
+  // pedido no Tiny saber que o restante vem em outra remessa.
+  const faltam = remessa ? (await query(
+    `SELECT SUM(Quantidade - QuantidadeEnviada) AS n FROM dbo.PedidoItem
+      WHERE PedidoId = @pid AND Quantidade > QuantidadeEnviada`,
+    { pid: exp.PedidoId }
+  ))[0].n || 0 : 0;
   const cnpj = String(ped.Cnpj || '').replace(/\D/g, '');
   const cliente = {
     nome: ped.RazaoSocial,
@@ -171,11 +201,15 @@ export async function montarPayload(exp) {
     // Tiny e o número do e-commerce precisa distingui-las.
     numero_pedido_ecommerce: backorder
       ? `${ped.NumeroPedido}-PV${exp.ExportId}`
-      : ped.NumeroPedido,
+      : (remessa && ordem > 1 ? `${ped.NumeroPedido}-R${ordem}` : ped.NumeroPedido),
     obs: (ped.Tipo === 'garantia' ? 'GARANTIA (reposição sem cobrança) — ' : '') +
       (backorder
         ? `Pré-venda liberada do pedido Fullgas ${ped.NumeroPedido}`
-        : `Pedido Fullgas ${ped.NumeroPedido}`) + ` — usuário ${ped.UsuarioEmail}.`
+        : remessa
+          ? `Remessa ${ordem} do pedido Fullgas ${ped.NumeroPedido} — contém somente as peças ` +
+            `enviadas nesta remessa` +
+            (faltam ? `; faltam ${faltam} peça(s), que virão em remessa seguinte` : ' (envio concluído)')
+          : `Pedido Fullgas ${ped.NumeroPedido}`) + ` — usuário ${ped.UsuarioEmail}.`
   };
 }
 
@@ -273,12 +307,18 @@ const MAPA_SITUACAO_TINY = { enviado: 'Enviado', entregue: 'Entregue' };
 export async function sincronizarSituacaoPedidos() {
   if (!exportacaoLigada()) return;
   const rows = await query(
-    `SELECT e.TinyPedidoId, p.PedidoId, p.NumeroPedido, p.Status
+    `SELECT e.TinyPedidoId, p.PedidoId, p.NumeroPedido, p.Status,
+            CASE WHEN EXISTS (SELECT 1 FROM dbo.PedidoItem pi
+                               WHERE pi.PedidoId = p.PedidoId
+                                 AND pi.Quantidade > pi.QuantidadeEnviada) THEN 1 ELSE 0 END AS TemPendente
        FROM dbo.TinyPedidoExport e
        JOIN dbo.Pedido p ON p.PedidoId = e.PedidoId
-      WHERE e.Escopo = 'normal' AND e.Status = 'enviado' AND e.TinyPedidoId IS NOT NULL
+      WHERE e.Escopo IN ('normal', 'remessa') AND e.Status = 'enviado' AND e.TinyPedidoId IS NOT NULL
         AND p.Status NOT IN (N'Entregue', N'Cancelado')`);
   for (const r of rows) {
+    // Remessa entregue no Tiny NÃO fecha um pedido que ainda tem peça para
+    // sair: lá cada remessa é um pedido próprio, aqui o pedido é um só.
+    if (r.TemPendente) continue;
     try {
       const sit = await obterSituacaoPedido(r.TinyPedidoId);
       const alvo = sit ? MAPA_SITUACAO_TINY[sit] : null;
