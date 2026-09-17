@@ -1964,15 +1964,46 @@
     setTimeout(function () { area.classList.add('hidden'); }, 300);
   }
 
+  // A biblioteca de PDF (html2pdf, ~900 KB) só é baixada no primeiro clique em
+  // "Baixar PDF". Antes ela vinha no <script> do portal.html em TODA abertura
+  // do portal: num computador fraco eram ~0,4 s de CPU a cada página, para
+  // uma função que quase ninguém usa. Depois do primeiro download ela fica no
+  // cache do navegador como qualquer outro arquivo.
+  var html2pdfPromessa = null;
+  function carregarHtml2pdf() {
+    if (window.html2pdf) return Promise.resolve(window.html2pdf);
+    if (!html2pdfPromessa) {
+      html2pdfPromessa = new Promise(function (ok, falha) {
+        var s = document.createElement('script');
+        s.src = 'js/vendor/html2pdf.bundle.min.js';
+        s.onload = function () {
+          if (window.html2pdf) ok(window.html2pdf); else falha(new Error('html2pdf ausente'));
+        };
+        s.onerror = function () { falha(new Error('Falha ao baixar o gerador de PDF.')); };
+        document.head.appendChild(s);
+      });
+      // Falhou (rede caiu)? O próximo clique tenta de novo.
+      html2pdfPromessa['catch'](function () { html2pdfPromessa = null; });
+    }
+    return html2pdfPromessa;
+  }
+
   // Baixar: gera um arquivo PDF de verdade (html2pdf) e dispara o download,
   // sem passar pela caixa de impressão. Nome: fatura-<numero>.pdf.
   function baixarFaturaPDF(i, btn) {
-    if (typeof html2pdf === 'undefined') { // biblioteca não carregou → imprime
-      FG.toast('Gerador de PDF indisponível — abrindo a impressão.', 'erro');
-      return imprimirFatura(i);
-    }
     var rotulo = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
+    carregarHtml2pdf().then(function () {
+      gerarFaturaPDF(i, btn, rotulo);
+    }, function () {
+      // Sem a biblioteca, a fatura ainda sai pela impressão do navegador.
+      if (btn) { btn.disabled = false; btn.textContent = rotulo; }
+      FG.toast('Gerador de PDF indisponível — abrindo a impressão.', 'erro');
+      imprimirFatura(i);
+    });
+  }
+
+  function gerarFaturaPDF(i, btn, rotulo) {
 
     // Container temporário fora da tela (o html2pdf renderiza o elemento real).
     // Fica preso ao <html> (não ao <body>) para escapar do `zoom` global da
