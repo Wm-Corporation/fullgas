@@ -1,0 +1,355 @@
+/* =========================================================
+   FULLGAS B2B — tela de ACESSO (index.html e redefinir.html)
+   ---------------------------------------------------------
+   Carregado SÓ nestas duas telas, depois do styles.css: é a primeira coisa
+   que o concessionário vê, e aqui a casa pode ser mais caprichada que no
+   resto do portal, que é ferramenta de trabalho e continua seco de propósito.
+
+   As regras valem apenas dentro de `body.auth` — nenhuma tela do portal, da
+   loja ou do admin é afetada por este arquivo.
+
+   FONTES: ficam em frontend/fonts/ e são servidas pelo próprio site. A
+   Content-Security-Policy usa `font-src 'self'` (ver deploy/nginx), então um
+   link para o Google Fonts seria bloqueado pelo navegador. Créditos e
+   licenças em fonts/LEIA-ME-LICENCAS.txt.
+
+   MOVIMENTO: tudo anima só `transform` e `opacity` (o que o navegador resolve
+   na placa de vídeo, sem travar em computador fraco) e em tempos longos, para
+   parecer respiração e não animação de banner. Quem liga "reduzir movimento"
+   no sistema não vê animação nenhuma — o styles.css já desliga todas — e o
+   desenho parado continua completo.
+   ========================================================= */
+
+@font-face {
+  font-family: 'Jost';
+  src: url('../fonts/jost-variable.woff2') format('woff2-variations');
+  font-weight: 300 500;          /* arquivo variável: um só para os três pesos */
+  font-style: normal;
+  font-display: swap;            /* o texto aparece na hora, com a fonte do sistema */
+}
+@font-face {
+  font-family: 'Playfair Display';
+  src: url('../fonts/playfair-display-600.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------------- base ---------------- */
+body.auth {
+  /* Paleta só desta tela. O amarelo continua sendo o da marca (--red). */
+  --ac-preto: #07070a;
+  --ac-texto: #ededf0;
+  --ac-suave: #9b9aa4;
+  --ac-linha: rgba(255, 255, 255, .10);
+  --ac-ouro: var(--red);
+  background: var(--ac-preto);
+  color: var(--ac-texto);
+  font-family: 'Jost', var(--font);
+  font-weight: 300;
+  letter-spacing: .01em;
+}
+
+/* O fundo da página inteira, não só do quadro: sem isto, sobra uma faixa
+   clara embaixo quando o formulário de cadastro (longo) rola. */
+body.auth .auth-wrap {
+  position: relative;
+  overflow: hidden;
+  background: none;
+  /* 100vh cru mediria 115% da janela por causa do zoom do body (ver
+     --zoom-ui em styles.css) e criaria uma rolagem que não existe. */
+  min-height: calc(100vh / var(--zoom-ui));
+  padding: 40px 24px;
+}
+
+/* ---------------- fundo vivo ----------------
+   Duas manchas de luz que passeiam devagar (26s e 34s, sem sincronia) sobre
+   o preto, e uma malha fina por cima. É o que tira o ar de "página em branco
+   com um formulário" sem roubar atenção do que importa. */
+body.auth .auth-wrap::before,
+body.auth .auth-wrap::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  border-radius: 50%;
+  filter: blur(70px);
+  pointer-events: none;          /* luz é enfeite: não intercepta clique */
+  /* Camada própria na placa de vídeo: o desfoque é calculado UMA vez e só a
+     posição muda. Sem isto (ou animando escala/opacidade), o navegador
+     redesenha o borrão a cada quadro — medi 13% de um núcleo parado na tela
+     num computador 6x mais lento; assim fica em torno de 1%. */
+  will-change: transform;
+}
+body.auth .auth-wrap::before {
+  width: 62vw; height: 62vw; max-width: 760px; max-height: 760px;
+  top: -18vh; left: -12vw;
+  background: radial-gradient(circle at 50% 50%, rgba(229, 177, 0, .24), rgba(229, 177, 0, 0) 68%);
+  animation: ac-luz-a 26s ease-in-out infinite;
+}
+body.auth .auth-wrap::after {
+  width: 54vw; height: 54vw; max-width: 660px; max-height: 660px;
+  right: -10vw; bottom: -14vh;
+  background: radial-gradient(circle at 50% 50%, rgba(212, 166, 0, .30), rgba(120, 90, 0, 0) 70%);
+  animation: ac-luz-b 34s ease-in-out infinite;
+}
+@keyframes ac-luz-a {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50%      { transform: translate3d(7vw, 6vh, 0); }
+}
+@keyframes ac-luz-b {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50%      { transform: translate3d(-6vw, -7vh, 0); }
+}
+
+/* Malha discreta (linhas de 1px a 3% de branco) — dá profundidade e disfarça
+   o degradê em telas de 8 bits, onde ele sairia em faixas. */
+body.auth .auth-wrap > * { position: relative; z-index: 1; }
+body.auth .auth-wrap::marker { content: none; }
+body.auth::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, .03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, .03) 1px, transparent 1px);
+  background-size: 64px 64px, 64px 64px;
+  mask-image: radial-gradient(ellipse at 50% 40%, #000 30%, transparent 78%);
+}
+
+/* Vinheta: cantos mais fundos, atenção no meio da tela. */
+body.auth::after {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 45%, transparent 42%, rgba(0, 0, 0, .55) 100%);
+}
+
+/* ---------------- o quadro ---------------- */
+body.auth .auth-card {
+  position: relative;
+  width: 430px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .055), rgba(255, 255, 255, .02));
+  border: 1px solid var(--ac-linha);
+  border-top: 1px solid var(--ac-linha);   /* anula a faixa amarela grossa do tema claro */
+  border-radius: 18px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .65), inset 0 1px 0 rgba(255, 255, 255, .07);
+  backdrop-filter: blur(22px) saturate(120%);
+  -webkit-backdrop-filter: blur(22px) saturate(120%);
+  overflow: hidden;
+  animation: ac-entrada 1s cubic-bezier(.2, .7, .2, 1) both;
+}
+/* Fio de ouro no topo do quadro: a marca aparece sem gritar. */
+body.auth .auth-card::before {
+  content: '';
+  position: absolute; top: 0; left: 12%; right: 12%; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--ac-ouro), transparent);
+  opacity: .85;
+}
+@keyframes ac-entrada {
+  from { opacity: 0; transform: translate3d(0, 18px, 0) scale(.99); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---------------- marca ---------------- */
+body.auth .auth-card .head { padding: 34px 26px 6px; }
+body.auth .brand.big {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 600;
+  font-size: 30px;
+  letter-spacing: .10em;
+  color: var(--ac-texto);
+  gap: 12px;
+}
+body.auth .brand .g-badge {
+  position: relative;
+  border-color: var(--ac-ouro);
+  color: var(--ac-ouro);
+  border-radius: 10px;
+  box-shadow: 0 0 18px rgba(229, 177, 0, .22);
+}
+/* O halo que "respira" é um elemento próprio mudando só de opacidade —
+   animar box-shadow obrigaria a repintar o selo a cada quadro. */
+body.auth .brand .g-badge::after {
+  content: '';
+  position: absolute; inset: -14px; z-index: -1; border-radius: 50%;
+  background: radial-gradient(circle, rgba(229, 177, 0, .40), rgba(229, 177, 0, 0) 70%);
+  animation: ac-respira 6s ease-in-out infinite;
+  will-change: opacity;
+}
+@keyframes ac-respira {
+  0%, 100% { opacity: .45; }
+  50%      { opacity: 1; }
+}
+body.auth .auth-card .head .sub {
+  color: var(--ac-suave);
+  font-size: 11px;
+  letter-spacing: .32em;
+  margin-top: 12px;
+}
+
+/* ---------------- abas Entrar / Cadastrar ---------------- */
+body.auth .auth-tabs {
+  border-bottom: 1px solid var(--ac-linha);
+  margin-top: 26px;
+  gap: 4px;
+}
+body.auth .auth-tabs button {
+  position: relative;
+  background: none;
+  border: none;
+  border-top: none;
+  color: var(--ac-suave);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  padding: 14px 8px;
+  transition: color .25s ease;
+}
+body.auth .auth-tabs button:hover { color: var(--ac-texto); }
+body.auth .auth-tabs button.on { background: none; color: var(--ac-texto); }
+/* O traço de ouro desliza para a aba escolhida em vez de simplesmente trocar. */
+body.auth .auth-tabs button::after {
+  content: '';
+  position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--ac-ouro), transparent);
+  transform: scaleX(0);
+  transition: transform .35s cubic-bezier(.2, .7, .2, 1);
+}
+body.auth .auth-tabs button.on::after { transform: scaleX(1); }
+
+/* ---------------- campos ---------------- */
+body.auth .auth-body { padding: 26px; }
+body.auth .field label {
+  color: var(--ac-suave);
+  font-size: 10.5px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  margin-bottom: 7px;
+}
+body.auth .field input {
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--ac-linha);
+  border-radius: 10px;
+  color: var(--ac-texto);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 11px 13px;
+  transition: border-color .2s ease, box-shadow .25s ease, background-color .2s ease;
+}
+body.auth .field input::placeholder { color: #7f7e8a; }   /* contraste legível sobre o campo escuro */
+body.auth .field input:hover { border-color: rgba(255, 255, 255, .18); }
+body.auth .field input:focus {
+  outline: none;                 /* o próprio anel abaixo marca o foco */
+  border-color: var(--ac-ouro);
+  background: rgba(255, 255, 255, .06);
+  box-shadow: 0 0 0 3px rgba(229, 177, 0, .16);
+}
+/* Preenchimento automático do navegador: sem isto o Chrome pinta o campo de
+   branco e o texto some no tema escuro. */
+body.auth .field input:-webkit-autofill,
+body.auth .field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ac-texto);
+  -webkit-box-shadow: 0 0 0 1000px #15151c inset;
+  caret-color: var(--ac-texto);
+}
+/* Rótulo que quebra em duas linhas (ex.: "Inscrição estadual (opcional)")
+   empurrava só o campo dele para baixo: alinhar pela base mantém a dupla
+   de campos na mesma linha. */
+body.auth .field-row { align-items: flex-end; }
+
+body.auth .field-title {
+  color: var(--ac-ouro);
+  border-bottom: 1px solid var(--ac-linha);
+  letter-spacing: .14em;
+}
+body.auth .muted { color: var(--ac-suave); }
+
+/* ---------------- botão ---------------- */
+body.auth .btn.red {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #f0c62a, var(--ac-ouro) 55%, #b98f00);
+  border: none;
+  border-radius: 12px;
+  color: #17140a;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  padding: 13px 20px;
+  box-shadow: 0 10px 26px rgba(229, 177, 0, .20);
+  transition: transform .2s cubic-bezier(.2, .7, .2, 1), box-shadow .25s ease, filter .2s ease;
+}
+body.auth .btn.red:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 34px rgba(229, 177, 0, .32);
+  filter: brightness(1.04);
+}
+body.auth .btn.red:active { transform: translateY(0); box-shadow: 0 8px 18px rgba(229, 177, 0, .22); }
+body.auth .btn.red:disabled { opacity: .55; transform: none; box-shadow: none; cursor: not-allowed; }
+/* Brilho que atravessa o botão ao passar o mouse. */
+body.auth .btn.red::after {
+  content: '';
+  position: absolute; top: 0; bottom: 0; left: -60%; width: 40%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .45), transparent);
+  transform: translateX(0);
+  opacity: 0;
+}
+body.auth .btn.red:hover::after { animation: ac-brilho .9s ease; }
+@keyframes ac-brilho {
+  0%   { opacity: 0; transform: translateX(0); }
+  30%  { opacity: 1; }
+  100% { opacity: 0; transform: translateX(420%); }
+}
+
+/* ---------------- avisos e links ---------------- */
+body.auth .auth-msg {
+  border-radius: 10px;
+  border-left: 3px solid transparent;
+  font-size: 13px;
+  padding: 11px 13px;
+  animation: ac-aviso .4s ease both;
+}
+body.auth .auth-msg.err { background: rgba(185, 28, 28, .16); border-left-color: #ef5350; color: #ffb4ad; }
+body.auth .auth-msg.ok { background: rgba(46, 158, 68, .15); border-left-color: #48c265; color: #a8e9b6; }
+@keyframes ac-aviso {
+  from { opacity: 0; transform: translate3d(0, -6px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+body.auth .link-btn {
+  color: var(--ac-suave);
+  font-family: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 1px;
+  transition: color .2s ease, border-color .2s ease;
+}
+body.auth .link-btn:hover { color: var(--ac-ouro); border-bottom-color: rgba(229, 177, 0, .5); }
+
+/* Cada campo entra um pouquinho depois do outro quando a aba troca: o
+   formulário "se monta" em vez de aparecer de uma vez. */
+body.auth #form-login .field,
+body.auth #form-esq .field,
+body.auth #form-cad .field,
+body.auth #form-login > .btn,
+body.auth #form-esq > .btn,
+body.auth #form-cad > .btn { animation: ac-sobe .5s cubic-bezier(.2, .7, .2, 1) both; }
+body.auth .field:nth-of-type(2) { animation-delay: .06s; }
+body.auth .field:nth-of-type(3) { animation-delay: .12s; }
+body.auth .field:nth-of-type(n+4) { animation-delay: .18s; }
+@keyframes ac-sobe {
+  from { opacity: 0; transform: translate3d(0, 10px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Telas estreitas: o quadro ocupa a largura e as luzes encolhem (em celular
+   uma mancha de 62vw borrada custa caro para desenhar). */
+@media (max-width: 560px) {
+  body.auth .auth-wrap { padding: 24px 14px; }
+  body.auth .auth-card { width: 100%; border-radius: 14px; }
+  body.auth .auth-card .head { padding: 26px 18px 4px; }
+  body.auth .auth-body { padding: 20px 18px; }
+  body.auth .brand.big { font-size: 25px; }
+  body.auth .auth-wrap::before, body.auth .auth-wrap::after { filter: blur(48px); }
+}
