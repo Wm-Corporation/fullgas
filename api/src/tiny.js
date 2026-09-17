@@ -18,6 +18,7 @@
 // ============================================================
 import 'dotenv/config';
 import { query } from './db.js';
+import { prepararMiniaturas } from './miniaturas.js';
 
 const BASE = 'https://api.tiny.com.br/api2';
 
@@ -456,5 +457,6 @@ export async function sincronizarLote(produtoIds = null, evento = 'lote') {
       resultados.push({ sku: p.Sku, tinyId: p.TinyId, status: 'erro', msg: e.message });
     }
   }
+  prepararMiniaturas();   // foto nova do Tiny ganha miniatura (segundo plano)
   return resultados;
 }

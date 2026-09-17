@@ -19,6 +19,7 @@ import {
   sincronizarLote, registrarLog
 } from '../tiny.js';
 import { exportarPedido } from '../tiny-pedidos.js';
+import { prepararMiniaturas } from '../miniaturas.js';
 import { erroSku } from '../validacao.js';
 
 const router = Router();
@@ -154,6 +155,7 @@ router.post('/tiny/importar', requireAuth, requireAdmin, async (req, res, next) 
         resultados.push({ tinyId, status: 'erro', msg: e.message });
       }
     }
+    prepararMiniaturas();   // fotos dos importados (segundo plano)
     res.status(201).json({ ...resumo(resultados), resultados });
   } catch (e) { tratarErro(e, res, next); }
 });

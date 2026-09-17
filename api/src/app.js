@@ -33,6 +33,7 @@ import pulsoRoutes from './routes/pulso.routes.js';
 import finderRoutes from './routes/finder.routes.js';
 import tinyRoutes from './routes/tiny.routes.js';
 import arquivosRoutes from './routes/arquivos.routes.js';
+import { PASTA_MINIATURAS } from './miniaturas.js';
 
 const app = express();
 
@@ -179,6 +180,15 @@ const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 for (const pasta of ['produtos', 'categorias', 'finder']) {
   app.use(`/uploads/${pasta}`, express.static(path.join(UPLOADS_DIR, pasta)));
 }
+// Miniaturas de produto (ver miniaturas.js): o nome é o hash da foto de
+// origem, então o conteúdo de um endereço nunca muda — cache de 30 dias sem
+// risco de imagem velha. Arquivo que não existe responde 404 seco aqui (sem
+// cair no 500 do tratador de erros nem na página HTML de 404); o cabeçalho de
+// cache só vai nas respostas de sucesso.
+app.use('/uploads/miniaturas', express.static(PASTA_MINIATURAS, {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=2592000, immutable')
+}));
+app.use('/uploads/miniaturas', (_req, res) => res.status(404).end());
 
 /* Log de requisições — sem a QUERY STRING.
    ------------------------------------------------------------

@@ -13,6 +13,7 @@ import 'dotenv/config';
 import app from './app.js';
 import { getPool } from './db.js';
 import { iniciarSincronizacaoAgendada } from './tiny-cron.js';
+import { prepararMiniaturas } from './miniaturas.js';
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -43,6 +44,8 @@ getPool()
     // Sincronização automática com o Tiny (node-cron, intervalo em minutos
     // via TINY_SYNC_INTERVALO_MIN) — só depois do banco estar de pé.
     iniciarSincronizacaoAgendada();
+    // Miniaturas que faltam (produtos novos, primeira vez após o deploy).
+    prepararMiniaturas();
   })
   .catch(() => {
     console.error('A API não subiu porque não conectou no banco. Confira o arquivo .env.');

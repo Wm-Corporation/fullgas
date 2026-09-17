@@ -282,34 +282,42 @@
                 orders: [], claims: [], invoices: [], deliveries: [],
                 notifications: [], users: [], searches: [], prevenda: [] };
 
-  // Carrega TODO o cache de uma vez (em paralelo). Assíncrono — devolve uma
-  // Promise que resolve quando o cache está cheio. Sem token, resolve vazio.
+  // De onde vem cada lista do cache.
+  var FONTES = [
+    ['products', '/produtos'],
+    ['categories', '/categorias'],
+    ['orders', '/pedidos'],
+    ['models', '/veiculos/modelos'],
+    ['vehicles', '/veiculos'],
+    ['invoices', '/faturas'],
+    ['prevenda', '/prevenda'],
+    ['claims', '/reivindicacoes'],
+    ['users', '/usuarios'],   // só admin recebe; cliente resolve null (apiGet nunca rejeita)
+    ['notifications', '/notificacoes']
+  ];
+
+  /* Cada página diz no <body data-cache="products categories ..."> quais
+     listas usa, e só essas são buscadas. Antes toda página pedia as 10 — a
+     loja baixava faturas, usuários e reivindicações que nunca mostra — e cada
+     pedido a mais custa uma ida e volta à API, o que pesa em internet lenta
+     e em computador fraco. `data-cache=""` = nenhuma lista. Sem o atributo,
+     busca todas (página nova que ainda não declarou continua funcionando). */
+  function listasDaPagina() {
+    var attr = document.body ? document.body.getAttribute('data-cache') : null;
+    return attr == null ? null : attr.split(/\s+/).filter(Boolean);
+  }
+  var LISTAS_DA_PAGINA = listasDaPagina();
+
+  // Carrega o cache da página (em paralelo). Assíncrono — devolve uma Promise
+  // que resolve quando o cache está cheio. Sem token, resolve vazio.
   function carregarCache() {
     if (!temSessao()) return Promise.resolve(CACHE);
-    return Promise.all([
-      apiGet('/produtos'),
-      apiGet('/categorias'),
-      apiGet('/pedidos'),
-      apiGet('/veiculos/modelos'),
-      apiGet('/veiculos'),
-      apiGet('/faturas'),
-      apiGet('/prevenda'),
-      apiGet('/reivindicacoes'),
-      apiGet('/usuarios'), // só admin recebe; cliente resolve null (apiGet nunca rejeita)
-      apiGet('/notificacoes')
-    ]).then(function (r) {
-      if (r[0]) CACHE.products = r[0];
-      if (r[1]) CACHE.categories = r[1];
-      if (r[2]) CACHE.orders = r[2];
-      if (r[3]) CACHE.models = r[3];
-      if (r[4]) CACHE.vehicles = r[4];
-      if (r[5]) CACHE.invoices = r[5];
-      if (r[6]) CACHE.prevenda = r[6];
-      if (r[7]) CACHE.claims = r[7];
-      if (r[8]) CACHE.users = r[8];
-      if (r[9]) CACHE.notifications = r[9];
+    var fontes = FONTES.filter(function (f) {
+      return !LISTAS_DA_PAGINA || LISTAS_DA_PAGINA.indexOf(f[0]) >= 0;
+    });
+    return Promise.all(fontes.map(function (f) { return apiGet(f[1]); })).then(function (r) {
+      fontes.forEach(function (f, i) { if (r[i]) CACHE[f[0]] = r[i]; });
       return CACHE;
-      // (demais coleções entram nas próximas rotas: notificações, etc.)
     });
   }
 
@@ -467,7 +475,18 @@
   /* ---------- sobrescreve a camada de dados do FG ---------- */
   // Leituras continuam SÍNCRONAS, lendo do cache em memória.
   FG.db = function () { return CACHE; };
-  FG.all = function (col) { return CACHE[col] || []; };
+  // Aviso para quem mexer no código: pedir uma lista que a página não
+  // declarou devolve vazio (ela nunca foi buscada). Some com a correção do
+  // data-cache no HTML da página.
+  var avisadas = {};
+  FG.all = function (col) {
+    if (LISTAS_DA_PAGINA && LISTAS_DA_PAGINA.indexOf(col) < 0 && !avisadas[col] &&
+        FONTES.some(function (f) { return f[0] === col; }) && !CACHE[col].length) {
+      avisadas[col] = true;
+      console.warn('[Fullgas] FG.all("' + col + '") numa página que não declarou essa lista em <body data-cache>.');
+    }
+    return CACHE[col] || [];
+  };
 
   // Requisição genérica que NÃO rejeita: resolve { ok:true, ... } no sucesso
   // ou { ok:false, msg } no erro. Usada pelos wrappers de mutação.

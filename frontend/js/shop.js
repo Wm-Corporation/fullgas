@@ -103,9 +103,15 @@
   }
 
   // Foto real do produto quando houver (upload do admin ou espelhada do Tiny
-  // ERP); sem foto, cai no desenho esquemático da categoria.
-  function prodImg(p, w) {
-    if (p.imagem) return '<img src="' + esc(p.imagem) + '" alt="' + esc(p.nome) + '" loading="lazy">';
+  // ERP); sem foto, cai no desenho esquemático da categoria. Na lista e na
+  // cesta vai a miniatura gerada pela API (≈4 KB e com cache); `inteira` pede
+  // a foto original (página do produto). A ampliação usa data-grande.
+  function prodImg(p, w, inteira) {
+    if (p.imagem) {
+      var src = inteira ? p.imagem : (p.miniatura || p.imagem);
+      return '<img src="' + esc(src) + '" data-grande="' + esc(p.imagem) + '" alt="' + esc(p.nome) +
+        '" loading="lazy" decoding="async">';
+    }
     var key = { tecnicos: 'escape', vestuario: 'oculos', balance: 'bike', kits: 'kit', retail: 'loja', marketing: 'sacola', ferramentas: 'ferramenta' }[p.cat];
     if (p.cat === 'pecas') return FG.bikeSVG('frame', w || 120, { cls: 'lite' });
     return catIcon(key || 'engrenagem', w || 95);
@@ -120,7 +126,7 @@
     back.className = 'modal-back';
     back.innerHTML = '<div class="modal modal-img"><header><h3>' + esc(img.alt || 'Foto do produto') + '</h3>' +
       '<button class="x">×</button></header><div class="modal-body">' +
-      '<img src="' + esc(img.src) + '" alt="' + esc(img.alt || '') + '"></div></div>';
+      '<img src="' + esc(img.getAttribute('data-grande') || img.src) + '" alt="' + esc(img.alt || '') + '"></div></div>';
     document.body.appendChild(back);
     back.querySelector('.x').addEventListener('click', function () { back.remove(); });
     // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
@@ -319,7 +325,7 @@
 
     view.innerHTML =
       '<div class="prod-page">' +
-      '<div class="big-img">' + prodImg(p, 240) + '</div>' +
+      '<div class="big-img">' + prodImg(p, 240, true) + '</div>' +
       '<div><div class="prod-name">' + esc(p.nome) + '</div>' +
       '<p class="muted">Article No. ' + esc(p.artigo) + '</p>' +
       '<div class="prod-desc prod-desc-full">' + esc(p.descricao) + '</div>' +
