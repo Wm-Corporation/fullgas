@@ -24,6 +24,15 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { query } from './db.js';
 
+// Só JPEG, PNG e WebP são decodificados — é o que o Tiny e o upload do admin
+// entregam. Os demais leitores do libvips (GIF, TIFF, HEIF, SVG, PDF...) ficam
+// desligados: é neles que costumam aparecer as falhas de segurança (ex.:
+// GHSA-f88m-g3jw-g9cj, corrigida no sharp 0.35), e um formato que não é lido
+// não pode ser explorado. Vale para o processo inteiro; hoje só este módulo
+// usa o sharp.
+sharp.block({ operation: ['VipsForeignLoad'] });
+sharp.unblock({ operation: ['VipsForeignLoadJpeg', 'VipsForeignLoadPng', 'VipsForeignLoadWebp'] });
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS = path.join(__dirname, '..', 'uploads');
 // FULLGAS_MINIATURAS_DIR existe para os testes: a limpeza de órfãs apaga
