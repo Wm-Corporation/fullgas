@@ -62,6 +62,22 @@ describe('gerarMiniatura', () => {
     expect(fs.statSync(arquivoDaMini(url)).size).toBeLessThan(20000);
   });
 
+  it.each(['gif', 'tiff'])('recusa decodificar %s (só JPEG, PNG e WebP)', async (formato) => {
+    const nome = 'teste-mini-fmt.' + formato;
+    const buf = await sharp({ create: { width: 50, height: 50, channels: 3, background: '#000' } })[formato]().toBuffer();
+    fs.writeFileSync(path.join(PRODUTOS, nome), buf);
+    criados.push(path.join(PRODUTOS, nome));
+    await expect(mini.gerarMiniatura('/uploads/produtos/' + nome)).rejects.toThrow(/unsupported image format/);
+  });
+
+  it.each(['jpeg', 'webp'])('aceita %s', async (formato) => {
+    const nome = 'teste-mini-ok.' + formato;
+    const buf = await sharp({ create: { width: 500, height: 400, channels: 3, background: '#e5b100' } })[formato]().toBuffer();
+    fs.writeFileSync(path.join(PRODUTOS, nome), buf);
+    criados.push(path.join(PRODUTOS, nome));
+    await expect(mini.gerarMiniatura('/uploads/produtos/' + nome)).resolves.toMatch(/\.webp$/);
+  });
+
   it.each([
     'http://anexos.tiny.com.br/erp/x.jpg',          // sem https
     'https://127.0.0.1/segredo.png',                 // rede interna
