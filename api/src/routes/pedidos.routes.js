@@ -16,6 +16,8 @@ import {
 const router = Router();
 
 // Status válidos (espelham o CHECK constraint da tabela Pedido).
+// 'Parcial' NÃO entra aqui de propósito: ele é consequência do envio (ver
+// statusPorEnvio), não uma escolha do admin no seletor de status.
 const STATUS_VALIDOS = ['Pendente', 'Em separação', 'Enviado', 'Entregue', 'Cancelado'];
 // Status terminais: uma vez aqui, o pedido não muda mais.
 const STATUS_FINAIS = ['Entregue', 'Cancelado'];
@@ -36,6 +38,9 @@ function montarItem(r) {
     preco: Number(r.PrecoUnitario),
     qtd: r.Quantidade,
     qtdEnviada: r.QuantidadeEnviada,
+    // Quanto deste item já foi ao Tiny. A diferença para qtdEnviada é o que
+    // entra na próxima remessa — é o que acende o "Confirmar envio" no painel.
+    qtdExportada: r.QuantidadeExportada,
     backorder: !!r.EmBackorder,
     // Nº da reivindicação de varejo aprovada que atingiu este item (ou null).
     garantiaNumero: r.GarantiaNumero || null
@@ -108,7 +113,8 @@ const SELECT_PEDIDO =
 
 const SELECT_ITENS =
   `SELECT pi.PedidoId, pi.PedidoItemId, pi.Sku, pi.NomeProduto, pi.PrecoUnitario,
-          pi.Quantidade, pi.QuantidadeEnviada, pi.EmBackorder, pi.GarantiaNumero`;
+          pi.Quantidade, pi.QuantidadeEnviada, pi.QuantidadeExportada,
+          pi.EmBackorder, pi.GarantiaNumero`;
 
 // Gera a Fatura "original" do pedido: valor cheio (total do pedido, todas as
 // peças, inclusive as em pré-venda) + vínculo PedidoFatura. É o ÚNICO documento
@@ -131,21 +137,67 @@ async function gerarFaturaPedido(tx, pedidoId, empresaId, total) {
    projeto): o envio só atualiza itens e status. As tabelas Entrega/Rastreio
    continuam no banco por causa dos pedidos antigos, mas nada novo é gerado. */
 
-// Agenda a exportação 'normal' do pedido de venda ao Tiny, na MESMA transação —
-// mas SÓ na APROVAÇÃO do admin (quando o pedido sai de 'Pendente'), não no
-// checkout. Idempotente: não duplica se já houver uma exportação 'normal', e
-// nada faz se o pedido só tem itens em pré-venda (esses saem por escopo
-// 'backorder' quando liberados). Devolve true se agendou (o chamador dispara
-// processarExportacoes após o commit).
-async function agendarExportacaoNaAprovacao(tx, pedidoId) {
-  const ja = await new sql.Request(tx).input('pid', sql.Int, pedidoId)
-    .query("SELECT 1 FROM dbo.TinyPedidoExport WHERE PedidoId = @pid AND Escopo = 'normal'");
-  if (ja.recordset.length) return false;
-  const temItens = await new sql.Request(tx).input('pid', sql.Int, pedidoId)
-    .query('SELECT TOP 1 1 FROM dbo.PedidoItem WHERE PedidoId = @pid AND EmBackorder = 0');
-  if (!temItens.recordset.length) return false;
-  await inserirExportacao(tx, pedidoId, 'normal');
-  return true;
+/* Fecha a REMESSA do pedido: o que foi marcado como enviado e ainda não foi
+   ao Tiny (QuantidadeEnviada - QuantidadeExportada) vira UM pedido no Tiny.
+   É o gatilho da exportação desde 17/09/2026 — antes o pedido ia inteiro na
+   aprovação, mesmo sem nada ter saído da prateleira.
+
+   Só peças em estoque (EmBackorder = 0): a pré-venda tem fluxo próprio
+   (escopo 'backorder', sufixo -PV) e já marca o que exportou.
+
+   Roda na MESMA transação do envio: ou a remessa é registrada com o que saiu,
+   ou nada muda. Devolve os itens da remessa (vazio = não havia o que exportar;
+   o chamador dispara processarExportacoes após o commit). */
+async function confirmarRemessa(tx, pedidoId) {
+  const pend = await new sql.Request(tx).input('pid', sql.Int, pedidoId)
+    .query(`SELECT PedidoItemId, Sku, NomeProduto, PrecoUnitario,
+                   QuantidadeEnviada - QuantidadeExportada AS Qtd
+              FROM dbo.PedidoItem
+             WHERE PedidoId = @pid AND EmBackorder = 0
+               AND QuantidadeEnviada > QuantidadeExportada`);
+  const itens = pend.recordset.map(r => ({
+    sku: r.Sku, nome: r.NomeProduto, preco: Number(r.PrecoUnitario), qtd: r.Qtd
+  }));
+  if (!itens.length) return [];
+
+  // Marca o que está indo, mesmo com a exportação desligada: assim, ligando o
+  // Tiny depois, remessas antigas não são reenviadas.
+  await new sql.Request(tx).input('pid', sql.Int, pedidoId)
+    .query(`UPDATE dbo.PedidoItem SET QuantidadeExportada = QuantidadeEnviada
+             WHERE PedidoId = @pid AND EmBackorder = 0
+               AND QuantidadeEnviada > QuantidadeExportada`);
+  if (exportacaoLigada()) await inserirExportacao(tx, pedidoId, 'remessa', itens);
+  return itens;
+}
+
+/* Pré-venda liberada vai ao Tiny pelo escopo 'backorder' (sufixo -PV), fora da
+   remessa. Marcar o item como exportado impede que a remessa mande a mesma
+   peça de novo. */
+async function marcarExportados(tx, pedidoItemIds) {
+  for (const id of pedidoItemIds) {
+    await new sql.Request(tx).input('iid', sql.Int, id)
+      .query('UPDATE dbo.PedidoItem SET QuantidadeExportada = QuantidadeEnviada WHERE PedidoItemId = @iid');
+  }
+}
+
+/* Status do pedido a partir do que já saiu (só peças em estoque; a pré-venda
+   anda no rastreador à parte):
+     nada enviado  -> mantém o status atual (Pendente / Em separação)
+     parte enviada -> 'Parcial'  (a fatura segue em aberto)
+     tudo enviado  -> 'Enviado'
+   Pedido só de pré-venda nunca chega a 'Enviado' por aqui. */
+async function statusPorEnvio(tx, pedidoId, statusAtual) {
+  const c = await new sql.Request(tx).input('pid', sql.Int, pedidoId)
+    .query(`SELECT
+              SUM(CASE WHEN EmBackorder = 0 THEN 1 ELSE 0 END) AS totNormais,
+              SUM(CASE WHEN EmBackorder = 0 AND Quantidade > QuantidadeEnviada THEN 1 ELSE 0 END) AS pendNormais,
+              SUM(CASE WHEN QuantidadeEnviada > 0 THEN 1 ELSE 0 END) AS comEnvio,
+              SUM(CASE WHEN Quantidade > QuantidadeEnviada THEN 1 ELSE 0 END) AS pendTotal
+            FROM dbo.PedidoItem WHERE PedidoId = @pid`);
+  const { totNormais, pendNormais, comEnvio, pendTotal } = c.recordset[0];
+  if (!comEnvio) return statusAtual;
+  const faltam = totNormais > 0 ? pendNormais > 0 : pendTotal > 0;
+  return faltam ? 'Parcial' : 'Enviado';
 }
 
 // GET /api/pedidos — cliente vê os da sua empresa; admin vê todos.
@@ -437,10 +489,6 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       await tx.rollback();
       return res.status(409).json({ erro: `Pedido ${ped.Status.toLowerCase()} não pode mudar de status.` });
     }
-    // Sair de 'Pendente' (para qualquer estado que não seja 'Cancelado') é a
-    // APROVAÇÃO do admin — o gatilho que exporta o pedido de venda ao Tiny.
-    const eraPendente = ped.Status === 'Pendente';
-
     // ---- Cancelamento ----
     if (status === 'Cancelado') {
       await new sql.Request(tx)
@@ -497,7 +545,8 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
                    AND pi.EmBackorder = @alvo`);
 
       let enviados = 0;
-      const liberados = []; // snapshot da pré-venda liberada agora (p/ Tiny)
+      const liberados = [];    // snapshot da pré-venda liberada agora (p/ Tiny)
+      const idsLiberados = []; // itens de pré-venda que de fato saíram
       for (const it of cand.recordset) {
         const restante = it.Quantidade - it.QuantidadeEnviada;
         if (it.EmBackorder) {
@@ -509,6 +558,7 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
                      WHERE ProdutoId = @prod AND Estoque >= @rem`);
           if (!dec.rowsAffected[0]) continue; // sem estoque: fica pendente
           liberados.push({ sku: it.Sku, nome: it.NomeProduto, preco: Number(it.PrecoUnitario), qtd: restante });
+          idsLiberados.push(it.PedidoItemId);
         }
         await new sql.Request(tx)
           .input('iid', sql.Int, it.PedidoItemId)
@@ -552,7 +602,9 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       // marca o pedido como 'Enviado' — a peça só foi liberada para SEPARAÇÃO;
       // o envio de verdade é o admin quem confirma depois, mudando o status.
       const faltam = totNormais > 0 ? pendNormais > 0 : pendTotal > 0;
-      const novoStatus = (alvoBackorder || faltam) ? 'Em separação' : 'Enviado';
+      const novoStatus = alvoBackorder
+        ? 'Em separação'
+        : await statusPorEnvio(tx, ped.PedidoId, ped.Status);
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .input('st', sql.NVarChar(14), novoStatus)  // NVarChar: preserva "Em separação" (o server converte p/ o varchar Latin1)
@@ -560,17 +612,16 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
 
       // Pré-venda liberada agora vira um pedido próprio no Tiny (baixa o
       // estoque lá): snapshot do que saiu NESTA liberação, na mesma transação.
-      if (exportacaoLigada() && liberados.length) {
-        await inserirExportacao(tx, ped.PedidoId, 'backorder', liberados);
+      if (liberados.length) {
+        await marcarExportados(tx, idsLiberados);
+        if (exportacaoLigada()) await inserirExportacao(tx, ped.PedidoId, 'backorder', liberados);
       }
-      // Enviar direto um pedido ainda 'Pendente' também é aprovação: exporta o
-      // pedido de venda (itens em estoque) ao Tiny agora.
-      const exportouNormal = eraPendente && exportacaoLigada()
-        ? await agendarExportacaoNaAprovacao(tx, ped.PedidoId) : false;
+      // As peças em estoque que acabaram de sair viram a remessa deste envio.
+      const remessa = alvoBackorder ? [] : await confirmarRemessa(tx, ped.PedidoId);
 
       await tx.commit();
-      if (liberados.length || exportouNormal) processarExportacoes(); // fire-and-forget
-      return res.json({ ok: true, status: novoStatus, parcial: faltam });
+      if (liberados.length || remessa.length) processarExportacoes(); // fire-and-forget
+      return res.json({ ok: true, status: novoStatus, parcial: faltam, remessa: remessa.length });
     }
 
     // ---- Mudança simples de status (Pendente/Em separação/Entregue) ----
@@ -579,14 +630,58 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       .input('st', sql.NVarChar(14), status)  // NVarChar: preserva "Em separação"
       .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE NumeroPedido = @num');
 
-    // Aprovação do admin: ao tirar o pedido de 'Pendente', exporta o pedido de
-    // venda ao Tiny (uma vez só). Até aqui o pedido só segurava estoque local.
-    const exportouNormal = eraPendente && exportacaoLigada()
-      ? await agendarExportacaoNaAprovacao(tx, ped.PedidoId) : false;
+    // Aprovar (sair de 'Pendente') NÃO exporta nada: o pedido só vai ao Tiny
+    // quando peças de verdade saem — ver confirmarRemessa.
+    await tx.commit();
+    res.json({ ok: true, status });
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* já desfeita */ }
+    next(e);
+  }
+});
+
+// POST /api/pedidos/:numero/remessa (admin) — fecha a remessa: o que está
+// marcado como enviado e ainda não foi ao Tiny vira UM pedido lá.
+//
+// É o "Confirmar envio" do painel: o admin ajusta a quantidade enviada de cada
+// peça à vontade (PUT .../enviado, que não exporta nada) e, quando estiver
+// certo, fecha a remessa. Envio parcial deixa o pedido em 'Parcial' e a fatura
+// segue em aberto; quando o restante sai, nova remessa e o pedido vai a
+// 'Enviado'.
+router.post('/pedidos/:numero/remessa', requireAuth, requireAdmin, async (req, res, next) => {
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    await tx.begin();
+    const cur = await new sql.Request(tx)
+      .input('num', sql.VarChar(20), req.params.numero)
+      .query('SELECT PedidoId, Status FROM dbo.Pedido WHERE NumeroPedido = @num');
+    if (!cur.recordset.length) {
+      await tx.rollback();
+      return res.status(404).json({ erro: 'Pedido não encontrado.' });
+    }
+    const ped = cur.recordset[0];
+    if (STATUS_FINAIS.includes(ped.Status)) {
+      await tx.rollback();
+      return res.status(409).json({ erro: `Pedido ${ped.Status.toLowerCase()} não aceita novas remessas.` });
+    }
+
+    const itens = await confirmarRemessa(tx, ped.PedidoId);
+    if (!itens.length) {
+      await tx.rollback();
+      return res.status(409).json({
+        erro: 'Nada novo para enviar: informe a quantidade enviada das peças desta remessa.'
+      });
+    }
+    const novoStatus = await statusPorEnvio(tx, ped.PedidoId, ped.Status);
+    await new sql.Request(tx)
+      .input('pid', sql.Int, ped.PedidoId)
+      .input('st', sql.NVarChar(14), novoStatus)
+      .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid');
 
     await tx.commit();
-    if (exportouNormal) processarExportacoes(); // fire-and-forget
-    res.json({ ok: true, status });
+    processarExportacoes();   // fire-and-forget
+    res.json({ ok: true, status: novoStatus, itens, parcial: novoStatus === 'Parcial' });
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }
     next(e);
@@ -653,9 +748,12 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
     // Aumento em item de pré-venda consumiu estoque local: espelha no Tiny
     // como liberação (pedido próprio lá). Redução não é desfeita no Tiny —
     // ajuste manualmente por lá se a liberação já tiver sido exportada.
-    if (exportacaoLigada() && it.EmBackorder && delta > 0) {
-      await inserirExportacao(tx, it.PedidoId, 'backorder',
-        [{ sku: it.Sku, nome: it.NomeProduto, preco: Number(it.PrecoUnitario), qtd: delta }]);
+    if (it.EmBackorder && delta > 0) {
+      await marcarExportados(tx, [it.PedidoItemId]);
+      if (exportacaoLigada()) {
+        await inserirExportacao(tx, it.PedidoId, 'backorder',
+          [{ sku: it.Sku, nome: it.NomeProduto, preco: Number(it.PrecoUnitario), qtd: delta }]);
+      }
     } else if (it.EmBackorder && delta < 0) {
       console.warn(`⚠ Quantidade enviada reduzida no item ${it.Sku} (pedido ${req.params.numero}): ` +
         'se a liberação já foi exportada ao Tiny, ajuste o pedido lá manualmente.');
