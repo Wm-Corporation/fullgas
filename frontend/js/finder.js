@@ -55,6 +55,17 @@
     return function (e) { FG.toast((e && e.message) || msg || 'Falha ao carregar.', 'erro'); };
   }
 
+  /* Modelo e seção desenham quando a resposta chega. Clicando rápido em NEXT
+     CATEGORY (ou nas setas), as respostas podem voltar fora de ordem: a tela
+     mostrava a seção 2 com o endereço já na 3, e o próximo clique apontava
+     para a própria 3 — nada acontecia, como se a página tivesse travado. Cada
+     troca de tela ganha um número; resposta de tela antiga é descartada. */
+  var telaSeq = 0;
+  function telaVigente() {
+    var minha = telaSeq;
+    return function () { return minha === telaSeq; };
+  }
+
   /* ---------- painel de busca: expandir/recolher e reset ---------- */
   var spBody = document.getElementById('sp-body');
   var spToggle = document.getElementById('sp-toggle');
@@ -235,7 +246,9 @@
      ========================================================= */
   function renderModelo(codigo, lado) {
     fdView.innerHTML = '<p class="muted">Carregando…</p>';
+    var vigente = telaVigente();
     FG.finderModelo(codigo).then(function (m) {
+      if (!vigente()) return;
       atual.modelo = m.id; atual.lado = lado;
       logUsage(m);
       sincronizarCascade(m);
@@ -288,6 +301,7 @@
         else FG.toast('Nenhuma documentação técnica cadastrada para este modelo.');
       });
     }, function () {
+      if (!vigente()) return;
       fdView.innerHTML = '<p class="muted">Modelo não encontrado.</p>';
     });
   }
@@ -297,7 +311,9 @@
      ========================================================= */
   function renderSecao(secaoId) {
     fdView.innerHTML = '<p class="muted">Carregando…</p>';
+    var vigente = telaVigente();
     FG.finderSecao(secaoId).then(function (s) {
+      if (!vigente()) return;
       atual.modelo = s.modelo.id; atual.lado = s.lado;
       recolherBusca();
       sincronizarCascade(modeloPorCodigo(s.modelo.id));
@@ -724,6 +740,7 @@
         });
       });
     }, function () {
+      if (!vigente()) return;
       fdView.innerHTML = '<p class="muted">Seção não encontrada.</p>';
     });
   }
@@ -732,6 +749,7 @@
      ROUTER
      ========================================================= */
   function route() {
+    telaSeq++;   // respostas pendentes da tela anterior não desenham mais
     var h = (location.hash || '').slice(1);
     if (h[0] === '/') h = h.slice(1);
     var p = h.split('/');

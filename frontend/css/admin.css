@@ -12,10 +12,21 @@
   --adm-ink: #303030;
 }
 
-body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; min-height: 100vh; }
+/* Alturas de tela divididas pelo zoom do body (--zoom-ui, em styles.css): lá
+   dentro, 100vh mede 115% da janela. Com o 100vh cru, a barra lateral ficava
+   mais alta que a tela e, por ser sticky, os últimos itens (Reivindicações,
+   Suporte, Notificações, Portal) nunca apareciam num notebook. */
+body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; min-height: calc(100vh / var(--zoom-ui)); }
 
 /* ---------- sidebar ---------- */
-.adm-side { width: 92px; background: var(--adm-side); flex-shrink: 0; display: flex; flex-direction: column; align-items: stretch; position: sticky; top: 0; height: 100vh; }
+/* overflow-y: se a janela for baixa demais para todos os itens, a barra rola
+   por conta própria em vez de esconder o fim da lista. */
+.adm-side {
+  width: 92px; background: var(--adm-side); flex-shrink: 0; display: flex; flex-direction: column; align-items: stretch;
+  position: sticky; top: 0; height: calc(100vh / var(--zoom-ui));
+  overflow-y: auto; scrollbar-width: thin; scrollbar-color: #6b6560 transparent;
+}
+.adm-side > * { flex-shrink: 0; }
 .adm-side .logo-cell { padding: 16px 0 12px; display: flex; justify-content: center; }
 .adm-side .logo-cell .g-badge { width: 34px; height: 34px; border: 3px solid var(--adm-orange); color: var(--adm-orange); border-radius: 8px; font-weight: 900; font-style: italic; display: flex; align-items: center; justify-content: center; font-size: 19px; }
 .adm-side a.item {
@@ -193,11 +204,8 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 
 select.inline-status { border: 1px solid #ccc; padding: 5px 8px; font-size: 12px; background: #fff; }
 
-/* modal reaproveita styles.css (.modal-back/.modal) — versão laranja */
-/* Centraliza o modal na vertical (o padrão do styles.css cola no topo com
-   `align-items: flex-start`, o que deixava o pop-up abaixo do centro da tela).
-   Como o .modal tem max-height: 85vh, centralizado ainda cabe na viewport. */
-body.admin .modal-back { align-items: center; }
+/* modal reaproveita styles.css (.modal-back/.modal, já centralizado e sempre
+   dentro da tela) — versão laranja */
 body.admin .modal { border-top-color: var(--adm-orange); }
 body.admin .field input:focus, body.admin .field select:focus, body.admin .field textarea:focus { outline-color: var(--adm-orange); }
 

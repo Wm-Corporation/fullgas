@@ -50,6 +50,20 @@
       a.classList.toggle('on', a.getAttribute('data-rota') === rota);
     });
   }
+
+  /* Telas que buscam dados na hora (Parts Finder, Suporte, Tiny) desenham
+     quando a resposta chega. Se o admin já trocou de seção nesse meio-tempo,
+     a resposta atrasada NÃO pode desenhar por cima: a fila de suporte, por
+     exemplo, tomava a tela de Clientes e ainda acendia "Suporte" na barra,
+     com o endereço em #clientes — clicar em Clientes de novo não fazia nada
+     e a página parecia travada até recarregar. Cada troca de tela ganha um
+     número; quem busca guarda o seu e confere na volta. */
+  var telaSeq = 0;
+  function telaVigente() {
+    var minha = telaSeq;
+    return function () { return minha === telaSeq; };
+  }
+
   // Além da classe com o texto cru (compatível com os estilos antigos), adiciona
   // uma classe slug ASCII (ps-<slug>) para status com espaço/acento — ex.:
   // "Em separação" → "ps-Em-separacao" — que o CSS consegue mirar.
@@ -1719,7 +1733,9 @@
   function renderFinderModelos() {
     h1.textContent = 'Parts Finder — modelos'; setOn('finder');
     view.innerHTML = '<div class="adm-card"><div class="c-body muted">Carregando…</div></div>';
+    var vigente = telaVigente();
     FG.finderModelos(true).then(function (modelos) {
+      if (!vigente()) return;
       view.innerHTML =
         '<div class="adm-bar"><span class="muted" style="font-size:13px;">Tudo que aparece no finder do cliente é editado aqui: ' +
         'modelos e árvore de seleção, seções (diagramas), peças de cada seção e áreas clicáveis da imagem.</span>' +
@@ -1757,6 +1773,7 @@
         });
       });
     }, function (e) {
+      if (!vigente()) return;
       view.innerHTML = '<div class="adm-card"><div class="c-body">Erro ao carregar: ' + esc(e.message || '') + '</div></div>';
     });
   }
@@ -1914,7 +1931,9 @@
   function renderFinderModelo(codigo, ladoAtivo) {
     setOn('finder');
     view.innerHTML = '<div class="adm-card"><div class="c-body muted">Carregando…</div></div>';
+    var vigente = telaVigente();
     FG.finderModelo(codigo).then(function (m) {
+      if (!vigente()) return;
       h1.textContent = 'Parts Finder — ' + m.label;
       var lado = ladoAtivo === 'engine' ? 'engine' : 'chassi';
       var secoes = m[lado] || [];
@@ -1980,6 +1999,7 @@
         });
       });
     }, function () {
+      if (!vigente()) return;
       view.innerHTML = '<div class="adm-card"><div class="c-body">Modelo não encontrado. <a href="#finder">Voltar</a></div></div>';
     });
   }
@@ -2031,7 +2051,9 @@
   function renderFinderSecao(secaoId) {
     setOn('finder');
     view.innerHTML = '<div class="adm-card"><div class="c-body muted">Carregando…</div></div>';
+    var vigente = telaVigente();
     FG.finderSecao(secaoId).then(function (sec) {
+      if (!vigente()) return;
       h1.textContent = 'Parts Finder — ' + sec.numero + ' ' + sec.nome;
 
       view.innerHTML =
@@ -2330,7 +2352,12 @@
         drag = { i: i, px: e.clientX, py: e.clientY, x0: hs[i].x, y0: hs[i].y, moveu: false, box: box };
         box.setPointerCapture && box.setPointerCapture(e.pointerId);
       });
-      document.addEventListener('pointermove', function (e) {
+      // move/solta ficam no canvas, e não no document: com o setPointerCapture
+      // acima, os eventos do arrasto chegam à caixa e sobem até aqui mesmo com
+      // o ponteiro fora da imagem. No document, cada abertura desta tela
+      // somava mais um par de listeners que nunca saía (e segurava a tela
+      // antiga inteira na memória).
+      canvas.addEventListener('pointermove', function (e) {
         if (!drag) return;
         var k = escala();
         var nx = Math.round(drag.x0 + (e.clientX - drag.px) * k);
@@ -2342,7 +2369,8 @@
         drag.box.style.left = (h.x / natW * 100) + '%';
         drag.box.style.top = (h.y / natH * 100) + '%';
       });
-      document.addEventListener('pointerup', function () { drag = null; });
+      canvas.addEventListener('pointerup', function () { drag = null; });
+      canvas.addEventListener('lostpointercapture', function () { drag = null; });
 
       canvas.addEventListener('click', function (e) {
         if (e.target.closest('.ha-box')) return;   // clique numa caixa não cria outra
@@ -2389,6 +2417,7 @@
         canvas.classList.toggle('ha-nonum', !mostrarNums);
       });
     }, function () {
+      if (!vigente()) return;
       view.innerHTML = '<div class="adm-card"><div class="c-body">Seção não encontrada. <a href="#finder">Voltar</a></div></div>';
     });
   }
@@ -2464,6 +2493,7 @@
           });
 
       fonte.then(function (r) {
+        if (!box.isConnected) return;   // o admin já saiu da tela do Tiny
         var itens = r.produtos.slice(offset, offset + IMP_POR_PAGINA);
         // Total exato quando estamos na última página do Tiny; senão, estimado
         // (páginas anteriores do Tiny vêm sempre cheias).
@@ -2495,6 +2525,7 @@
         document.getElementById('ty-ant').addEventListener('click', function () { carregarImportacao(pagina - 1); });
         document.getElementById('ty-prox').addEventListener('click', function () { carregarImportacao(pagina + 1); });
       }, function (e) {
+        if (!box.isConnected) return;
         box.innerHTML = '<p class="muted">Erro ao consultar o Tiny: ' + esc((e && e.message) || '') + '</p>';
       });
     }
@@ -2653,10 +2684,12 @@
 
     if (!supLista || recarregar) {
       view.innerHTML = '<div class="adm-card"><div class="c-body">Carregando chamados…</div></div>';
+      var vigente = telaVigente();
       FG.suporteChamados().then(function (l) {
-        supLista = l;
-        renderSuporte();
+        supLista = l;                   // a lista fresca serve mesmo se o admin já saiu
+        if (vigente()) renderSuporte();
       }, function () {
+        if (!vigente()) return;
         view.innerHTML = '<div class="adm-card"><div class="c-body">' +
           'Não foi possível carregar os chamados agora. Tente de novo em instantes.</div></div>';
       });
@@ -2716,7 +2749,10 @@
     h1.textContent = 'Suporte Técnico'; setOn('suporte');
     view.innerHTML = '<div class="adm-card"><div class="c-body">Carregando chamado…</div></div>';
 
+    var vigente = telaVigente();
     FG.suporteChamado(id).then(function (c) {
+      // Saiu antes de abrir: não desenha e não se registra como chamado aberto.
+      if (!vigente()) return;
       if (!c) {
         view.innerHTML = '<div class="adm-card"><div class="c-body">Chamado não encontrado. ' +
           '<a href="#suporte">Voltar à fila</a>.</div></div>';
@@ -2802,6 +2838,7 @@
         });
       });
     }, function () {
+      if (!vigente()) return;
       view.innerHTML = '<div class="adm-card"><div class="c-body">' +
         'Não foi possível carregar o chamado agora. <a href="#suporte">Voltar à fila</a>.</div></div>';
     });
@@ -2840,6 +2877,7 @@
     // Sair de um chamado apaga o alvo do batimento; quem continuar num chamado
     // o preenche de novo ao terminar de desenhar.
     supAberto = null;
+    telaSeq++;   // respostas pendentes da tela anterior não desenham mais
 
     switch (seg[0]) {
       case 'dashboard': renderDash(); break;
