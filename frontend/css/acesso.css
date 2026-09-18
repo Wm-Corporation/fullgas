@@ -40,13 +40,17 @@ body.auth {
   /* Paleta só desta tela. O amarelo continua sendo o da marca (--red). */
   --ac-preto: #07070a;
   --ac-texto: #ededf0;
-  --ac-suave: #9b9aa4;
+  --ac-suave: #adacb6;   /* mais claro que o cinza original: legível sem gritar */
   --ac-linha: rgba(255, 255, 255, .09);
   --ac-ouro: var(--red);
   background: var(--ac-preto);
   color: var(--ac-texto);
   font-family: 'Jost', var(--font);
-  font-weight: 300;
+  /* 400 (Regular), não 300 (Light): o peso fino da Jost, em texto claro sobre
+     fundo escuro, perde definição no anti-aliasing e passa a impressão de
+     "apagado" — foi o que o usuário reportou. 400 mantém a fonte leve e
+     geométrica, mas com o traço definido. */
+  font-weight: 400;
   letter-spacing: .01em;
 }
 
@@ -182,8 +186,9 @@ body.auth .auth-painel { padding: 34px 34px 30px; }
 body.auth .auth-sobre {
   margin: 0;
   color: var(--ac-suave);
-  font-size: 10.5px;
-  letter-spacing: .3em;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .26em;
   text-transform: uppercase;
 }
 
@@ -200,9 +205,9 @@ body.auth .auth-tabs button {
   border-top: none;
   color: var(--ac-suave);
   font-family: inherit;
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: .18em;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .16em;
   text-transform: uppercase;
   padding: 13px 8px;
   transition: color .25s ease;
@@ -223,8 +228,9 @@ body.auth .auth-tabs button.on::after { transform: scaleX(1); }
 body.auth .auth-body { padding: 24px 0 0; }
 body.auth .field label {
   color: var(--ac-suave);
-  font-size: 10.5px;
-  letter-spacing: .16em;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: .14em;
   text-transform: uppercase;
   margin-bottom: 7px;
 }
@@ -234,7 +240,8 @@ body.auth .field input {
   border-radius: 10px;
   color: var(--ac-texto);
   font-family: inherit;
-  font-size: 14px;
+  font-size: 15.5px;
+  font-weight: 400;
   padding: 11px 13px;
   transition: border-color .2s ease, box-shadow .25s ease, background-color .2s ease;
 }
@@ -260,8 +267,9 @@ body.auth .field input:-webkit-autofill:focus {
 body.auth .field-row { align-items: flex-end; }
 body.auth .field-title {
   color: var(--ac-ouro);
+  font-weight: 500;
   border-bottom: 1px solid var(--ac-linha);
-  letter-spacing: .14em;
+  letter-spacing: .12em;
 }
 body.auth .muted { color: var(--ac-suave); }
 
@@ -274,9 +282,9 @@ body.auth .btn.red {
   border-radius: 12px;
   color: #17140a;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
-  letter-spacing: .14em;
+  letter-spacing: .12em;
   text-transform: uppercase;
   padding: 13px 20px;
   box-shadow: 0 10px 26px rgba(229, 177, 0, .18);
@@ -307,7 +315,8 @@ body.auth .btn.red:hover::after { animation: ac-brilho .9s ease; }
 body.auth .auth-msg {
   border-radius: 10px;
   border-left: 3px solid transparent;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 400;
   padding: 11px 13px;
   animation: ac-aviso .4s ease both;
 }
