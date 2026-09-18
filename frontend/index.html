@@ -7,18 +7,27 @@
   <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
   <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
   <link rel="stylesheet" href="css/styles.css?v=20260916b">
+  <link rel="stylesheet" href="css/acesso.css?v=20260918b">
 </head>
-<body data-cache="">
+<body class="auth" data-cache="">
   <div class="auth-wrap">
+    <div class="auth-glow" aria-hidden="true"></div>
     <div class="auth-card">
-      <div class="head">
-        <span class="brand big"><span class="g-badge" id="logo-f">F</span> FULLGAS</span>
-        <div class="sub">Portal B2B do concessionário</div>
+      <!-- LADO ESQUERDO — só a marca, sem texto nenhum escrito à mão.
+           O clique no logo é o EASTER EGG (#logo-f em js/auth.js): continua
+           sem pista visual, como antes, quando ele morava no "F". -->
+      <aside class="auth-marca">
+        <img id="logo-f" class="auth-logo" src="img/logo-fullgas-marca.png?v=20260918a"
+             alt="Fullgas" draggable="false">
+      </aside>
+
+      <!-- LADO DIREITO — o acesso -->
+      <section class="auth-painel">
+        <p class="auth-sobre">Portal B2B do concessionário</p>
         <div class="auth-tabs">
           <button id="tab-login" class="on" type="button">Entrar</button>
           <button id="tab-cad" type="button">Cadastrar</button>
         </div>
-      </div>
 
       <div class="auth-body">
         <p id="auth-msg" class="auth-msg"></p>
@@ -151,6 +160,7 @@
           <p class="muted" style="font-size:12px;margin-top:10px;">Novos cadastros entram como <b>cliente</b> e precisam ser aprovados por um administrador antes do primeiro acesso.</p>
         </div>
       </div>
+      </section>
     </div>
 
     <!-- Aqui existia um quadro "Acessos de demonstração" com e-mail e senha das
@@ -160,7 +170,7 @@
          database/fullgas_seeds.sql, que não é aplicado em produção. -->
   </div>
 
-  <!-- EASTER EGG — clicar no "F" do logo abre este vídeo. Sem pista visual
+  <!-- EASTER EGG — clicar no logo abre este vídeo. Sem pista visual
        nenhuma de propósito (nada de cursor:pointer, nada de título "clique
        aqui"): é para ser achado, não anunciado. Ver #logo-f em js/auth.js. -->
   <div id="egg-back" class="egg-back hidden">
@@ -175,6 +185,6 @@
   <script src="js/config.js?v=20260727a"></script>
   <script src="js/store.js?v=20260916a"></script>
   <script src="js/api-adapter.js?v=20260917b"></script>
-  <script src="js/auth.js?v=20260915a"></script>
+  <script src="js/auth.js?v=20260917a"></script>
 </body>
 </html>

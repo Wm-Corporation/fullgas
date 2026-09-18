@@ -109,6 +109,7 @@
       captchaId = turnstile.render('#captcha-widget', {
         sitekey: siteKey,
         language: 'pt-br',
+        theme: 'dark',   // a tela de acesso é preta (css/acesso.css)
         // Expirou sozinho na tela parada: renova em silêncio, para o usuário
         // não descobrir só ao clicar em Entrar.
         'expired-callback': function () { turnstile.reset(captchaId); }
@@ -118,6 +119,7 @@
       captchaIdCad = turnstile.render('#captcha-widget-cad', {
         sitekey: siteKey,
         language: 'pt-br',
+        theme: 'dark',
         'expired-callback': function () { turnstile.reset(captchaIdCad); }
       });
       blocoCad.classList.remove('hidden');
