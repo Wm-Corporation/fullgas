@@ -52,7 +52,6 @@ body.auth {
 
 body.auth .auth-wrap {
   position: relative;
-  overflow: hidden;
   background: none;
   /* 100vh cru mediria 115% da janela por causa do zoom do body (ver
      --zoom-ui em styles.css) e criaria uma rolagem que não existe. */
@@ -62,17 +61,33 @@ body.auth .auth-wrap {
 
 /* ---------------- fundo ----------------
    Uma única luz dourada passeando devagar e uma vinheta. Nada mais: a tela
-   precisa respirar, quem fala é o logo. */
-body.auth .auth-wrap::before {
+   precisa respirar, quem fala é o logo.
+
+   Vive num DIV PRÓPRIO (.auth-glow, irmão de .auth-card — ver o HTML), não
+   como ::before do .auth-wrap. A luz vaza bastante para fora do seu próprio
+   quadrado (top: -22vh, left: -14vw) e por isso PRECISA de overflow:hidden
+   de verdade para não crescer a página — diferente de clip-path (só recorta
+   o desenho na tela, mas o navegador ainda soma aquele espaço na altura
+   rolável), overflow:hidden também tira esse espaço da conta. Só que
+   overflow:hidden em qualquer ANCESTRAL do logo (.auth-wrap ou .auth-card)
+   anula o position:sticky dele (ver .auth-logo) — daí a luz sair do caminho
+   do logo e virar um irmão isolado, com o próprio overflow:hidden só para
+   si, sem embrulhar o card. */
+body.auth .auth-glow {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;          /* luz é enfeite: não intercepta clique */
+}
+body.auth .auth-glow::before {
   content: '';
   position: absolute;
-  z-index: 0;
   width: 70vw; height: 70vw; max-width: 900px; max-height: 900px;
   top: -22vh; left: -14vw;
   border-radius: 50%;
   background: radial-gradient(circle at 50% 50%, rgba(229, 177, 0, .22), rgba(229, 177, 0, 0) 68%);
   filter: blur(80px);
-  pointer-events: none;          /* luz é enfeite: não intercepta clique */
   /* Camada própria na placa de vídeo: o desfoque é calculado uma vez e só a
      posição muda. */
   will-change: transform;
@@ -88,10 +103,11 @@ body.auth::after {
   position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background: radial-gradient(ellipse at 50% 45%, transparent 45%, rgba(0, 0, 0, .6) 100%);
 }
-body.auth .auth-wrap > * { position: relative; z-index: 1; }
 
 /* ---------------- o quadro (duas colunas) ---------------- */
 body.auth .auth-card {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: 300px 1fr;
   align-items: stretch;
@@ -104,7 +120,10 @@ body.auth .auth-card {
   box-shadow: 0 30px 80px rgba(0, 0, 0, .65), inset 0 1px 0 rgba(255, 255, 255, .06);
   backdrop-filter: blur(22px) saturate(120%);
   -webkit-backdrop-filter: blur(22px) saturate(120%);
-  overflow: hidden;
+  /* Mesmo motivo do .auth-wrap acima: clip-path recorta as bordas
+     arredondadas sem virar um contêiner de rolagem, que anularia o
+     position:sticky do logo (o card é o ancestral mais próximo dele). */
+  clip-path: inset(0 round 20px);
   animation: ac-entrada 1s cubic-bezier(.2, .7, .2, 1) both;
 }
 @keyframes ac-entrada {
@@ -113,10 +132,17 @@ body.auth .auth-card {
 }
 
 /* ---------------- lado esquerdo: a marca ---------------- */
+/* No login o formulário é curto e a coluna da marca acompanha a altura dele
+   (stretch). No cadastro, bem mais alto, o mesmo stretch fazia a logo
+   centralizar na altura do CARD inteiro — que passa da tela — e não na
+   janela: ao abrir a aba, a logo aparecia quase fora da vista, lá embaixo.
+   position: sticky + top: 50% prende a logo no meio da JANELA (não da
+   coluna), mesmo com a coluna esticada; ela só sai do centro perto do fim
+   da rolagem, quando o próprio topo/base da coluna barra o sticky. */
 body.auth .auth-marca {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
   padding: 44px 34px;
   border-right: 1px solid var(--ac-linha);
   background:
@@ -130,10 +156,23 @@ body.auth .auth-logo {
   height: auto;
   /* O brilho acompanha o desenho do logo, não uma caixa atrás dele. */
   filter: drop-shadow(0 0 26px rgba(229, 177, 0, .22));
+  position: sticky;
+  top: 50%;
+  /* A animação de flutuar (translate3d) substitui o transform inteiro a cada
+     quadro — por isso o -50% de centralização entra DENTRO do keyframe, e
+     não aqui fora, senão a animação apagaria a centralização a cada tique. */
   animation: ac-flutua 9s ease-in-out infinite;
   will-change: transform;
 }
 @keyframes ac-flutua {
+  0%, 100% { transform: translateY(-50%) translate3d(0, 0, 0); }
+  50%      { transform: translateY(-50%) translate3d(0, -7px, 0); }
+}
+
+/* Mesma flutuação, sem o deslocamento de centralização do sticky — usada
+   só na faixa estreita (ver o media query lá embaixo), onde o logo volta a
+   ser posicionado normalmente. */
+@keyframes ac-flutua-mobile {
   0%, 100% { transform: translate3d(0, 0, 0); }
   50%      { transform: translate3d(0, -7px, 0); }
 }
@@ -309,13 +348,22 @@ body.auth .field:nth-of-type(n+4) { animation-delay: .18s; }
    formulário ocupa a largura toda. */
 @media (max-width: 720px) {
   body.auth .auth-wrap { padding: 24px 14px; }
-  body.auth .auth-card { grid-template-columns: 1fr; border-radius: 16px; }
+  body.auth .auth-card { grid-template-columns: 1fr; border-radius: 16px; clip-path: inset(0 round 16px); }
   body.auth .auth-marca {
     padding: 26px 24px 22px;
     border-right: none;
     border-bottom: 1px solid var(--ac-linha);
   }
-  body.auth .auth-logo { max-width: 150px; }
+  /* Em tela estreita as duas colunas viram uma: a marca é só um cabeçalho
+     curto acima do formulário, não uma coluna esticada ao lado de um form
+     alto — o problema que o sticky resolve (ver .auth-logo lá em cima)
+     nem existe aqui. Sticky nessa caixa curta empurrava a logo para fora
+     da área visível, cortando a ponta no topo. */
+  body.auth .auth-logo {
+    max-width: 150px;
+    position: static;
+    animation-name: ac-flutua-mobile;
+  }
   body.auth .auth-painel { padding: 24px 20px 26px; }
-  body.auth .auth-wrap::before { filter: blur(52px); }
+  body.auth .auth-glow::before { filter: blur(52px); }
 }
