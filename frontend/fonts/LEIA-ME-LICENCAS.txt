@@ -7,12 +7,6 @@ Jost* (jost-variable.woff2)
   Uso aqui: interface (rotulos, campos, botoes) da tela de acesso.
   Arquivo: subconjunto latino, formato variavel (pesos 300-500).
 
-Playfair Display (playfair-display-600.woff2)
-  Autores: Claus Eggers Sorensen e colaboradores — https://github.com/clauseggers/Playfair-Display
-  Licenca: SIL Open Font License 1.1 (texto completo abaixo)
-  Uso aqui: marca e titulos da tela de acesso.
-  Arquivo: subconjunto latino, peso 600.
-
 Baixadas do Google Fonts em 17/09/2026 e servidas pelo proprio site: a
 Content-Security-Policy usa `font-src 'self'`, entao fonte de outro dominio
 seria bloqueada pelo navegador (ver deploy/nginx/fullgas.conf).
