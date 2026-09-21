@@ -825,7 +825,7 @@
     return apiGet('/empresas').then(function (l) { _empresas = l || []; return _empresas; });
   };
 
-  // Cadastra um chassi novo (SÓ ADMIN): { niv, modeloId, empresaId? } — sem
+  // Cadastra um chassi novo (SÓ ADMIN): { niv, modeloId, ano, empresaId? } — sem
   // empresaId ele nasce na Fábrica. Recarrega o cache de veículos no sucesso.
   FG.criarVeiculo = function (dados) {
     return req('POST', '/veiculos', dados).then(function (r) {

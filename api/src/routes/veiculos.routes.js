@@ -12,13 +12,22 @@ import { FABRICA, sqlEhFabrica, sqlNaFabrica } from '../fabrica.js';
 const router = Router();
 
 // Mapeia uma linha do banco para o formato que o front (store.js) já espera:
-// { niv, modeloId (código do modelo), status, entrada, fabrica, venda?, garantia? }.
+// { niv, modeloId (código do modelo), ano, status, entrada, fabrica, venda?, garantia? }.
+//
+// `entrada` (EntradaEstoque) é o dia em que o chassi entrou NO ESTOQUE ATUAL —
+// a concessionária de hoje, ou a Fábrica. Toda atribuição/transferência a
+// reinicia (21/09/2026): antes ela era gravada uma única vez, no cadastro, e
+// uma moto transferida ontem aparecia no estoque novo "desde" o dia em que a
+// fábrica a cadastrou, meses antes. A entrada no SISTEMA não se perdeu: está
+// em Veiculo.CriadoEm e no evento 'cadastro' do histórico, que é justamente
+// onde se lê a vida inteira do chassi.
 // Cor e nº do motor saíram da tela (16/09/2026); as colunas seguem no banco.
 function toVeiculo(r) {
   const naFabrica = !!r.NaFabrica;
   const v = {
     niv: r.Niv,
     modeloId: r.ModeloCodigo,
+    ano: r.Ano,
     status: r.Status,
     entrada: r.EntradaEstoque,
     // Na Fábrica não há concessionária: empresa/empresaId vêm null mesmo que o
@@ -40,7 +49,7 @@ function toVeiculo(r) {
 }
 
 const SELECT_VEIC =
-  `SELECT v.VeiculoId, v.Niv, v.Status, v.EntradaEstoque, v.VendaData,
+  `SELECT v.VeiculoId, v.Niv, v.Ano, v.Status, v.EntradaEstoque, v.VendaData,
           v.VendaCliente, v.ClienteCpf, v.ClienteEmail, v.ClienteTelefone,
           v.ClienteEndereco, v.GarantiaAtivaEm, v.EmpresaId,
           m.Codigo AS ModeloCodigo, e.RazaoSocial AS EmpresaNome,
@@ -92,7 +101,7 @@ router.get('/empresas', requireAuth, requireAdmin, async (_req, res, next) => {
 });
 
 // POST /api/veiculos (SÓ ADMIN) — cadastra um chassi novo.
-//   { niv, modeloId (código do modelo), empresaId? }
+//   { niv, modeloId (código do modelo), ano, empresaId? }
 // empresaId opcional: já nasce atribuído àquela concessionária; sem ele o
 // chassi nasce na Fábrica (nenhum cliente vê até o admin atribuir).
 router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
@@ -100,10 +109,18 @@ router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
     const niv = String(req.body?.niv || '').trim().toUpperCase();
     const modeloCod = String(req.body?.modeloId || '').trim();
     const empresaId = req.body?.empresaId ? Number(req.body.empresaId) : null;
+    const ano = Number(req.body?.ano);
 
     if (!/^[A-Z0-9]{11,17}$/.test(niv))
       return res.status(400).json({ erro: 'NIV inválido — use 11 a 17 letras/números (sem espaços).' });
     if (!modeloCod) return res.status(400).json({ erro: 'Informe o modelo da moto.' });
+    // O ano é da UNIDADE, não do modelo: o mesmo modelo é montado em anos
+    // diferentes. Teto no ano que vem porque a indústria já vende o
+    // ano-modelo seguinte; o banco só barra a digitação absurda (CK, faixa
+    // larga), o limite de verdade é este, que sabe a data de hoje.
+    const anoMax = new Date().getFullYear() + 1;
+    if (!Number.isInteger(ano) || ano < 1980 || ano > anoMax)
+      return res.status(400).json({ erro: 'Ano inválido — informe um ano entre 1980 e ' + anoMax + '.' });
 
     const mod = (await query(
       'SELECT ModeloId, Nome, Ano, Etiqueta FROM dbo.ModeloMoto WHERE Codigo = @cod', { cod: modeloCod }))[0];
@@ -122,9 +139,9 @@ router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
     if (jaExiste) return res.status(409).json({ erro: 'Já existe um chassi cadastrado com este NIV.' });
 
     await query(
-      `INSERT INTO dbo.Veiculo (Niv, ModeloId, Status, EntradaEstoque, EmpresaId)
-       VALUES (@niv, @mid, 'Disponível', SYSUTCDATETIME(), @eid)`,
-      { niv, mid: mod.ModeloId, eid: empresaId }
+      `INSERT INTO dbo.Veiculo (Niv, ModeloId, Ano, Status, EntradaEstoque, EmpresaId)
+       VALUES (@niv, @mid, @ano, 'Disponível', SYSUTCDATETIME(), @eid)`,
+      { niv, mid: mod.ModeloId, ano, eid: empresaId }
     );
 
     const rows = await query(SELECT_VEIC + ' WHERE v.Niv = @niv', { niv });
@@ -136,7 +153,7 @@ router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
     // código: o código muda quando o modelo é renomeado.
     await registrarEvento({
       veiculoId: veic.VeiculoId, tipo: 'cadastro', titulo: 'Chassi cadastrado na Fábrica',
-      detalhe: mod.Etiqueta || (mod.Nome + ' ' + mod.Ano),
+      detalhe: (mod.Etiqueta || (mod.Nome + ' ' + mod.Ano)) + ' · Ano ' + ano,
       user: req.user, empresaId: null
     });
     // Nascer atribuído é um segundo fato: separá-lo do cadastro deixa claro,
@@ -160,6 +177,8 @@ router.get('/veiculos', requireAuth, requireAreaAny(['estoque', 'acoes']), async
   try {
     const esc = escopoEmpresa(req.user);
     const rows = await query(
+      // Mais recentes primeiro: quem chegou por último ao estoque de quem está
+      // olhando — não quem foi cadastrado por último lá na Fábrica.
       SELECT_VEIC + (esc.where ? ' WHERE' + esc.where : '') + ' ORDER BY v.EntradaEstoque DESC',
       esc.params
     );
@@ -258,7 +277,8 @@ router.post('/veiculos/:niv/venda', requireAuth, requireArea('acoes'), async (re
 });
 
 // PUT /api/veiculos/:niv/transferir (SÓ ADMIN) — transfere o chassi para
-// outra concessionária. Aceita { empresaId } (vindo do autocomplete do front)
+// outra concessionária. Quem recebe passa a ter o chassi "desde hoje":
+// EntradaEstoque é reiniciada (ver o comentário de toVeiculo). Aceita { empresaId } (vindo do autocomplete do front)
 // ou { empresa } com o NOME (razão social ou fantasia; case-insensitive pela
 // collation). Nome ambíguo ou inexistente devolve erro com sugestões.
 // { fabrica: true } devolve o chassi à Fábrica (tira a concessionária).
@@ -276,7 +296,11 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
     if (paraFabrica) {
       if (veic.NaFabrica) return res.status(409).json({ erro: 'O chassi já está na Fábrica.' });
       await query(
-        'UPDATE dbo.Veiculo SET EmpresaId = NULL, AtualizadoEm = SYSUTCDATETIME() WHERE VeiculoId = @id',
+        `UPDATE dbo.Veiculo
+            SET EmpresaId = NULL,
+                EntradaEstoque = SYSUTCDATETIME(),
+                AtualizadoEm = SYSUTCDATETIME()
+          WHERE VeiculoId = @id`,
         { id: veic.VeiculoId }
       );
       await registrarEvento({
@@ -317,7 +341,11 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
       return res.status(409).json({ erro: 'O veículo já pertence a ' + emp[0].RazaoSocial + '.' });
 
     await query(
-      'UPDATE dbo.Veiculo SET EmpresaId = @eid, AtualizadoEm = SYSUTCDATETIME() WHERE VeiculoId = @id',
+      `UPDATE dbo.Veiculo
+          SET EmpresaId = @eid,
+              EntradaEstoque = SYSUTCDATETIME(),
+              AtualizadoEm = SYSUTCDATETIME()
+        WHERE VeiculoId = @id`,
       { eid: emp[0].EmpresaId, id: veic.VeiculoId }
     );
 
