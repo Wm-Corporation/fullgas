@@ -39,7 +39,7 @@ function app(user = ADMIN) {
 // Linha de veículo como o SELECT_VEIC devolve.
 function linhaVeiculo(extra = {}) {
   return {
-    VeiculoId: 50, Niv: 'VBFGA125XSM160872', Status: 'Disponível',
+    VeiculoId: 50, Niv: 'VBFGA125XSM160872', Ano: 2025, Status: 'Disponível',
     EntradaEstoque: new Date('2026-09-01T12:00:00Z'), VendaData: null,
     GarantiaAtivaEm: null, EmpresaId: null, EmpresaNome: null,
     ModeloCodigo: 'fg125-2025', NaFabrica: true,
@@ -69,6 +69,7 @@ describe('GET /api/veiculos', () => {
     expect(r.body[0]).toMatchObject({ fabrica: true, empresa: null, empresaId: null });
     expect(r.body[0]).not.toHaveProperty('cor');
     expect(r.body[0]).not.toHaveProperty('numeroMotor');
+    expect(r.body[0].ano).toBe(2025);
   });
 
   it('chassi preso à empresa de um admin (dado antigo) também é Fábrica', async () => {
@@ -85,7 +86,7 @@ describe('GET /api/veiculos', () => {
 });
 
 describe('POST /api/veiculos', () => {
-  const corpo = { niv: 'VBFGA125XSM160872', modeloId: 'fg125-2025' };
+  const corpo = { niv: 'VBFGA125XSM160872', modeloId: 'fg125-2025', ano: 2025 };
 
   it('sem concessionária nasce na Fábrica, e cor/motor não são gravados', async () => {
     responder = (s) => {
@@ -101,12 +102,43 @@ describe('POST /api/veiculos', () => {
     const insert = consultas.find(c => /INSERT INTO dbo\.Veiculo /.test(c.sql));
     expect(insert.sql).not.toMatch(/\bCor\b|NumeroMotor/);
     expect(insert.params.eid).toBeNull();
+    expect(insert.params.ano).toBe(2025);            // o ano é da unidade, não do modelo
 
     const ev = eventos();
     expect(ev).toHaveLength(1);                       // sem concessionária, sem atribuição
     expect(ev[0].params.titulo).toBe('Chassi cadastrado na Fábrica');
     expect(ev[0].params.eid).toBeNull();
-    expect(ev[0].params.detalhe).toBe('FG 125 2025');  // nome do modelo, não o código
+    expect(ev[0].params.detalhe).toBe('FG 125 2025 · Ano 2025');  // nome do modelo, não o código
+  });
+
+  // O ano é digitado a cada chassi (migration 042). Sem ele o cadastro para
+  // aqui: gravar um chassi sem ano deixaria a moto sem o dado que vale na nota
+  // e na contagem de garantia.
+  it.each([
+    ['sem ano', {}],
+    ['ano vazio', { ano: '' }],
+    ['ano antigo demais', { ano: 1979 }],
+    ['ano longe demais no futuro', { ano: new Date().getFullYear() + 2 }],
+    ['ano com texto', { ano: 'dois mil' }]
+  ])('recusa o cadastro %s', async (_nome, troca) => {
+    const { ano, ...semAno } = corpo;
+    const r = await request(app()).post('/api/veiculos').send({ ...semAno, ...troca });
+    expect(r.status).toBe(400);
+    expect(r.body.erro).toMatch(/Ano inválido/);
+    expect(consultas.some(c => /INSERT INTO dbo\.Veiculo /.test(c.sql))).toBe(false);
+  });
+
+  it('aceita o ano-modelo seguinte (a indústria já o vende)', async () => {
+    const proximo = new Date().getFullYear() + 1;
+    responder = (s) => {
+      if (/FROM dbo\.ModeloMoto WHERE Codigo/.test(s)) return [{ ModeloId: 3, Nome: 'FG 125', Ano: 2025, Etiqueta: null }];
+      if (/SELECT 1 FROM dbo\.Veiculo WHERE Niv/.test(s)) return [];
+      if (/FROM dbo\.Veiculo v/.test(s)) return [linhaVeiculo({ Ano: proximo })];
+      return [];
+    };
+    const r = await request(app()).post('/api/veiculos').send({ ...corpo, ano: proximo });
+    expect(r.status).toBe(201);
+    expect(r.body.ano).toBe(proximo);
   });
 
   it('recusa a empresa da Fábrica como concessionária', async () => {
@@ -141,7 +173,7 @@ describe('PUT /api/veiculos/:niv/transferir', () => {
   it('devolve à Fábrica: tira a concessionária e registra de onde saiu', async () => {
     let devolvido = false;
     responder = (s) => {
-      if (/UPDATE dbo\.Veiculo SET EmpresaId = NULL/.test(s)) { devolvido = true; return []; }
+      if (/UPDATE dbo\.Veiculo[\s\S]*SET EmpresaId = NULL/.test(s)) { devolvido = true; return []; }
       if (/FROM dbo\.Veiculo v/.test(s)) {
         return [devolvido ? linhaVeiculo()
           : linhaVeiculo({ EmpresaId: 7, EmpresaNome: 'MOTO SUL', NaFabrica: false })];
@@ -198,6 +230,37 @@ describe('PUT /api/veiculos/:niv/transferir', () => {
     const r = await request(app()).put(url).send({ empresaId: 8 });
     expect(r.status).toBe(200);
     expect(eventos()[0].params).toMatchObject({ tipo: 'transferencia', detalhe: 'Concessionária anterior: MOTO SUL' });
+  });
+
+  // A entrada no estoque conta desde a chegada NAQUELA conta (migration 043):
+  // quem recebe a moto hoje não a vê "em estoque desde" o cadastro na Fábrica.
+  it('mudar de dono reinicia a entrada no estoque', async () => {
+    responder = (s) => {
+      if (/FROM dbo\.Empresa e WHERE e\.Ativo = 1 AND e\.EmpresaId/.test(s))
+        return [{ EmpresaId: 7, RazaoSocial: 'MOTO SUL', EhFabrica: false }];
+      if (/FROM dbo\.Veiculo v/.test(s)) return [linhaVeiculo()];
+      return [];
+    };
+    const r = await request(app()).put(url).send({ empresaId: 7 });
+    expect(r.status).toBe(200);
+    const upd = consultas.find(c => /UPDATE dbo\.Veiculo/.test(c.sql));
+    expect(upd.sql).toMatch(/EntradaEstoque = SYSUTCDATETIME\(\)/);
+  });
+
+  it('devolver à Fábrica também reinicia a entrada no estoque', async () => {
+    let devolvido = false;
+    responder = (s) => {
+      if (/UPDATE dbo\.Veiculo[\s\S]*SET EmpresaId = NULL/.test(s)) { devolvido = true; return []; }
+      if (/FROM dbo\.Veiculo v/.test(s)) {
+        return [devolvido ? linhaVeiculo()
+          : linhaVeiculo({ EmpresaId: 7, EmpresaNome: 'MOTO SUL', NaFabrica: false })];
+      }
+      return [];
+    };
+    const r = await request(app()).put(url).send({ fabrica: true });
+    expect(r.status).toBe(200);
+    const upd = consultas.find(c => /UPDATE dbo\.Veiculo/.test(c.sql));
+    expect(upd.sql).toMatch(/EntradaEstoque = SYSUTCDATETIME\(\)/);
   });
 
   it('continua exigindo um destino', async () => {

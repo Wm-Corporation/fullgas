@@ -762,6 +762,42 @@
     });
   }
 
+  // Conferencia antes de gravar o chassi — a "segunda chave" do cadastro.
+  // Chassi digitado errado é caro de desfazer: o NIV é único e acompanha a
+  // moto na garantia, no emplacamento e no histórico. Então, em vez de o botão
+  // gravar direto, ele mostra tudo o que será gravado e exige um segundo sim,
+  // com o resumo à vista. `onOk` só roda se a pessoa confirmar.
+  function modalConferirChassi(resumo, onOk) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>Todas as informações estão corretas?</h3>' +
+      '<button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<p class="muted" style="margin-top:0;">Confira antes de cadastrar. Depois de gravado, ' +
+      'o NIV não pode ser alterado — um erro aqui só se resolve com um chassi novo.</p>' +
+      '<table class="tbl"><tbody>' +
+      resumo.map(function (l) {
+        return '<tr><th style="width:38%;text-align:left;">' + esc(l[0]) + '</th>' +
+          '<td><b>' + esc(l[1]) + '</b></td></tr>';
+      }).join('') +
+      '</tbody></table></div>' +
+      '<div class="modal-foot">' +
+      '<button class="btn-line" id="cf-canc">Revisar</button>' +
+      '<button class="btn-orange" id="cf-ok">Sim, cadastrar</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    back.querySelector('#cf-canc').addEventListener('click', fechar);
+    // O foco começa em "Revisar": confirmar é uma escolha, não um Enter à toa.
+    document.getElementById('cf-canc').focus();
+    document.getElementById('cf-ok').addEventListener('click', function () {
+      fechar();
+      onOk();
+    });
+  }
+
   function renderChassis() {
     h1.textContent = 'Chassis (VINs)'; setOn('chassis');
     var todos = FG.all('vehicles');
@@ -773,7 +809,7 @@
       if (f.atrib === 'sim' && v.fabrica) return false;
       if (f.atrib === 'nao' && !v.fabrica) return false;
       var m = FG.model(v.modeloId);
-      return casaBusca('chassis', [v.niv, v.fabrica ? 'Fábrica' : v.empresa, m ? m.label : v.modeloId]);
+      return casaBusca('chassis', [v.niv, v.fabrica ? 'Fábrica' : v.empresa, m ? m.label : v.modeloId, v.ano]);
     });
 
     view.innerHTML =
@@ -786,6 +822,9 @@
       '<option value="">— escolha o modelo —</option>' +
       modelos.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.label) + '</option>'; }).join('') +
       '</select></div>' +
+      '<div class="field"><label for="ch-ano">Ano *</label>' +
+      '<input id="ch-ano" type="number" min="1980" max="' + (new Date().getFullYear() + 1) + '" ' +
+      'step="1" inputmode="numeric" placeholder="Ex.: ' + new Date().getFullYear() + '"></div>' +
       '<div class="field"><label for="ch-nova-emp">Concessionária (opcional)</label>' +
       '<div class="ac-wrap"><input id="ch-nova-emp" type="text" placeholder="Vazio = fica na Fábrica" autocomplete="off">' +
       '<div class="ac-list hidden" id="ch-nova-emp-ac"></div></div></div>' +
@@ -801,18 +840,19 @@
         { k: 'status', rotulo: 'Status', opcoes: [['Disponível', 'Disponível'], ['Vendido', 'Vendido']] },
         { k: 'modelo', rotulo: 'Modelo', opcoes: modelos.map(function (m) { return [m.id, m.label]; }) },
         { k: 'atrib', rotulo: 'Localização', opcoes: [['nao', 'Na Fábrica'], ['sim', 'Em concessionária']] }
-      ], 'Buscar por NIV, modelo ou concessionária') +
-      '<table class="tbl"><thead><tr><th>NIV</th><th>Modelo</th>' +
-      '<th>Status</th><th>Localização</th><th>Entrada</th><th>Ações</th></tr></thead><tbody>' +
+      ], 'Buscar por NIV, modelo, ano ou concessionária') +
+      '<table class="tbl"><thead><tr><th>NIV</th><th>Modelo</th><th>Ano</th>' +
+      '<th>Status</th><th>Localização</th><th>Entrada no local</th><th>Ações</th></tr></thead><tbody>' +
       (vehs.length ? vehs.map(function (v) {
         var m = FG.model(v.modeloId);
         return '<tr><td>' + esc(v.niv) + '</td><td>' + esc(m ? m.label : v.modeloId) + '</td>' +
+          '<td>' + esc(v.ano || '—') + '</td>' +
           '<td>' + pill(v.status) + '</td>' +
           '<td>' + localChassi(v) + '</td>' +
           '<td>' + FG.fmtDate(v.entrada) + '</td>' +
           '<td><button class="btn-line btn-mini" data-atr="' + esc(v.niv) + '">' +
           (v.fabrica ? 'Atribuir' : 'Transferir') + '</button></td></tr>';
-      }).join('') : vazioFiltro(6, todos.length
+      }).join('') : vazioFiltro(7, todos.length
         ? 'Nenhum chassi com esse filtro.'
         : 'Nenhum chassi cadastrado ainda.')) +
       '</tbody></table></div></div>';
@@ -824,21 +864,36 @@
     document.getElementById('ch-criar').addEventListener('click', function () {
       var empEl = document.getElementById('ch-nova-emp');
       var idSel = empEl.getAttribute('data-ac-id');
+      var anoMax = new Date().getFullYear() + 1;
       var dados = {
         niv: document.getElementById('ch-niv').value.trim().toUpperCase(),
         modeloId: document.getElementById('ch-modelo').value,
+        ano: Number(document.getElementById('ch-ano').value),
         empresaId: idSel ? Number(idSel) : null
       };
       if (!/^[A-Z0-9]{11,17}$/.test(dados.niv)) { FG.toast('NIV inválido — use 11 a 17 letras/números.', 'erro'); return; }
       if (!dados.modeloId) { FG.toast('Escolha o modelo da moto.', 'erro'); return; }
+      // Mesma faixa que a API cobra — aqui só para o erro aparecer sem ida ao servidor.
+      if (!dados.ano || dados.ano < 1980 || dados.ano > anoMax) {
+        FG.toast('Informe o ano da moto (entre 1980 e ' + anoMax + ').', 'erro'); return;
+      }
       if (empEl.value.trim() && !idSel) { FG.toast('Escolha a concessionária na lista de sugestões (ou deixe vazio para ficar na Fábrica).', 'erro'); return; }
-      var b = document.getElementById('ch-criar');
-      b.disabled = true;
-      FG.criarVeiculo(dados).then(function (r) {
-        b.disabled = false;
-        if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível cadastrar o chassi.', 'erro'); return; }
-        FG.toast('Chassi ' + dados.niv + ' cadastrado' + (dados.empresaId ? '.' : ' na Fábrica.'));
-        renderChassis();
+
+      var mod = FG.model(dados.modeloId);
+      modalConferirChassi([
+        ['NIV (chassi)', dados.niv],
+        ['Modelo', mod ? mod.label : dados.modeloId],
+        ['Ano', dados.ano],
+        ['Concessionária', dados.empresaId ? empEl.value.trim() : 'Nenhuma — fica na Fábrica']
+      ], function () {
+        var b = document.getElementById('ch-criar');
+        b.disabled = true;
+        FG.criarVeiculo(dados).then(function (r) {
+          b.disabled = false;
+          if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível cadastrar o chassi.', 'erro'); return; }
+          FG.toast('Chassi ' + dados.niv + ' cadastrado' + (dados.empresaId ? '.' : ' na Fábrica.'));
+          renderChassis();
+        });
       });
     });
 

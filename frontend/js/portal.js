@@ -1625,9 +1625,14 @@
         '<div class="veh-grid">' +
         '<div><b>NIV</b>' + v.niv + '</div>' +
         '<div><b>Modelo</b>' + esc(modelName(v.modeloId)) + '</div>' +
+        '<div><b>Ano</b>' + esc(v.ano || '—') + '</div>' +
         '<div><b>Status</b>' + esc(v.status) + '</div>' +
         '<div><b>Localização</b>' + (v.fabrica ? FG.seloFabrica() : esc(v.empresa || '—')) + '</div>' +
-        '<div><b>Entrada no estoque</b>' + FG.fmtDate(v.entrada) + '</div>' +
+        // A entrada é sempre a do estoque ONDE o chassi está hoje (o rótulo diz
+        // qual), não a do dia em que ele foi cadastrado no sistema. Quem quiser
+        // a vida inteira do chassi tem o histórico logo abaixo.
+        '<div><b>' + (v.fabrica ? 'Entrada na Fábrica' : 'Entrada nesta concessionária') + '</b>' +
+        FG.fmtDate(v.entrada) + '</div>' +
         (v.venda ? '<div><b>Venda</b>' + FG.fmtDate(v.venda.data) + ' — ' + esc(v.venda.cliente) + '</div>' +
           (v.venda.cpf ? '<div><b>CPF</b>' + esc(v.venda.cpf) + '</div>' : '') +
           (v.venda.telefone ? '<div><b>Telefone</b>' + esc(v.venda.telefone) + '</div>' : '') +
