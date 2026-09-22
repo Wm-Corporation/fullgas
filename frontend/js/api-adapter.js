@@ -846,6 +846,14 @@
     });
   };
 
+  // Corrige o ano de um chassi já cadastrado (admin). Promise<{ ok, ... }>.
+  FG.editarAnoVeiculo = function (niv, ano) {
+    return req('PUT', '/veiculos/' + encodeURIComponent(niv) + '/ano', { ano: ano }).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarVeiculos().then(function () { return r; });
+    });
+  };
+
   /* ---------- histórico do veículo (linha do tempo do chassi) ---------- */
   // Busca sob demanda, sem entrar no cache geral: é uma lista por chassi, que
   // só interessa quando alguém abre aquele veículo. Resolve [] em erro para a
