@@ -11,6 +11,21 @@ import { FABRICA, sqlEhFabrica, sqlNaFabrica } from '../fabrica.js';
 
 const router = Router();
 
+// Ano da UNIDADE (não do modelo — o mesmo modelo é montado em anos
+// diferentes). Teto dinâmico porque a indústria já vende o ano-modelo
+// seguinte ANTES de virar o ano civil — em setembro de 2026, por exemplo, o
+// ano-modelo 2028 já circula. +2 cobre esse adiantamento; +1 (usado até
+// 22/09/2026) ficou curto demais e recusava um ano que já existia no mercado.
+// O banco só barra a digitação absurda (CK, faixa larga de 1980 a 2100); o
+// limite de verdade é este, que sabe a data de hoje.
+function validarAno(ano) {
+  const anoMax = new Date().getFullYear() + 2;
+  if (!Number.isInteger(ano) || ano < 1980 || ano > anoMax) {
+    return { erro: 'Ano inválido — informe um ano entre 1980 e ' + anoMax + '.' };
+  }
+  return null;
+}
+
 // Mapeia uma linha do banco para o formato que o front (store.js) já espera:
 // { niv, modeloId (código do modelo), ano, status, entrada, fabrica, venda?, garantia? }.
 //
@@ -114,13 +129,8 @@ router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
     if (!/^[A-Z0-9]{11,17}$/.test(niv))
       return res.status(400).json({ erro: 'NIV inválido — use 11 a 17 letras/números (sem espaços).' });
     if (!modeloCod) return res.status(400).json({ erro: 'Informe o modelo da moto.' });
-    // O ano é da UNIDADE, não do modelo: o mesmo modelo é montado em anos
-    // diferentes. Teto no ano que vem porque a indústria já vende o
-    // ano-modelo seguinte; o banco só barra a digitação absurda (CK, faixa
-    // larga), o limite de verdade é este, que sabe a data de hoje.
-    const anoMax = new Date().getFullYear() + 1;
-    if (!Number.isInteger(ano) || ano < 1980 || ano > anoMax)
-      return res.status(400).json({ erro: 'Ano inválido — informe um ano entre 1980 e ' + anoMax + '.' });
+    const erroAno = validarAno(ano);
+    if (erroAno) return res.status(400).json(erroAno);
 
     const mod = (await query(
       'SELECT ModeloId, Nome, Ano, Etiqueta FROM dbo.ModeloMoto WHERE Codigo = @cod', { cod: modeloCod }))[0];
@@ -365,6 +375,41 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
 
     const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
     res.json({ ...toVeiculo(rows[0]), empresa: emp[0].RazaoSocial });
+  } catch (e) { next(e); }
+});
+
+// PUT /api/veiculos/:niv/ano (SÓ ADMIN) — corrige o ano de um chassi já
+// cadastrado. { ano }
+//
+// O NIV é imutável (é a identidade da moto), mas o ano é só um dado digitado
+// no cadastro — e digitação errada acontece. Diferente do NIV, corrigi-lo não
+// tem por que exigir cadastrar um chassi novo. A correção fica registrada no
+// histórico do veículo (tipo 'nota', a mesma categoria de uma anotação
+// administrativa) para quem olhar o chassi depois entender de onde veio a
+// mudança — sem isso, o valor trocaria "sozinho" aos olhos de quem consulta.
+router.put('/veiculos/:niv/ano', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const ano = Number(req.body?.ano);
+    const erroAno = validarAno(ano);
+    if (erroAno) return res.status(400).json(erroAno);
+
+    const veic = await acharVeiculo(req.params.niv, req.user);
+    if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
+    if (veic.Ano === ano) return res.status(409).json({ erro: 'O chassi já está com o ano ' + ano + '.' });
+
+    const anoAntigo = veic.Ano;
+    await query(
+      'UPDATE dbo.Veiculo SET Ano = @ano, AtualizadoEm = SYSUTCDATETIME() WHERE VeiculoId = @id',
+      { ano, id: veic.VeiculoId }
+    );
+    await registrarEvento({
+      veiculoId: veic.VeiculoId, tipo: 'nota', titulo: 'Ano corrigido',
+      detalhe: 'De ' + anoAntigo + ' para ' + ano,
+      user: req.user, empresaId: veic.EmpresaId, empresaNome: veic.EmpresaNome, manual: true
+    });
+
+    const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
+    res.json(toVeiculo(rows[0]));
   } catch (e) { next(e); }
 });
 

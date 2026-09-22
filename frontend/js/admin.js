@@ -798,6 +798,50 @@
     });
   }
 
+  // Corrige o ano de um chassi já cadastrado (NIV não muda — é a identidade
+  // da moto — mas o ano é só um dado digitado, e digitação errada acontece).
+  function modalEditarAno(v) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>Corrigir ano — ' + esc(v.niv) + '</h3>' +
+      '<button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<p class="muted" style="margin-top:0;">Ano cadastrado hoje: <b>' + esc(v.ano || '—') + '</b>.</p>' +
+      '<div class="field"><label for="ea-ano">Ano correto *</label>' +
+      '<input id="ea-ano" type="number" min="1980" max="' + (new Date().getFullYear() + 2) + '" ' +
+      'step="1" inputmode="numeric" value="' + esc(v.ano || '') + '"></div>' +
+      '</div>' +
+      '<div class="modal-foot">' +
+      '<button class="btn-line" id="ea-canc">Cancelar</button>' +
+      '<button class="btn-orange" id="ea-ok">Salvar</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    back.querySelector('#ea-canc').addEventListener('click', fechar);
+    var inp = document.getElementById('ea-ano');
+    inp.focus(); inp.select();
+
+    document.getElementById('ea-ok').addEventListener('click', function () {
+      var anoMax = new Date().getFullYear() + 2;
+      var ano = Number(inp.value);
+      if (!ano || ano < 1980 || ano > anoMax) {
+        FG.toast('Informe o ano da moto (entre 1980 e ' + anoMax + ').', 'erro'); return;
+      }
+      if (ano === v.ano) { FG.toast('Esse já é o ano cadastrado.', 'erro'); return; }
+      var b = document.getElementById('ea-ok');
+      b.disabled = true;
+      FG.editarAnoVeiculo(v.niv, ano).then(function (r) {
+        b.disabled = false;
+        if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível corrigir o ano.', 'erro'); return; }
+        fechar();
+        FG.toast('Ano do chassi ' + v.niv + ' corrigido: ' + (v.ano || '—') + ' → ' + ano + '.');
+        renderChassis();
+      });
+    });
+  }
+
   function renderChassis() {
     h1.textContent = 'Chassis (VINs)'; setOn('chassis');
     var todos = FG.all('vehicles');
@@ -823,7 +867,7 @@
       modelos.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.label) + '</option>'; }).join('') +
       '</select></div>' +
       '<div class="field"><label for="ch-ano">Ano *</label>' +
-      '<input id="ch-ano" type="number" min="1980" max="' + (new Date().getFullYear() + 1) + '" ' +
+      '<input id="ch-ano" type="number" min="1980" max="' + (new Date().getFullYear() + 2) + '" ' +
       'step="1" inputmode="numeric" placeholder="Ex.: ' + new Date().getFullYear() + '"></div>' +
       '<div class="field"><label for="ch-nova-emp">Concessionária (opcional)</label>' +
       '<div class="ac-wrap"><input id="ch-nova-emp" type="text" placeholder="Vazio = fica na Fábrica" autocomplete="off">' +
@@ -846,7 +890,8 @@
       (vehs.length ? vehs.map(function (v) {
         var m = FG.model(v.modeloId);
         return '<tr><td>' + esc(v.niv) + '</td><td>' + esc(m ? m.label : v.modeloId) + '</td>' +
-          '<td>' + esc(v.ano || '—') + '</td>' +
+          '<td>' + esc(v.ano || '—') +
+          ' <button class="link-action" data-ed-ano="' + esc(v.niv) + '" title="Corrigir o ano deste chassi">✎</button></td>' +
           '<td>' + pill(v.status) + '</td>' +
           '<td>' + localChassi(v) + '</td>' +
           '<td>' + FG.fmtDate(v.entrada) + '</td>' +
@@ -864,7 +909,10 @@
     document.getElementById('ch-criar').addEventListener('click', function () {
       var empEl = document.getElementById('ch-nova-emp');
       var idSel = empEl.getAttribute('data-ac-id');
-      var anoMax = new Date().getFullYear() + 1;
+      // Mesmo teto da API (validarAno em api/src/routes/veiculos.routes.js): a
+      // indústria já vende o ano-modelo dali a dois anos antes de virar o ano
+      // civil (em set/2026 o 2028 já circula).
+      var anoMax = new Date().getFullYear() + 2;
       var dados = {
         niv: document.getElementById('ch-niv').value.trim().toUpperCase(),
         modeloId: document.getElementById('ch-modelo').value,
@@ -902,6 +950,14 @@
       b.addEventListener('click', function () {
         var v = FG.all('vehicles').find(function (x) { return x.niv === b.getAttribute('data-atr'); });
         if (v) modalAtribuir(v);
+      });
+    });
+
+    /* corrigir ano */
+    Array.prototype.forEach.call(view.querySelectorAll('[data-ed-ano]'), function (b) {
+      b.addEventListener('click', function () {
+        var v = FG.all('vehicles').find(function (x) { return x.niv === b.getAttribute('data-ed-ano'); });
+        if (v) modalEditarAno(v);
       });
     });
   }

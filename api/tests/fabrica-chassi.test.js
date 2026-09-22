@@ -118,7 +118,7 @@ describe('POST /api/veiculos', () => {
     ['sem ano', {}],
     ['ano vazio', { ano: '' }],
     ['ano antigo demais', { ano: 1979 }],
-    ['ano longe demais no futuro', { ano: new Date().getFullYear() + 2 }],
+    ['ano longe demais no futuro', { ano: new Date().getFullYear() + 3 }],
     ['ano com texto', { ano: 'dois mil' }]
   ])('recusa o cadastro %s', async (_nome, troca) => {
     const { ano, ...semAno } = corpo;
@@ -128,17 +128,17 @@ describe('POST /api/veiculos', () => {
     expect(consultas.some(c => /INSERT INTO dbo\.Veiculo /.test(c.sql))).toBe(false);
   });
 
-  it('aceita o ano-modelo seguinte (a indústria já o vende)', async () => {
-    const proximo = new Date().getFullYear() + 1;
+  it.each([1, 2])('aceita até dois anos-modelo à frente (a indústria já vende o ano-modelo +%i)', async (adiante) => {
+    const ano = new Date().getFullYear() + adiante;
     responder = (s) => {
       if (/FROM dbo\.ModeloMoto WHERE Codigo/.test(s)) return [{ ModeloId: 3, Nome: 'FG 125', Ano: 2025, Etiqueta: null }];
       if (/SELECT 1 FROM dbo\.Veiculo WHERE Niv/.test(s)) return [];
-      if (/FROM dbo\.Veiculo v/.test(s)) return [linhaVeiculo({ Ano: proximo })];
+      if (/FROM dbo\.Veiculo v/.test(s)) return [linhaVeiculo({ Ano: ano })];
       return [];
     };
-    const r = await request(app()).post('/api/veiculos').send({ ...corpo, ano: proximo });
+    const r = await request(app()).post('/api/veiculos').send({ ...corpo, ano });
     expect(r.status).toBe(201);
-    expect(r.body.ano).toBe(proximo);
+    expect(r.body.ano).toBe(ano);
   });
 
   it('recusa a empresa da Fábrica como concessionária', async () => {
@@ -266,6 +266,55 @@ describe('PUT /api/veiculos/:niv/transferir', () => {
   it('continua exigindo um destino', async () => {
     const r = await request(app()).put(url).send({});
     expect(r.status).toBe(400);
+  });
+});
+
+describe('PUT /api/veiculos/:niv/ano', () => {
+  const url = '/api/veiculos/VBFGA125XSM160872/ano';
+
+  it('corrige o ano e registra uma nota no histórico', async () => {
+    responder = (s) => {
+      if (/FROM dbo\.Veiculo v/.test(s)) return [linhaVeiculo({ Ano: 2026, EmpresaId: 7, EmpresaNome: 'MOTO SUL' })];
+      return [];
+    };
+    const r = await request(app()).put(url).send({ ano: 2027 });
+    expect(r.status).toBe(200);
+
+    const upd = consultas.find(c => /UPDATE dbo\.Veiculo SET Ano/.test(c.sql));
+    expect(upd.params).toMatchObject({ ano: 2027, id: 50 });
+
+    const ev = eventos();
+    expect(ev).toHaveLength(1);
+    expect(ev[0].params).toMatchObject({
+      tipo: 'nota', titulo: 'Ano corrigido', detalhe: 'De 2026 para 2027',
+      eid: 7, enome: 'MOTO SUL', manual: 1
+    });
+  });
+
+  it('recusa quando o ano já é esse', async () => {
+    responder = (s) => (/FROM dbo\.Veiculo v/.test(s) ? [linhaVeiculo({ Ano: 2027 })] : []);
+    const r = await request(app()).put(url).send({ ano: 2027 });
+    expect(r.status).toBe(409);
+    expect(consultas.some(c => /UPDATE dbo\.Veiculo SET Ano/.test(c.sql))).toBe(false);
+  });
+
+  it('recusa ano fora da faixa, na mesma regra do cadastro', async () => {
+    const foraDaFaixa = new Date().getFullYear() + 3;
+    const r = await request(app()).put(url).send({ ano: foraDaFaixa });
+    expect(r.status).toBe(400);
+    expect(r.body.erro).toMatch(/Ano inválido/);
+  });
+
+  it('404 para chassi inexistente', async () => {
+    responder = () => [];
+    const r = await request(app()).put(url).send({ ano: 2027 });
+    expect(r.status).toBe(404);
+  });
+
+  it('só admin corrige o ano', async () => {
+    const cliente = { id: 9, email: 'c@motosul.com.br', papel: 'cliente', empresaId: 7 };
+    const r = await request(app(cliente)).put(url).send({ ano: 2027 });
+    expect(r.status).toBe(403);
   });
 });
 
