@@ -570,9 +570,15 @@ router.post('/reivindicacoes/:numero/anexos', requireAuth, requireArea('reivindi
 // Reivindicação APROVADA não desconta mais da fatura do cliente (o modelo de
 // nota de crédito foi aposentado): a aprovação cria um PEDIDO DE GARANTIA —
 // as peças reclamadas, com preço R$ 0 e SEM fatura — que segue o fluxo normal
-// de pedidos: aparece na área de pedidos (pill "Garantia"), exporta ao Tiny
-// (baixa o estoque lá) e, se faltar estoque, o item entra em pré-venda e sai
-// pelo rastreador quando repor. Roda dentro da transação da aprovação.
+// de pedidos: aparece na área de pedidos (pill "Garantia"), nasce 'Aprovado'
+// e vai ao Tiny UMA vez (baixa o estoque lá) e, se faltar estoque, o item entra
+// em pré-venda e sai pelo rastreador quando repor. Roda dentro da transação da
+// aprovação.
+//
+// Os itens com estoque já nascem com QuantidadeExportada = Quantidade e o
+// snapshot vai em ItensJson. Antes de 30/09/2026 nenhum dos dois acontecia: o
+// envio posterior (remessa) mandava as MESMAS peças ao Tiny de novo e o
+// estoque de lá baixava duas vezes.
 async function criarPedidoGarantia(tx, reiv) {
   const pecas = (await new sql.Request(tx).input('rid', sql.Int, reiv.ReivindicacaoId)
     .query('SELECT Sku, NomeProduto, Quantidade FROM dbo.ReivindicacaoPeca WHERE ReivindicacaoId = @rid')).recordset;
@@ -590,10 +596,10 @@ async function criarPedidoGarantia(tx, reiv) {
     .input('data', sql.DateTime2, Agora)
     .query(`INSERT INTO dbo.Pedido (NumeroPedido, UsuarioId, EmpresaId, DataPedido, Status, Total, Tipo)
             OUTPUT inserted.PedidoId
-            VALUES (@num, @uid, @eid, @data, N'Em separação', 0, 'garantia')`);
+            VALUES (@num, @uid, @eid, @data, N'Aprovado', 0, 'garantia')`);
   const pedidoId = insPed.recordset[0].PedidoId;
 
-  let temEstoque = false;
+  const exportar = [];   // snapshot das peças com estoque (vão ao Tiny agora)
   for (const p of pecas) {
     // Baixa atômica. Sem estoque, o item entra em PRÉ-VENDA mesmo sem previsão
     // de chegada — garantia aprovada não é recusada por falta de estoque.
@@ -604,7 +610,8 @@ async function criarPedidoGarantia(tx, reiv) {
                WHERE Sku = @sku AND Estoque >= @qtd`);
     let produtoId, backorder;
     if (dec.recordset.length) {
-      produtoId = dec.recordset[0].ProdutoId; backorder = false; temEstoque = true;
+      produtoId = dec.recordset[0].ProdutoId; backorder = false;
+      exportar.push({ sku: p.Sku, nome: p.NomeProduto, preco: 0, qtd: p.Quantidade });
     } else {
       const prod = await new sql.Request(tx).input('sku', sql.VarChar(40), p.Sku)
         .query('SELECT ProdutoId FROM dbo.Produto WHERE Sku = @sku');
@@ -615,13 +622,15 @@ async function criarPedidoGarantia(tx, reiv) {
       .input('pid', sql.Int, pedidoId).input('prod', sql.Int, produtoId)
       .input('sku', sql.VarChar(40), p.Sku).input('nome', sql.NVarChar(200), p.NomeProduto)
       .input('qtd', sql.Int, p.Quantidade).input('back', sql.Bit, backorder ? 1 : 0)
-      .query(`INSERT INTO dbo.PedidoItem (PedidoId, ProdutoId, Sku, NomeProduto, PrecoUnitario, Quantidade, EmBackorder)
-              VALUES (@pid, @prod, @sku, @nome, 0, @qtd, @back)`);
+      .input('exp', sql.Int, backorder ? 0 : p.Quantidade)
+      .query(`INSERT INTO dbo.PedidoItem
+                (PedidoId, ProdutoId, Sku, NomeProduto, PrecoUnitario, Quantidade, EmBackorder, QuantidadeExportada)
+              VALUES (@pid, @prod, @sku, @nome, 0, @qtd, @back, @exp)`);
   }
 
   // Sem fatura (garantia não cobra). Exporta ao Tiny o que tem estoque; a
   // pré-venda vira exportação própria quando o admin liberar.
-  if (exportacaoLigada() && temEstoque) await inserirExportacao(tx, pedidoId, 'normal');
+  if (exportacaoLigada() && exportar.length) await inserirExportacao(tx, pedidoId, 'normal', exportar);
   return NumeroPedido;
 }
 

@@ -31,7 +31,7 @@ IF EXISTS (SELECT 1 FROM sys.check_constraints
 -- API antiga (ainda não reiniciada) pode gravá-lo. O código novo só usa
 -- "Em separação"; o legado some sozinho conforme os pedidos avançam.
 DECLARE @sql NVARCHAR(MAX) = N'ALTER TABLE dbo.Pedido ADD CONSTRAINT CK_Pedido_Status ' +
-  N'CHECK (Status IN (N''Pendente'', N''Processando'', N''Enviado'', N''Entregue'', N''Cancelado'', N''' + @sep + N'''))';
+  N'CHECK (Status IN (N''Pendente'', N''Aprovado'', N''Processando'', N''Parcial'', N''Enviado'', N''Entregue'', N''Cancelado'', N''' + @sep + N'''))';
 EXEC sp_executesql @sql;
 
 COMMIT;
