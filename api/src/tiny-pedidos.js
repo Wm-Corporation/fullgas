@@ -2,30 +2,37 @@
 // Exportação de PEDIDOS para o Tiny ERP (sentido Fullgas → Tiny)
 // ------------------------------------------------------------
 // O estoque do Tiny é compartilhado com outro e-commerce (Magento).
-// Para a peça vendida aqui sumir de lá o quanto antes, cada pedido
-// do Fullgas vira um pedido no Tiny NA HORA da compra, já 'aprovado'
-// (a aprovação baixa o estoque no Tiny — a conta precisa estar com
-// "lançar estoque na aprovação do pedido" ligado).
+// Regra desde 30/09/2026: APROVAR o pedido no B2B significa que o
+// estoque pode ser descontado no Tiny. Na aprovação (sair de
+// 'Pendente') as peças em estoque viram UM pedido no Tiny, já
+// 'aprovado' (a aprovação baixa o estoque lá — a conta precisa estar
+// com "lançar estoque na aprovação do pedido" ligado).
 //
 // Fluxo:
-//   REMESSA (escopo 'remessa'): o admin decide o que vai nesta saída
-//   (quantidade enviada de cada peça) e clica em "Confirmar envio" —
-//   só então as peças daquela remessa viram um pedido no Tiny. Um
-//   pedido enviado em partes gera uma remessa por saída; o Tiny recebe
-//   exatamente o que saiu. Se o Tiny estiver fora, a linha fica 'erro'
-//   e o cron (tiny-cron.js) tenta de novo.
+//   APROVAÇÃO (escopo 'normal', com o snapshot em ItensJson): feita
+//   pelo admin no painel. Se o Tiny estiver fora, a linha fica 'erro' e
+//   o cron (tiny-cron.js) tenta de novo; enquanto isso o espelho de
+//   estoque desconta a reserva (tiny.js → reservaPendente).
 //
-//   O escopo 'normal' (pedido inteiro exportado na APROVAÇÃO) é
-//   HISTÓRICO: até 17/09/2026 o pedido ia ao Tiny quando o admin o
-//   tirava de 'Pendente', antes de qualquer envio. As linhas antigas
-//   continuam sendo lidas; nenhuma nova é criada.
+//   Envio (quantidade enviada de cada peça, Parcial/Enviado) é só
+//   controle interno: não exporta nada.
+//
+//   HISTÓRICO: de 17/09 a 30/09/2026 o pedido ia ao Tiny por remessa, no
+//   "Confirmar envio" (escopo 'remessa', números -R2, -R3...). As linhas
+//   antigas continuam sendo lidas; nenhuma nova é criada.
 //
 //   Pré-venda: quando o admin libera o envio do backorder, cada
-//   liberação gera um SEGUNDO pedido no Tiny (escopo 'backorder')
+//   liberação gera um pedido próprio no Tiny (escopo 'backorder')
 //   com o snapshot dos itens liberados naquele momento (ItensJson).
 //
-//   Cancelamento local → pedidos já criados no Tiny são cancelados
-//   lá (a situação 'cancelado' devolve o estoque no Tiny).
+//   Cancelamento local → se nenhuma peça saiu, os pedidos já criados no
+//   Tiny são cancelados lá (devolve o estoque). Se alguma peça já saiu,
+//   o Tiny NÃO é mexido sozinho: a linha ganha um aviso para ajuste
+//   manual (só o que não saiu deve voltar ao estoque).
+//
+//   Tiny → Fullgas: pedido cancelado ou excluído no Tiny vira aviso na
+//   linha de exportação (aparece na aba Tiny ERP do painel); o pedido do
+//   Fullgas não é cancelado sozinho, porque isso anularia a fatura.
 //
 // Idempotência: TinyPedidoId é gravado logo após a inclusão — um
 // pedido NUNCA é incluído duas vezes; se só a aprovação falhar, o
@@ -209,7 +216,7 @@ export async function montarPayload(exp) {
           ? `Remessa ${ordem} do pedido Fullgas ${ped.NumeroPedido} — contém somente as peças ` +
             `enviadas nesta remessa` +
             (faltam ? `; faltam ${faltam} peça(s), que virão em remessa seguinte` : ' (envio concluído)')
-          : `Pedido Fullgas ${ped.NumeroPedido}`) + ` — usuário ${ped.UsuarioEmail}.`
+          : `Pedido Fullgas ${ped.NumeroPedido} aprovado no B2B`) + ` — usuário ${ped.UsuarioEmail}.`
   };
 }
 
@@ -300,14 +307,33 @@ export async function processarExportacoes() {
 // (aprovado, preparando envio, FATURADO, pronto p/ envio...) são ignoradas.
 const MAPA_SITUACAO_TINY = { enviado: 'Enviado', entregue: 'Entregue' };
 
-// Puxa do Tiny a situação dos pedidos já exportados (escopo 'normal') que ainda
-// não foram finalizados aqui e reflete 'Enviado'/'Entregue' no status local.
-// Nunca regride (Entregue não volta a Enviado) nem toca pedidos já terminais.
+// Pedido que alguém cancelou ou EXCLUIU direto no Tiny. Não cancelamos o pedido
+// do Fullgas sozinhos (isso anularia a fatura do cliente sem ninguém decidir):
+// a linha de exportação ganha um aviso, que aparece na aba Tiny ERP do painel.
+// Grava uma vez só (UltimoErro IS NULL) — o cron passa aqui a cada rodada.
+export const AVISO_CANCELADO_NO_TINY = 'Cancelado no Tiny';
+export const AVISO_EXCLUIDO_NO_TINY = 'Excluído do Tiny';
+async function avisarMudancaNoTiny(r, aviso) {
+  const msg = `${aviso} — o pedido ${r.NumeroPedido} segue '${r.Status}' no Fullgas ` +
+    '(fatura em aberto). Cancele no painel se a venda não vai acontecer.';
+  const marcou = await query(
+    `UPDATE dbo.TinyPedidoExport SET UltimoErro = @msg
+     OUTPUT inserted.ExportId
+      WHERE ExportId = @id AND UltimoErro IS NULL`,
+    { msg: msg.slice(0, 500), id: r.ExportId });
+  if (marcou?.length) console.warn(`⚠ ${msg}`);
+}
+const RE_NAO_LOCALIZADO = /n[ãa]o\s+(foi\s+)?(localizad|encontrad)/i;
+
+// Puxa do Tiny a situação dos pedidos já exportados que ainda não foram
+// finalizados aqui e reflete 'Enviado'/'Entregue' no status local. Nunca
+// regride (Entregue não volta a Enviado) nem toca pedidos já terminais.
+// Cancelado/excluído no Tiny vira aviso (ver avisarMudancaNoTiny).
 // Chamada pelo cron, depois de reprocessar a fila de exportação.
 export async function sincronizarSituacaoPedidos() {
   if (!exportacaoLigada()) return;
   const rows = await query(
-    `SELECT e.TinyPedidoId, p.PedidoId, p.NumeroPedido, p.Status,
+    `SELECT e.ExportId, e.TinyPedidoId, p.PedidoId, p.NumeroPedido, p.Status,
             CASE WHEN EXISTS (SELECT 1 FROM dbo.PedidoItem pi
                                WHERE pi.PedidoId = p.PedidoId
                                  AND pi.Quantidade > pi.QuantidadeEnviada) THEN 1 ELSE 0 END AS TemPendente
@@ -316,11 +342,18 @@ export async function sincronizarSituacaoPedidos() {
       WHERE e.Escopo IN ('normal', 'remessa') AND e.Status = 'enviado' AND e.TinyPedidoId IS NOT NULL
         AND p.Status NOT IN (N'Entregue', N'Cancelado')`);
   for (const r of rows) {
-    // Remessa entregue no Tiny NÃO fecha um pedido que ainda tem peça para
-    // sair: lá cada remessa é um pedido próprio, aqui o pedido é um só.
-    if (r.TemPendente) continue;
     try {
-      const sit = await obterSituacaoPedido(r.TinyPedidoId);
+      let sit;
+      try {
+        sit = await obterSituacaoPedido(r.TinyPedidoId);
+      } catch (e) {
+        if (RE_NAO_LOCALIZADO.test(e.message)) { await avisarMudancaNoTiny(r, AVISO_EXCLUIDO_NO_TINY); continue; }
+        throw e;
+      }
+      if (sit === 'cancelado') { await avisarMudancaNoTiny(r, AVISO_CANCELADO_NO_TINY); continue; }
+      // Tiny marcou enviado/entregue, mas aqui ainda falta peça sair: não
+      // fecha o pedido — o envio de verdade é o registrado no painel.
+      if (r.TemPendente) continue;
       const alvo = sit ? MAPA_SITUACAO_TINY[sit] : null;
       // Ignora situações não mapeadas (faturado, aprovado...) e o que já bate;
       // nunca volta de Entregue para Enviado.
@@ -343,16 +376,26 @@ export async function sincronizarSituacaoPedidos() {
 // As linhas são marcadas 'cancelado' ANTES da chamada ao Tiny para a fila não
 // aprovar um pedido cancelado no meio do caminho; se a chamada falhar, o
 // UltimoErro avisa que precisa cancelar manualmente no Tiny.
-export async function cancelarExportacoesDoPedido(pedidoId) {
+//
+// `pecasEnviadas` > 0: parte do pedido já saiu da prateleira. Cancelar no Tiny
+// devolveria ao estoque de lá também as peças que já foram embora — então o
+// Tiny NÃO é mexido: a linha fica com um aviso para ajuste manual (só o que
+// não saiu deve voltar). Decisão de 30/09/2026.
+export async function cancelarExportacoesDoPedido(pedidoId, { pecasEnviadas = 0 } = {}) {
   const rows = await query(
     `SELECT ExportId, TinyPedidoId FROM dbo.TinyPedidoExport
       WHERE PedidoId = @pid AND Status <> 'cancelado'`, { pid: pedidoId });
   for (const r of rows) {
+    const manual = pecasEnviadas > 0 && r.TinyPedidoId
+      ? `Pedido cancelado no Fullgas com ${pecasEnviadas} peça(s) já enviada(s): ajuste o pedido ` +
+        `${r.TinyPedidoId} no Tiny à mão — só as peças que não saíram devem voltar ao estoque.`
+      : null;
     await query(
-      "UPDATE dbo.TinyPedidoExport SET Status = 'cancelado', UltimoErro = NULL WHERE ExportId = @id",
-      { id: r.ExportId }
+      "UPDATE dbo.TinyPedidoExport SET Status = 'cancelado', UltimoErro = @msg WHERE ExportId = @id",
+      { id: r.ExportId, msg: manual }
     );
     if (!r.TinyPedidoId) continue; // nunca chegou ao Tiny: nada a desfazer lá
+    if (manual) { console.warn(`⚠ Exportação Tiny #${r.ExportId}: ${manual}`); continue; }
     try {
       await alterarSituacaoPedido(r.TinyPedidoId, 'cancelado');
       console.log(`✓ Exportação Tiny #${r.ExportId}: pedido ${r.TinyPedidoId} cancelado no Tiny.`);

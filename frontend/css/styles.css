@@ -231,6 +231,9 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 2px; background: #eee; color: #555; text-transform: uppercase; }
 .pill-status.Pendente { background: #fff3cd; color: #8a6d00; }
 .pill-status.Processando { background: #dbeafe; color: #1d4ed8; }
+/* Pedido aprovado (já foi ao Tiny). Mesmo azul do antigo "Em separação" —
+   não o verde de .aprovado, que é o status de CONTA de usuário. */
+.pill-status.Aprovado { background: #dbeafe; color: #1d4ed8; }
 /* "Em separação": o status tem espaço/acento, então o nome vira classes soltas.
    O seletor por atributo pega tanto o slug do admin (ps-Em-separacao) quanto o
    texto cru "Em separação" usado na loja/portal. */

@@ -4,8 +4,8 @@
 // O Tiny é a única fonte de verdade dos produtos importados dele:
 // estoque, preço, nome, descrição e foto são sempre espelho do
 // Tiny (Tiny → Fullgas, sem override manual). No sentido inverso
-// vão só os PEDIDOS (tiny-pedidos.js): cada compra no site vira um
-// pedido 'aprovado' no Tiny, baixando o estoque lá na hora.
+// vão só os PEDIDOS (tiny-pedidos.js): quando o admin APROVA o pedido
+// no B2B, ele vira um pedido 'aprovado' no Tiny, baixando o estoque lá.
 //
 // A atualização automática NÃO usa webhook (método descartado —
 // as notificações do Tiny se mostraram pouco confiáveis): é o
@@ -339,21 +339,72 @@ export async function obterSituacaoPedido(tinyPedidoId) {
   return sit != null && sit !== '' ? String(sit).trim().toLowerCase() : null;
 }
 
-// Vendas do Fullgas ainda não registradas no Tiny (exportação pendente ou com
-// erro): o saldo do Tiny ainda não desconta essas peças, então quem ESPELHA o
-// estoque precisa subtraí-las — sem isso o cron "devolveria" ao site um estoque
-// que já foi vendido aqui. Cobre o escopo 'normal' (itens baixados na criação
-// do pedido); a janela do 'backorder' dura segundos e ficou de fora de propósito.
+/* ---------------- reserva: vendido aqui, ainda fora do Tiny ----------------
+   O saldo do Tiny só desconta uma venda do Fullgas depois que ela é exportada
+   e aprovada lá. Até isso acontecer, quem ESPELHA o estoque (o cron e a
+   checagem do checkout) precisa subtrair essas peças — senão "devolve" ao site
+   um estoque já vendido, e a mesma peça é vendida duas vezes.
+
+   São DUAS fases, e as duas contam:
+     1. Ainda não saiu para o Tiny: itens em estoque (EmBackorder = 0) de
+        pedidos não cancelados, na parte Quantidade − QuantidadeExportada.
+        É o pedido Pendente, esperando a aprovação.
+     2. Já saiu, mas o Tiny ainda não confirmou: linhas de TinyPedidoExport
+        'pendente' ou 'erro' (Tiny fora do ar, retry do cron). O item já foi
+        marcado como exportado — a quantidade está no ItensJson da linha.
+
+   Até 30/09/2026 só a fase 2 existia, e só no escopo 'normal'. Com a
+   exportação adiada para o envio (17/09) a fase 1 ficou descoberta: o cron
+   regravava o estoque cheio e a venda "sumia" em até 30 minutos. */
+
+// Soma, nas linhas de exportação ainda não confirmadas, a quantidade do SKU.
+// Linha antiga sem ItensJson (escopo 'normal' de antes de 30/09) usa os itens
+// do pedido, que o chamador põe em `itensDoPedido`. Pura, para ser testada.
+export function somarReservaExportacoes(sku, linhas) {
+  let total = 0;
+  for (const l of linhas) {
+    let itens;
+    if (l.ItensJson) {
+      try { itens = JSON.parse(l.ItensJson); } catch { itens = []; }
+    } else {
+      itens = (l.itensDoPedido || []).map(i => ({ sku: i.Sku, qtd: i.Quantidade }));
+    }
+    for (const i of itens || []) {
+      if (String(i.sku) === String(sku)) total += Number(i.qtd) || 0;
+    }
+  }
+  return total;
+}
+
 export async function reservaPendente(produtoId) {
-  const rows = await query(
-    `SELECT ISNULL(SUM(pi.Quantidade), 0) AS Reserva
+  const prod = (await query(
+    'SELECT Sku FROM dbo.Produto WHERE ProdutoId = @pid', { pid: produtoId }))[0];
+  if (!prod) return 0;
+
+  // Fase 1 — vendido e ainda não exportado.
+  const f1 = (await query(
+    `SELECT ISNULL(SUM(pi.Quantidade - pi.QuantidadeExportada), 0) AS Reserva
        FROM dbo.PedidoItem pi
-       JOIN dbo.TinyPedidoExport te ON te.PedidoId = pi.PedidoId
-      WHERE te.Escopo = 'normal' AND te.Status IN ('pendente', 'erro')
-        AND pi.EmBackorder = 0 AND pi.ProdutoId = @pid`,
+       JOIN dbo.Pedido p ON p.PedidoId = pi.PedidoId
+      WHERE pi.ProdutoId = @pid AND pi.EmBackorder = 0
+        AND pi.Quantidade > pi.QuantidadeExportada
+        AND p.Status <> N'Cancelado'`,
     { pid: produtoId }
+  ))[0];
+
+  // Fase 2 — exportado, mas o Tiny ainda não confirmou.
+  const linhas = await query(
+    `SELECT ExportId, PedidoId, ItensJson FROM dbo.TinyPedidoExport
+      WHERE Status IN ('pendente', 'erro')`
   );
-  return rows[0]?.Reserva || 0;
+  for (const l of linhas) {
+    if (!l.ItensJson) {
+      l.itensDoPedido = await query(
+        `SELECT Sku, Quantidade FROM dbo.PedidoItem
+          WHERE PedidoId = @pid AND EmBackorder = 0`, { pid: l.PedidoId });
+    }
+  }
+  return (Number(f1?.Reserva) || 0) + somarReservaExportacoes(prod.Sku, linhas);
 }
 
 /* ---------------- gravação no banco ---------------- */
