@@ -2074,7 +2074,11 @@
         '<h3 class="sec-title">Dados da empresa</h3>' +
         '<div class="conta-grid">' +
         '<div class="field"><label>Razão social</label><input type="text" value="' + esc(c.empresa.razaoSocial) + '" readonly disabled></div>' +
-        '<div class="field"><label for="ct-cnpj">CNPJ</label><input id="ct-cnpj" type="text" maxlength="18" value="' + esc(c.empresa.cnpj) + '"' + ro + '></div>' +
+        // CNPJ travado para o cliente: é a chave do vínculo com o Tiny. Só a
+        // Fullgas muda, entrando na conta pela alteração de identidade.
+        '<div class="field"><label for="ct-cnpj">CNPJ</label><input id="ct-cnpj" type="text" maxlength="18" value="' + esc(c.empresa.cnpj) + '"' +
+          (FG.identidadeAssumida() ? ro : ' readonly disabled title="Para alterar o CNPJ, abra um chamado no Suporte."') + '>' +
+          (FG.identidadeAssumida() ? '' : '<small class="muted">Para alterar o CNPJ, abra um chamado no Suporte.</small>') + '</div>' +
         '<div class="field"><label for="ct-ie">Inscrição estadual (opcional)</label><input id="ct-ie" type="text" maxlength="20" value="' + esc(c.empresa.inscricaoEstadual || '') + '"' + ro + '></div>' +
         '<div class="field"><label for="ct-tel">Telefone</label><input id="ct-tel" type="text" maxlength="15" value="' + esc(c.empresa.telefone) + '"' + ro + '></div>' +
         '<div class="field"><label for="ct-email">E-mail (empresa e acesso)</label><input id="ct-email" type="email" value="' + esc(c.empresa.email) + '"' + ro + '>' +

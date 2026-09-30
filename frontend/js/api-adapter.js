@@ -140,8 +140,46 @@
       localStorage.removeItem('fullgas_session_v1');
       localStorage.removeItem(IMP_KEY);
       localStorage.removeItem(ATIVIDADE_KEY);
+      // Cesta e cópia de dados também saem com a sessão: no computador de
+      // balcão, quem entra depois não herda a cesta nem os dados do anterior.
+      localStorage.removeItem(CESTA_KEY);
+      localStorage.removeItem(CESTA_DONO_KEY);
+      localStorage.removeItem(DADOS_LEGADO_KEY);
     } catch (e) {}
   }
+
+  /* =======================================================================
+     O QUE NÃO PODE FICAR NO NAVEGADOR (achados de 30/09/2026)
+     -----------------------------------------------------------------------
+     1. `fullgas_db_v1`: o store.js é da era sem API. Ele grava ali um banco
+        de demonstração a cada visita e, em qualquer FG.save (a busca chama),
+        a cópia INTEIRA do cache — pedidos, faturas, reivindicações, usuários
+        da empresa. Isso ficava no navegador depois de sair. Com a API, nada
+        disso precisa ser gravado: FG.save vira no-op e a chave é apagada.
+     2. A cesta (`fullgas_cart_v1`) era do NAVEGADOR, não da pessoa: sair,
+        entrar com outra conta ou voltar de uma identidade assumida mantinha a
+        cesta de quem estava antes. Agora ela tem dono (o id da sessão) e é
+        descartada quando quem está logado muda.
+     ======================================================================= */
+  var CESTA_KEY = 'fullgas_cart_v1';
+  var CESTA_DONO_KEY = 'fullgas_cart_dono';
+  var DADOS_LEGADO_KEY = 'fullgas_db_v1';
+
+  try { localStorage.removeItem(DADOS_LEGADO_KEY); } catch (e) {}
+  FG.save = function () { /* com API, nada é persistido no navegador */ };
+
+  function garantirDonoDaCesta() {
+    try {
+      var s = FG.session();
+      var id = s && s.id != null ? String(s.id) : '';
+      if (localStorage.getItem(CESTA_DONO_KEY) !== id) {
+        localStorage.removeItem(CESTA_KEY);
+        if (id) localStorage.setItem(CESTA_DONO_KEY, id);
+        else localStorage.removeItem(CESTA_DONO_KEY);
+      }
+    } catch (e) {}
+  }
+  garantirDonoDaCesta();
 
   // Encerra de verdade e vai para `destino`.
   //
@@ -519,6 +557,9 @@
         permissoes: u.permissoes || null      // null = acesso total
       }));
     } catch (e) {}
+    // Mudou quem está logado (login, identidade assumida, volta)? A cesta
+    // de quem estava antes não vale para quem entrou.
+    garantirDonoDaCesta();
   }
 
   // Chave pública do widget anti-robô, ou '' quando não há configuração no

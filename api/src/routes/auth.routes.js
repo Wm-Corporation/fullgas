@@ -6,7 +6,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { query, getPool, sql } from '../db.js';
 import { signToken, parsePermissoes, abrirSessao, fecharSessao, requireAuth, invalidarCacheSessao } from '../auth.js';
-import { erroEndereco, limparIe, erroSenha } from '../validacao.js';
+import { erroEndereco, limparIe, erroSenha, erroCnpj, formatarCnpj, soDigitosCnpj } from '../validacao.js';
 import { vincularContatoTiny } from '../tiny-contatos.js';
 import { enviarEmail, emailRecuperacaoSenha, appUrl } from '../mail.js';
 import { verificarCaptcha, captchaSiteKey } from '../captcha.js';
@@ -92,7 +92,7 @@ router.post('/login', limiteLogin, async (req, res, next) => {
 // existente → vincula; inexistente → cria lá com os dados do cadastro.
 router.post('/register', limiteCadastro, async (req, res, next) => {
   try {
-    const { nome, empresa, email, senha, cnpj, telefone } = req.body;
+    const { nome, empresa, email, senha, telefone } = req.body;
     const end = req.body.endereco || {};
     if (!nome || !empresa || !email || !senha)
       return res.status(400).json({ erro: 'Preencha nome, empresa, e-mail e senha.' });
@@ -105,8 +105,9 @@ router.post('/register', limiteCadastro, async (req, res, next) => {
     if (!cap.ok) return res.status(400).json({ erro: cap.erro });
     const errSenha = erroSenha(senha, { email, nome });
     if (errSenha) return res.status(400).json({ erro: errSenha });
-    if (!cnpj)
-      return res.status(400).json({ erro: 'Informe o CNPJ da empresa.' });
+    const errCnpj = erroCnpj(req.body.cnpj);
+    if (errCnpj) return res.status(400).json({ erro: errCnpj });
+    const cnpj = formatarCnpj(req.body.cnpj);   // formato único no banco
     const errEnd = erroEndereco(end);
     if (errEnd) return res.status(400).json({ erro: errEnd });
     const ie = limparIe(req.body.inscricaoEstadual);
@@ -125,16 +126,28 @@ router.post('/register', limiteCadastro, async (req, res, next) => {
     try {
       await tx.begin();
 
-      // Identifica a empresa: primeiro pelo CNPJ (identidade fiscal), depois
-      // pela razão social. Se não existir, cria com todos os dados. Se já
-      // existir, preenche os campos que estiverem vazios (não sobrescreve).
+      // Identifica a empresa SÓ pelo CNPJ (identidade fiscal), comparando os
+      // dígitos — com ou sem máscara é o mesmo CNPJ. Se não existir, cria.
+      //
+      // Empresa que JÁ TEM usuário no portal não aceita cadastro público
+      // (achado de 30/09/2026): o CNPJ é público, e antes quem o digitasse
+      // entrava na empresa como GESTOR — aprovado por descuido, ganhava
+      // financeiro, pedidos e a troca de e-mail/CNPJ de um estranho. Quem
+      // trabalha na concessionária recebe acesso pelo gestor (Subdealers).
+      // A busca pela razão social também saiu: mesmo nome com outro CNPJ é
+      // outra empresa (uma filial, por exemplo), não a mesma.
       let empRow = (await new sql.Request(tx)
-        .input('cnpj', sql.VarChar(18), cnpj)
-        .query('SELECT EmpresaId FROM dbo.Empresa WHERE Cnpj = @cnpj')).recordset[0];
-      if (!empRow) {
-        empRow = (await new sql.Request(tx)
-          .input('r', sql.NVarChar(160), empresaUp)
-          .query('SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial = @r')).recordset[0];
+        .input('dig', sql.VarChar(14), soDigitosCnpj(cnpj))
+        .query(`SELECT e.EmpresaId,
+                       (SELECT COUNT(*) FROM dbo.Usuario u WHERE u.EmpresaId = e.EmpresaId) AS Usuarios
+                  FROM dbo.Empresa e
+                 WHERE REPLACE(REPLACE(REPLACE(e.Cnpj, '.', ''), '/', ''), '-', '') = @dig`)).recordset[0];
+      if (empRow && empRow.Usuarios > 0) {
+        await tx.rollback();
+        return res.status(409).json({
+          erro: 'Esta empresa já tem cadastro no portal. Peça ao gestor da sua concessionária para ' +
+            'criar o seu acesso (Minha conta → Subdealers) ou fale com a Fullgas.'
+        });
       }
 
       if (empRow) {

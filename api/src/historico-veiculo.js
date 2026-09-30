@@ -106,15 +106,25 @@ export function toEvento(r) {
 // Histórico de um chassi, do mais recente para o mais antigo. Empate na data
 // (backfill gravou vários eventos com o mesmo carimbo) cai no id, que preserva
 // a ordem de inserção.
-export async function historicoDoVeiculo(veiculoId) {
+//
+// `user` (quem está lendo): o evento de VENDA guarda nome e CPF do comprador
+// no detalhe. Para outra concessionária — a moto foi transferida depois da
+// venda — o detalhe sai vazio (achado de 30/09/2026). Admin e chamadas
+// internas (sem `user`) veem tudo.
+export async function historicoDoVeiculo(veiculoId, user) {
   const rows = await query(
     `SELECT h.HistoricoId, h.Tipo, h.Titulo, h.Detalhe, h.UsuarioNome, h.EmpresaNome,
-            h.Referencia, h.Manual, h.DataEvento,
+            h.Referencia, h.Manual, h.DataEvento, h.EmpresaId,
             ${sqlNaFabrica('h.EmpresaId')} AS NaFabrica
        FROM dbo.VeiculoHistorico h
       WHERE h.VeiculoId = @vid
       ORDER BY h.DataEvento DESC, h.HistoricoId DESC`,
     { vid: veiculoId }
   );
-  return rows.map(toEvento);
+  const restrito = user && user.papel !== 'admin';
+  return rows.map(r => {
+    const ev = toEvento(r);
+    if (restrito && r.Tipo === 'venda' && r.EmpresaId !== user.empresaId) ev.detalhe = '';
+    return ev;
+  });
 }
