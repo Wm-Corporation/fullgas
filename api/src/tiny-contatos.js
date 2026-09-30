@@ -19,9 +19,12 @@
 //       tiver mudado no Tiny (sincronizarContatosDoTiny).
 //
 // O CNPJ é a CHAVE do vínculo e nunca é alterado por aqui.
-// Conflito (mudou nos dois lados entre sincronizações): vence a
-// última escrita — o push é imediato na edição, então a janela é
-// mínima; o pull do cron reflete o que estiver no Tiny.
+// Conflito (mudou nos dois lados entre sincronizações): a edição do
+// portal tem prioridade enquanto não chega ao Tiny. Ela marca
+// Empresa.TinyContatoAlterado = 1 (migration 046); o envio que der
+// certo volta a 0. Com a marca ligada o cron RE-TENTA o envio em vez
+// de trazer o contato de lá por cima — antes, um envio que falhasse
+// era desfeito em silêncio pelo pull seguinte (achado de 30/09/2026).
 //
 // Liga/desliga: TINY_SINCRONIZAR_CLIENTES=1 no .env (além do
 // TINY_TOKEN). Desligado, o cadastro funciona normalmente e nada
@@ -168,6 +171,15 @@ export async function vincularContatoTiny(empresaId) {
     );
     await registrarLog(contato.id, null, 'contato', 'ok',
       `Empresa "${emp.RazaoSocial}" (CNPJ ${fmtCnpj(dig)}): ${acao}.`);
+    // Vinculou a um contato que JÁ existia: o que foi editado no portal ainda
+    // precisa ir para lá. (Contato criado agora já nasceu com os dados atuais.)
+    if (acao !== 'contato criado no Tiny') {
+      const alt = (await query('SELECT TinyContatoAlterado FROM dbo.Empresa WHERE EmpresaId = @eid',
+        { eid: empresaId }))[0];
+      if (alt?.TinyContatoAlterado) await atualizarContatoTiny(empresaId);
+    } else {
+      await query('UPDATE dbo.Empresa SET TinyContatoAlterado = 0 WHERE EmpresaId = @eid', { eid: empresaId });
+    }
     return contato.id;
   } catch (e) {
     // Continua pendente — o cron re-tenta na próxima rodada.
@@ -217,6 +229,8 @@ export async function atualizarContatoTiny(empresaId) {
       await alterarContato(montarContato({ ...emp, TinyContatoId: alvo }, true));
     }
 
+    await query('UPDATE dbo.Empresa SET TinyContatoAlterado = 0 WHERE EmpresaId = @eid',
+      { eid: empresaId });
     await registrarLog(alvo, null, 'contato', 'ok',
       `Cadastro da empresa "${emp.RazaoSocial}" atualizado no Tiny.`);
     return alvo;
@@ -354,7 +368,7 @@ export async function sincronizarContatosDoTiny() {
   try {
     empresas = await query(
       `SELECT e.EmpresaId, e.RazaoSocial, e.NomeFantasia, e.Cnpj, e.InscricaoEstadual,
-              e.Email, e.Telefone, e.TinyContatoId,
+              e.Email, e.Telefone, e.TinyContatoId, e.TinyContatoAlterado,
               en.EnderecoId, en.Logradouro, en.Numero, en.Complemento, en.Bairro,
               en.Cidade, en.Uf, en.Cep
          FROM dbo.Empresa e
@@ -374,6 +388,14 @@ export async function sincronizarContatosDoTiny() {
   }
 
   for (const emp of empresas) {
+    // Edição do portal que ainda não chegou ao Tiny: trazer o contato de lá
+    // agora APAGARIA a edição (achado de 30/09/2026 — o cliente via "salvo" e
+    // o cron desfazia em até 30 min). Re-tenta o envio; o pull volta a valer
+    // quando o envio der certo.
+    if (emp.TinyContatoAlterado) {
+      await atualizarContatoTiny(emp.EmpresaId);
+      continue;
+    }
     try {
       let c = await obterContato(emp.TinyContatoId);
       if (!c) continue;

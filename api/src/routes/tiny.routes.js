@@ -4,6 +4,7 @@
 //   GET  /api/tiny/produtos    lista do Tiny p/ importação (admin)
 //   POST /api/tiny/importar    importa/vincula selecionados (admin)
 //   POST /api/tiny/sync-lote   sincroniza produtos importados (admin)
+//   GET  /api/tiny/contatos    cadastro de cada concessionária no Tiny (admin)
 //   GET  /api/tiny/log         histórico de sincronizações (admin)
 //   GET  /api/tiny/pedidos     exportações de pedido ao Tiny (admin)
 //   POST /api/tiny/pedidos/:id/reexportar   força nova tentativa (admin)
@@ -208,6 +209,56 @@ router.get('/tiny/log', requireAuth, requireAdmin, async (req, res, next) => {
       id: r.LogId, tinyId: r.TinyId, sku: r.Sku, evento: r.Evento,
       status: r.Status, mensagem: r.Mensagem, data: r.CriadoEm
     })));
+  } catch (e) { tratarErro(e, res, next); }
+});
+
+// GET /api/tiny/contatos  (admin) — situação do cadastro de cada
+// concessionária no Tiny: vínculo, edição do portal ainda não entregue e o
+// ÚLTIMO registro de sincronização do contato. Alimenta o card "Cadastros de
+// clientes com problema no Tiny" da aba Tiny ERP. Antes nenhuma tela mostrava
+// esse log, e um contato duplicado no Tiny bloqueou por semanas toda edição do
+// Art Moto Racing sem ninguém saber (achado de 30/09/2026).
+//
+// Só o último registro conta: o log guarda o histórico inteiro (1.287 erros
+// antigos de um defeito de vínculo já resolvido), e um erro que já foi
+// superado por um 'ok' posterior não é problema. E só erro RECENTE: a leitura
+// do cron que dá certo sem mudar nada não grava log, então um erro velho de
+// rede ficaria "por último" para sempre. Problema de verdade se repete a cada
+// rodada (o cron re-tenta a edição pendente a cada 30 min).
+const JANELA_ERRO_CONTATO_MS = 2 * 60 * 60 * 1000;
+router.get('/tiny/contatos', requireAuth, requireAdmin, async (_req, res, next) => {
+  try {
+    const rows = await query(
+      `SELECT e.EmpresaId, e.RazaoSocial, e.Cnpj, e.TinyContatoId,
+              e.TinyContatoPendente, e.TinyContatoAlterado,
+              ul.Status AS UltimoStatus, ul.Mensagem AS UltimaMensagem, ul.CriadoEm AS UltimaData
+         FROM dbo.Empresa e
+         OUTER APPLY (
+           SELECT TOP 1 l.Status, l.Mensagem, l.CriadoEm
+             FROM dbo.TinySyncLog l
+            WHERE l.Evento = 'contato'
+              AND (l.TinyId = CAST(e.TinyContatoId AS VARCHAR(40))
+                   OR l.Mensagem LIKE '%"' + e.RazaoSocial + '"%')
+            ORDER BY l.LogId DESC
+         ) ul
+        WHERE e.Ativo = 1
+        ORDER BY e.RazaoSocial`
+    );
+    res.json(rows.map(r => {
+      const pendente = !!r.TinyContatoPendente && !r.TinyContatoId;
+      const alterado = !!r.TinyContatoAlterado;
+      const erro = r.UltimoStatus === 'erro' && r.UltimaData &&
+        Date.now() - new Date(r.UltimaData).getTime() < JANELA_ERRO_CONTATO_MS;
+      return {
+        empresaId: r.EmpresaId, empresa: r.RazaoSocial, cnpj: r.Cnpj || '',
+        tinyContatoId: r.TinyContatoId || null,
+        pendente, alterado,
+        ultimoStatus: r.UltimoStatus || null,
+        ultimaMensagem: r.UltimaMensagem || null,
+        ultimaData: r.UltimaData || null,
+        problema: pendente || alterado || erro
+      };
+    }));
   } catch (e) { tratarErro(e, res, next); }
 });
 
