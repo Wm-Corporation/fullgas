@@ -37,7 +37,15 @@ function validarAno(ano) {
 // em Veiculo.CriadoEm e no evento 'cadastro' do histórico, que é justamente
 // onde se lê a vida inteira do chassi.
 // Cor e nº do motor saíram da tela (16/09/2026); as colunas seguem no banco.
-function toVeiculo(r) {
+//
+// Dados do COMPRADOR só para quem registrou a venda (VendaEmpresaId) e para o
+// admin: uma moto vendida e depois transferida não expõe o consumidor à nova
+// concessionária (achado de 30/09/2026). `user` ausente = chamada interna.
+function podeVerComprador(r, user) {
+  return !user || user.papel === 'admin' || (r.VendaEmpresaId != null && r.VendaEmpresaId === user.empresaId);
+}
+
+function toVeiculo(r, user) {
   const naFabrica = !!r.NaFabrica;
   const v = {
     niv: r.Niv,
@@ -51,13 +59,18 @@ function toVeiculo(r) {
     empresaId: naFabrica ? null : r.EmpresaId,
     empresa: naFabrica ? null : r.EmpresaNome
   };
-  if (r.VendaData) v.venda = {
+  if (r.VendaData) v.venda = podeVerComprador(r, user) ? {
     data: r.VendaData,
     cliente: r.VendaCliente || '',
     cpf: r.ClienteCpf || '',
     email: r.ClienteEmail || '',
     telefone: r.ClienteTelefone || '',
     endereco: r.ClienteEndereco || ''
+  } : {
+    data: r.VendaData,
+    cliente: 'Venda registrada por outra concessionária',
+    cpf: '', email: '', telefone: '', endereco: '',
+    outraConcessionaria: true
   };
   if (r.GarantiaAtivaEm) v.garantia = r.GarantiaAtivaEm;
   return v;
@@ -66,7 +79,7 @@ function toVeiculo(r) {
 const SELECT_VEIC =
   `SELECT v.VeiculoId, v.Niv, v.Ano, v.Status, v.EntradaEstoque, v.VendaData,
           v.VendaCliente, v.ClienteCpf, v.ClienteEmail, v.ClienteTelefone,
-          v.ClienteEndereco, v.GarantiaAtivaEm, v.EmpresaId,
+          v.ClienteEndereco, v.GarantiaAtivaEm, v.EmpresaId, v.VendaEmpresaId,
           m.Codigo AS ModeloCodigo, e.RazaoSocial AS EmpresaNome,
           ${sqlNaFabrica('v.EmpresaId')} AS NaFabrica
      FROM dbo.Veiculo v
@@ -176,7 +189,7 @@ router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
       });
     }
 
-    res.status(201).json(toVeiculo(veic));
+    res.status(201).json(toVeiculo(veic, req.user));
   } catch (e) { next(e); }
 });
 
@@ -192,7 +205,7 @@ router.get('/veiculos', requireAuth, requireAreaAny(['estoque', 'acoes']), async
       SELECT_VEIC + (esc.where ? ' WHERE' + esc.where : '') + ' ORDER BY v.EntradaEstoque DESC',
       esc.params
     );
-    res.json(rows.map(toVeiculo));
+    res.json(rows.map(r => toVeiculo(r, req.user)));
   } catch (e) { next(e); }
 });
 
@@ -205,7 +218,7 @@ router.get('/veiculos/:niv', requireAuth, requireAreaAny(['estoque', 'acoes']), 
       { niv: req.params.niv, ...esc.params }
     );
     if (!rows.length) return res.status(404).json({ erro: 'Veículo não encontrado.' });
-    res.json(toVeiculo(rows[0]));
+    res.json(toVeiculo(rows[0], req.user));
   } catch (e) { next(e); }
 });
 
@@ -250,6 +263,7 @@ router.post('/veiculos/:niv/venda', requireAuth, requireArea('acoes'), async (re
               ClienteEmail = @email,
               ClienteTelefone = @telefone,
               ClienteEndereco = @endereco,
+              VendaEmpresaId = EmpresaId,
               GarantiaAtivaEm = COALESCE(GarantiaAtivaEm, SYSUTCDATETIME()),
               AtualizadoEm = SYSUTCDATETIME()
         WHERE VeiculoId = @id`,
@@ -282,7 +296,7 @@ router.post('/veiculos/:niv/venda', requireAuth, requireArea('acoes'), async (re
       });
     }
 
-    res.json(toVeiculo(atualizado));
+    res.json(toVeiculo(atualizado, req.user));
   } catch (e) { next(e); }
 });
 
@@ -319,7 +333,7 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
         user: req.user, empresaId: null
       });
       const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
-      return res.json(toVeiculo(rows[0]));
+      return res.json(toVeiculo(rows[0], req.user));
     }
 
     // A empresa da Fábrica entra na busca só para o erro sair claro ("isso é a
@@ -374,7 +388,7 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
     });
 
     const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
-    res.json({ ...toVeiculo(rows[0]), empresa: emp[0].RazaoSocial });
+    res.json({ ...toVeiculo(rows[0], req.user), empresa: emp[0].RazaoSocial });
   } catch (e) { next(e); }
 });
 
@@ -409,7 +423,7 @@ router.put('/veiculos/:niv/ano', requireAuth, requireAdmin, async (req, res, nex
     });
 
     const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
-    res.json(toVeiculo(rows[0]));
+    res.json(toVeiculo(rows[0], req.user));
   } catch (e) { next(e); }
 });
 
@@ -434,7 +448,7 @@ router.post('/veiculos/:niv/garantia', requireAuth, requireArea('acoes'), async 
     });
 
     const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
-    res.json(toVeiculo(rows[0]));
+    res.json(toVeiculo(rows[0], req.user));
   } catch (e) { next(e); }
 });
 
@@ -453,7 +467,7 @@ router.get('/veiculos/:niv/historico', requireAuth, requireAreaAny(['estoque', '
   try {
     const veic = await acharVeiculo(req.params.niv, req.user);
     if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
-    res.json(await historicoDoVeiculo(veic.VeiculoId));
+    res.json(await historicoDoVeiculo(veic.VeiculoId, req.user));
   } catch (e) { next(e); }
 });
 

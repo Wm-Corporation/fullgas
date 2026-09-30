@@ -13,7 +13,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, AREAS, parsePermissoes, invalidarCacheSessao } from '../auth.js';
-import { erroEndereco, limparIe, erroSenha } from '../validacao.js';
+import { erroEndereco, limparIe, erroSenha, erroCnpj, formatarCnpj, soDigitosCnpj } from '../validacao.js';
 import { atualizarContatoTiny } from '../tiny-contatos.js';
 
 const router = Router();
@@ -68,13 +68,30 @@ router.get('/conta', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// PUT /api/conta/empresa — gestor atualiza CNPJ/telefone/e-mail e endereço
+// PUT /api/conta/empresa — gestor atualiza telefone/e-mail e endereço
 // principal (upsert). Razão social não muda por aqui (identidade da conta).
+//
+// CNPJ TRAVADO para o cliente (decisão de 30/09/2026): ele é a chave do
+// vínculo com o Tiny, e trocá-lo fazia o portal se ligar a OUTRO contato de lá
+// e sobrescrevê-lo. Só a Fullgas muda — o admin, entrando na conta pela
+// alteração de identidade (req.user.imp) —, e mesmo assim com CNPJ válido.
 router.put('/conta/empresa', requireAuth, requireGestor, async (req, res, next) => {
   try {
-    const { cnpj, telefone, email } = req.body;
+    const { telefone, email } = req.body;
     const end = req.body.endereco || {};
-    if (!cnpj) return res.status(400).json({ erro: 'Informe o CNPJ.' });
+    const atual = (await query('SELECT Cnpj FROM dbo.Empresa WHERE EmpresaId = @eid',
+      { eid: req.user.empresaId }))[0];
+    if (!atual) return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    let cnpj = atual.Cnpj;
+    const pedido = req.body.cnpj;
+    if (pedido != null && soDigitosCnpj(pedido) !== soDigitosCnpj(atual.Cnpj)) {
+      const podeTrocar = req.user.papel === 'admin' || !!req.user.imp;
+      if (!podeTrocar)
+        return res.status(403).json({ erro: 'O CNPJ só pode ser alterado pela Fullgas. Abra um chamado no Suporte.' });
+      const errCnpj = erroCnpj(pedido);
+      if (errCnpj) return res.status(400).json({ erro: errCnpj });
+      cnpj = formatarCnpj(pedido);
+    }
     const errEnd = erroEndereco(end);
     if (errEnd) return res.status(400).json({ erro: errEnd });
     const ie = limparIe(req.body.inscricaoEstadual);

@@ -175,11 +175,10 @@ async function resolverVeicPreEntrega(tx, niv, pecas, user) {
   const veic = await new sql.Request(tx).input('niv', sql.VarChar(30), niv)
     .query(`SELECT VeiculoId, VendaData, Status, EmpresaId
               FROM dbo.Veiculo WHERE Niv = @niv`);
-  if (!veic.recordset.length) return { erro: 'Veículo não encontrado: ' + niv };
   const v = veic.recordset[0];
-
-  if (user.papel !== 'admin' && v.EmpresaId !== user.empresaId)
-    return { erro: 'Este chassi não está no estoque da sua concessionária.' };
+  // Chassi de outra concessionária responde IGUAL a chassi inexistente: a
+  // mensagem diferente deixava descobrir quais NIVs existem na rede.
+  if (!v || !chassiDaEmpresa(v, user)) return { erro: erroChassiNaoEncontrado(niv) };
 
   if (v.VendaData || v.Status === 'Vendido')
     return {
@@ -191,14 +190,27 @@ async function resolverVeicPreEntrega(tx, niv, pecas, user) {
   return { veiculoId: v.VeiculoId, pecasResolvidas };
 }
 
+// O chassi é da concessionária de quem pede? Admin abre em nome de qualquer uma.
+function chassiDaEmpresa(v, user) {
+  return user.papel === 'admin' || (v.EmpresaId != null && v.EmpresaId === user.empresaId);
+}
+function erroChassiNaoEncontrado(niv) {
+  return 'Veículo não encontrado no estoque da sua concessionária: ' + niv;
+}
+
 // Resolve o veículo (NIV) e valida cada peça no catálogo (dentro de uma tx).
 // Aplica o prazo de garantia: 90 dias a partir de GarantiaAtivaEm. Sem garantia
 // ativada, ou com o prazo vencido, a abertura é barrada.
-async function resolverVeicPecas(tx, niv, pecas) {
+//
+// O chassi precisa ser DA EMPRESA que abre (achado de 30/09/2026): antes
+// qualquer concessionária que soubesse o NIV de uma moto de outra abria
+// garantia nela — e, aprovada, recebia as peças. A pré-entrega já conferia.
+async function resolverVeicPecas(tx, niv, pecas, user) {
   const veic = await new sql.Request(tx).input('niv', sql.VarChar(30), niv)
-    .query('SELECT VeiculoId, GarantiaAtivaEm FROM dbo.Veiculo WHERE Niv = @niv');
-  if (!veic.recordset.length) return { erro: 'Veículo não encontrado: ' + niv };
-  const { VeiculoId, GarantiaAtivaEm } = veic.recordset[0];
+    .query('SELECT VeiculoId, GarantiaAtivaEm, EmpresaId FROM dbo.Veiculo WHERE Niv = @niv');
+  const v0 = veic.recordset[0];
+  if (!v0 || !chassiDaEmpresa(v0, user)) return { erro: erroChassiNaoEncontrado(niv) };
+  const { VeiculoId, GarantiaAtivaEm } = v0;
   if (!GarantiaAtivaEm)
     return { erro: 'Garantia não ativada para este veículo — registre a venda primeiro.' };
   const limite = new Date(GarantiaAtivaEm).getTime() + GARANTIA_DIAS * 24 * 60 * 60 * 1000;
@@ -403,7 +415,7 @@ router.post('/reivindicacoes', requireAuth, requireArea('reivindicacoes'), async
       ? await resolverPedidoPecas(tx, dados.numeroPedido, req.user, dados.pecas)
       : preEntrega
         ? await resolverVeicPreEntrega(tx, dados.niv, dados.pecas, req.user)
-        : await resolverVeicPecas(tx, dados.niv, dados.pecas);
+        : await resolverVeicPecas(tx, dados.niv, dados.pecas, req.user);
     if (rv.erro) { await tx.rollback(); return res.status(400).json({ erro: rv.erro }); }
 
     // Numero único de 8 dígitos.
@@ -499,7 +511,7 @@ router.put('/reivindicacoes/:numero', requireAuth, requireArea('reivindicacoes')
       ? await resolverPedidoPecas(tx, dados.numeroPedido, req.user, dados.pecas)
       : preEntrega
         ? await resolverVeicPreEntrega(tx, dados.niv, dados.pecas, req.user)
-        : await resolverVeicPecas(tx, dados.niv, dados.pecas);
+        : await resolverVeicPecas(tx, dados.niv, dados.pecas, req.user);
     if (rv.erro) { await tx.rollback(); return res.status(400).json({ erro: rv.erro }); }
 
     await new sql.Request(tx)

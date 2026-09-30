@@ -33,6 +33,46 @@ export function limparIe(v) {
 }
 
 /* ============================================================
+   CNPJ
+   ------------------------------------------------------------
+   O CNPJ é a chave do vínculo com o Tiny: é por ele que o cadastro acha (e,
+   na edição, SOBRESCREVE) o contato de lá. Por isso a API confere os dígitos
+   verificadores e grava sempre no mesmo formato ("12.345.678/0001-90") —
+   antes aceitava qualquer texto, e "12345678000190" e "12.345.678/0001-90"
+   viravam duas empresas diferentes.
+   ============================================================ */
+export function soDigitosCnpj(v) {
+  return String(v || '').replace(/\D/g, '');
+}
+
+export function cnpjValido(v) {
+  const d = soDigitosCnpj(v);
+  if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false;
+  const dv = (base) => {
+    let peso = base.length - 7, soma = 0;
+    for (const c of base) { soma += Number(c) * peso--; if (peso < 2) peso = 9; }
+    const r = soma % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  const d1 = dv(d.slice(0, 12));
+  const d2 = dv(d.slice(0, 12) + d1);
+  return d.endsWith(String(d1) + String(d2));
+}
+
+// "12345678000190" (ou já mascarado) → "12.345.678/0001-90".
+export function formatarCnpj(v) {
+  return soDigitosCnpj(v).replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+}
+
+// Mensagem de erro para o CNPJ, ou null se estiver bom.
+export function erroCnpj(v) {
+  if (!soDigitosCnpj(v)) return 'Informe o CNPJ da empresa.';
+  if (soDigitosCnpj(v).length !== 14) return 'CNPJ incompleto — use os 14 dígitos.';
+  if (!cnpjValido(v)) return 'CNPJ inválido — confira os dígitos.';
+  return null;
+}
+
+/* ============================================================
    CATÁLOGO — número do artigo (SKU)
    ------------------------------------------------------------
    O SKU não é só um dado: ele vira ATRIBUTO DE HTML no front
