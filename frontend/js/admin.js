@@ -1437,7 +1437,8 @@
         : '<p class="muted" style="font-size:12px;margin:4px 0 0;">' + (pendente
           ? 'Aprove o pedido para registrar o envio das peças.'
           : 'Pedido ' + esc(o.status.toLowerCase()) + ' — as peças não podem mais ser alteradas.') + '</p>') +
-      '<div class="tiny-venda" data-ped="' + esc(o.id) + '"></div></div>';
+      '<div class="tiny-venda" data-ped="' + esc(o.id) + '"></div>' +
+      '<div class="hist-venda" data-ped="' + esc(o.id) + '"></div></div>';
   }
 
   // Quais detalhes estão abertos (por número de pedido). Salvar uma peça
@@ -1491,6 +1492,16 @@
       if (tv && !tv.getAttribute('data-ok')) {
         tv.setAttribute('data-ok', '1');
         carregarTinyVenda(tv, tv.getAttribute('data-ped'));
+      }
+      // Histórico do pedido (30/09/2026): vem no detalhe, buscado ao abrir.
+      var hv = row.querySelector('.hist-venda');
+      if (hv && !hv.getAttribute('data-ok')) {
+        hv.setAttribute('data-ok', '1');
+        FG.pedidoDetalhe(hv.getAttribute('data-ped')).then(function (d) {
+          if (!hv.isConnected || !d) return;
+          hv.innerHTML = '<div style="font-weight:600;margin:12px 0 4px;">Histórico do pedido</div>' +
+            FG.historicoPedidoHTML(d.historico);
+        });
       }
     }
 
@@ -1666,6 +1677,14 @@
       '<div class="modal-body">' +
       (c.reenviada ? '<div class="reenviada-aviso">↩ Devolvida pelo revendedor — revisar' + (c.atualizadoEm ? ' (em ' + FG.fmtDateTime(c.atualizadoEm) + ')' : '') + '</div>' : '') +
       (c.sentBack ? '<div class="devolvida-aviso">↩ Devolvida ao revendedor — aguardando. Falta: ' + esc(c.faltaInformacao || '—') + '</div>' : '') +
+      // Pedido de origem cancelado depois da abertura: a decisão é do admin,
+      // mas ele precisa saber (30/09/2026).
+      (c.origem === 'varejo' && c.pedidoStatus === 'Cancelado' && !term
+        ? '<div class="devolvida-aviso">⚠ O pedido de origem ' + esc(c.numeroPedido) + ' foi CANCELADO. ' +
+          'Confira no histórico do pedido quais peças chegaram a sair antes de decidir.</div>' : '') +
+      (!term && (c.anexos || []).length < 3
+        ? '<div class="devolvida-aviso">📷 Esta reivindicação tem ' + (c.anexos || []).length + ' foto(s)/vídeo(s); ' +
+          'para aprovar são necessárias no mínimo 3. Devolva ao revendedor pedindo as que faltam.</div>' : '') +
       (c.status === 'Aprovada' ? '<div class="det-credito">✔ Aprovada — pedido de garantia criado para repor a(s) peça(s) sem cobrança' +
         (c.valorGarantia ? ' (valor de referência: ' + FG.fmtMoney(c.valorGarantia) + ')' : '') + '. Acompanhe na área de pedidos.</div>' : '') +
       '<div class="det-grid">' +
@@ -1673,7 +1692,8 @@
       linha('Status', esc(c.status)) +
       (c.origem === 'varejo'
         ? linha('Origem', 'Varejo (peça de pedido)') +
-          linha('Pedido', '<a href="#pedido/' + esc(c.numeroPedido) + '">' + esc(c.numeroPedido) + '</a>') +
+          linha('Pedido', '<a href="#pedidos" class="ad-ir-pedido" data-ped="' + esc(c.numeroPedido) + '">' + esc(c.numeroPedido) + '</a>' +
+            (c.pedidoStatus ? ' ' + pill(c.pedidoStatus) : '')) +
           linha('Criador', esc(c.criador || '—')) +
           linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
           (c.dataAprovacao ? linha('Data de aprovação', FG.fmtDateTime(c.dataAprovacao)) : '')
@@ -1697,7 +1717,7 @@
       '</div>' +
       '<div class="field"><label>Peça(s) defeituosa(s)</label><div class="pecas-list">' + pecas + '</div></div>' +
       '<div class="field"><label>Descrição</label><div class="cell-value">' + esc(c.descricao || '—') + '</div></div>' +
-      '<div class="field"><label>Fotos e vídeos</label>' + fotos + '</div>' +
+      '<div class="field"><label>Fotos e vídeos (' + (c.anexos || []).length + ' — mínimo 3 para aprovar)</label>' + fotos + '</div>' +
       '</div>' +
       '<div class="modal-foot" style="flex-wrap:wrap;gap:8px;">' +
       '<div style="margin-right:auto;">' + acoes + '</div>' +
@@ -1707,6 +1727,16 @@
 
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
+    // O link do pedido abre a aba de vendas já filtrada e com o detalhe (e o
+    // histórico) aberto. Antes apontava para "#pedido/…", rota que o admin
+    // não tem — o clique não levava a lugar nenhum.
+    Array.prototype.forEach.call(back.querySelectorAll('.ad-ir-pedido'), function (a) {
+      a.addEventListener('click', function () {
+        filtros.pedidos.busca = a.getAttribute('data-ped');
+        pedAbertos[a.getAttribute('data-ped')] = true;
+        fechar();
+      });
+    });
     document.getElementById('ad-fechar').addEventListener('click', fechar);
     // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
 

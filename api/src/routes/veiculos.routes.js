@@ -427,30 +427,10 @@ router.put('/veiculos/:niv/ano', requireAuth, requireAdmin, async (req, res, nex
   } catch (e) { next(e); }
 });
 
-// POST /api/veiculos/:niv/garantia — ativa a garantia (se ainda não ativa).
-router.post('/veiculos/:niv/garantia', requireAuth, requireArea('acoes'), async (req, res, next) => {
-  try {
-    const veic = await acharVeiculo(req.params.niv, req.user);
-    if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
-    if (veic.GarantiaAtivaEm)
-      return res.status(409).json({ erro: 'Garantia já está ativa.' });
-
-    await query(
-      `UPDATE dbo.Veiculo
-          SET GarantiaAtivaEm = SYSUTCDATETIME(), AtualizadoEm = SYSUTCDATETIME()
-        WHERE VeiculoId = @id`,
-      { id: veic.VeiculoId }
-    );
-
-    await registrarEvento({
-      veiculoId: veic.VeiculoId, tipo: 'garantia', titulo: 'Garantia ativada',
-      user: req.user, empresaId: veic.EmpresaId, empresaNome: veic.EmpresaNome
-    });
-
-    const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
-    res.json(toVeiculo(rows[0], req.user));
-  } catch (e) { next(e); }
-});
+// (Não existe mais POST /api/veiculos/:niv/garantia — decisão de 30/09/2026.
+// A garantia da moto começa no REGISTRO DA VENDA, acima. Ativá-la avulsa, com a
+// moto ainda no pátio, fazia o prazo de 90 dias do comprador correr antes de
+// ele receber a moto.)
 
 /* ============================================================
    HISTÓRICO DO VEÍCULO

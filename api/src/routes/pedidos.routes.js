@@ -21,6 +21,7 @@ import {
   exportacaoLigada, atualizarEstoqueCesta, inserirExportacao,
   processarExportacoes, cancelarExportacoesDoPedido
 } from '../tiny-pedidos.js';
+import { registrarEventoPedido, historicoDoPedido, resumoPecas } from '../historico-pedido.js';
 
 const router = Router();
 
@@ -317,9 +318,15 @@ router.get('/pedidos/:numero', requireAuth, requireAreaAny(['loja', 'pedidos']),
       },
       temBackorder: itens.some(i => i.backorder)
     };
+    // Linha do tempo do pedido (migration 047). Sem a área 'financeiro', o
+    // detalhe de evento que traz valor ("Total R$ ...") sai vazio.
+    const verValores = podeVerFinanceiro(req.user);
+    detalhe.historico = (await historicoDoPedido(p.PedidoId)).map(ev =>
+      verValores || !/R\$/.test(ev.detalhe) ? ev : { ...ev, detalhe: '' });
+
     // Era por AQUI que a área 'financeiro' vazava: o detalhe do pedido carrega
     // o total, o preço de cada item e a lista de faturas ligadas.
-    res.json(podeVerFinanceiro(req.user) ? detalhe : semValores(detalhe));
+    res.json(verValores ? detalhe : semValores(detalhe));
   } catch (e) { next(e); }
 });
 
@@ -457,6 +464,12 @@ router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async 
     const itensEmBackorder = itensSnap.filter(i => i.backorder)
       .map(i => ({ sku: i.sku, nome: i.nome, quantidade: i.qtd }));
 
+    await registrarEventoPedido({
+      pedidoId, tipo: 'criado', titulo: 'Pedido criado', user: req.user,
+      detalhe: resumoPecas(itensSnap) +
+        (itensEmBackorder.length ? ` · ${itensEmBackorder.length} item(ns) em pré-venda` : '')
+    });
+
     res.status(201).json({
       id: NumeroPedido,
       data: toIso(Agora),
@@ -556,6 +569,21 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       // saiu, só deixa o aviso de ajuste manual. Fire-and-forget.
       cancelarExportacoesDoPedido(ped.PedidoId, { pecasEnviadas });
 
+      // Reivindicações ainda abertas deste pedido: o admin decide o que fazer
+      // com elas (decisão de 30/09/2026 — não são recusadas sozinhas).
+      const abertas = (await query(
+        `SELECT Numero FROM dbo.Reivindicacao WHERE PedidoId = @pid AND Status = 'Em processo'`,
+        { pid: ped.PedidoId })).map(r => r.Numero);
+      await registrarEventoPedido({
+        pedidoId: ped.PedidoId, tipo: 'cancelado', titulo: 'Pedido cancelado', user: req.user,
+        detalhe: [
+          pecasEnviadas
+            ? `${pecasEnviadas} peça(s) já tinham saído e não voltaram ao estoque; o pedido no Tiny precisa de ajuste manual.`
+            : 'Nenhuma peça tinha saído: o estoque foi devolvido.',
+          abertas.length ? `Reivindicação(ões) ainda aberta(s): ${abertas.join(', ')} — revise no painel.` : ''
+        ].filter(Boolean).join(' ')
+      });
+
       return res.json({
         ok: true, status: 'Cancelado', pecasEnviadas,
         aviso: pecasEnviadas
@@ -583,6 +611,11 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         .query("UPDATE dbo.Pedido SET Status = N'Aprovado', AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid");
       await tx.commit();
       if (exportados.length) processarExportacoes(); // fire-and-forget
+      await registrarEventoPedido({
+        pedidoId: ped.PedidoId, tipo: 'aprovado', user: req.user,
+        titulo: exportados.length ? 'Pedido aprovado — enviado ao Tiny' : 'Pedido aprovado',
+        detalhe: exportados.length ? resumoPecas(exportados) : 'Só peças em pré-venda: vão ao Tiny quando forem liberadas.'
+      });
       return res.json({ ok: true, status: 'Aprovado', exportados: exportados.length });
     }
 
@@ -670,6 +703,18 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
 
       await tx.commit();
       if (liberados.length || exportados.length) processarExportacoes(); // fire-and-forget
+      if (exportados.length) {
+        await registrarEventoPedido({
+          pedidoId: ped.PedidoId, tipo: 'aprovado', user: req.user,
+          titulo: 'Pedido aprovado — enviado ao Tiny', detalhe: resumoPecas(exportados)
+        });
+      }
+      await registrarEventoPedido({
+        pedidoId: ped.PedidoId, tipo: 'envio', user: req.user,
+        ...(alvoBackorder
+          ? { titulo: 'Pré-venda liberada para envio', detalhe: resumoPecas(liberados) }
+          : { titulo: 'Todas as peças em estoque marcadas como enviadas', detalhe: `Status: ${novoStatus}` })
+      });
       return res.json({ ok: true, status: novoStatus, parcial: faltam, exportados: exportados.length });
     }
 
@@ -679,6 +724,12 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       .input('st', sql.NVarChar(14), status)
       .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE NumeroPedido = @num');
     await tx.commit();
+    await registrarEventoPedido({
+      pedidoId: ped.PedidoId, user: req.user,
+      ...(status === 'Entregue'
+        ? { tipo: 'entregue', titulo: 'Pedido entregue' }
+        : { tipo: 'aviso', titulo: `Status alterado para ${status}` })
+    });
     res.json({ ok: true, status });
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }
@@ -761,6 +812,14 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
 
     await tx.commit();
     if (exportacaoLigada() && it.EmBackorder && delta > 0) processarExportacoes();
+    if (delta !== 0) {
+      await registrarEventoPedido({
+        pedidoId: it.PedidoId, tipo: 'envio', user: req.user,
+        titulo: delta > 0 ? `Envio registrado: ${it.Sku}` : `Envio corrigido: ${it.Sku}`,
+        detalhe: `${it.NomeProduto} — enviadas ${qtd} de ${it.Quantidade}` +
+          (delta < 0 ? ` (antes: ${it.QuantidadeEnviada})` : '') + ` · status do pedido: ${novoStatus}`
+      });
+    }
     res.json({ ok: true, itemId: it.PedidoItemId, qtdEnviada: qtd, status: novoStatus });
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }

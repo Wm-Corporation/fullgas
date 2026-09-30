@@ -811,8 +811,26 @@
     return putPedido('/pedidos/' + encodeURIComponent(id) + '/status', { status: status });
   };
 
-  // Detalhe rico do pedido (itens com qtdEnviada/backorder/estoque, faturas
-  // e progresso). Promise<detalhe|null>.
+  // Linha do tempo do pedido (vem no detalhe, campo `historico`). HTML pronto,
+  // no mesmo visual do histórico do chassi — portal e admin usam a mesma.
+  var HIST_PEDIDO_ICONE = { criado: '🛒', aprovado: '✔', tiny: '⇄', envio: '📦', entregue: '🏁',
+    cancelado: '✖', garantia: '🛡', aviso: '⚠' };
+  FG.historicoPedidoHTML = function (lista) {
+    if (!lista || !lista.length)
+      return '<p class="muted">Nenhum registro ainda. O que acontecer com este pedido aparece aqui.</p>';
+    return '<div class="hist-lista">' + lista.map(function (h) {
+      return '<div class="hist-item hist-' + FG.esc(h.tipo) + '">' +
+        '<div class="hist-ico">' + (HIST_PEDIDO_ICONE[h.tipo] || '•') + '</div>' +
+        '<div class="hist-corpo"><div class="hist-linha1"><b>' + FG.esc(h.titulo) + '</b>' +
+        '<span class="hist-data">' + FG.fmtDateTime(h.data) + '</span></div>' +
+        (h.detalhe ? '<div class="hist-detalhe">' + FG.esc(h.detalhe) + '</div>' : '') +
+        (h.usuario ? '<div class="hist-rodape">' + FG.esc(h.usuario) + '</div>' : '') +
+        '</div></div>';
+    }).join('') + '</div>';
+  };
+
+  // Detalhe rico do pedido (itens com qtdEnviada/backorder/estoque, faturas,
+  // progresso e histórico). Promise<detalhe|null>.
   FG.pedidoDetalhe = function (numero) {
     return apiGet('/pedidos/' + encodeURIComponent(numero));
   };
@@ -837,14 +855,6 @@
   // `dados` = { cliente, cpf, email, telefone, endereco }.
   FG.registrarVenda = function (niv, dados) {
     return req('POST', '/veiculos/' + encodeURIComponent(niv) + '/venda', dados || {}).then(function (r) {
-      if (!r.ok) return r;
-      return recarregarVeiculos().then(function () { return r; });
-    });
-  };
-
-  // Ativa a garantia do veículo. Recarrega o cache em caso de sucesso.
-  FG.ativarGarantia = function (niv) {
-    return req('POST', '/veiculos/' + encodeURIComponent(niv) + '/garantia').then(function (r) {
       if (!r.ok) return r;
       return recarregarVeiculos().then(function () { return r; });
     });

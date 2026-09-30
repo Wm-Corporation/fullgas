@@ -18,6 +18,7 @@ import {
   exportacaoLigada, atualizarEstoqueCesta, inserirExportacao, processarExportacoes
 } from '../tiny-pedidos.js';
 import { registrarEvento } from '../historico-veiculo.js';
+import { registrarEventoPedido, resumoPecas } from '../historico-pedido.js';
 
 const router = Router();
 
@@ -25,6 +26,8 @@ const router = Router();
 const STATUS_VALIDOS = ['Em processo', 'Aprovada', 'Recusada'];
 // Estados terminais: não voltam a ser editados pelo cliente.
 const STATUS_TERMINAIS = ['Aprovada', 'Recusada'];
+// Mínimo de fotos/vídeos para APROVAR qualquer garantia (30/09/2026).
+export const FOTOS_MINIMAS = 3;
 const TIPOS_VALIDOS = ['Manufacturer', 'Implícito'];
 // Prazo da garantia do VEÍCULO: 90 dias a partir de Veiculo.GarantiaAtivaEm
 // (ativada na venda). Vencido — ou nunca ativada — o chassi não aceita novas
@@ -236,40 +239,65 @@ function parseReivVarejo(body) {
 }
 
 // Resolve o pedido (dentro do escopo da empresa) e valida que CADA peça está
-// entre os itens daquele pedido — só o que foi comprado ali pode ter garantia.
-// Pedidos de garantia (reposição) não abrem nova garantia. Devolve o PedidoId e
-// as peças com o nome do snapshot do item.
-async function resolverPedidoPecas(tx, numeroPedido, user, pecas) {
+// entre os itens daquele pedido. Pedidos de garantia (reposição) não abrem nova
+// garantia. Devolve o PedidoId e as peças com o nome do snapshot do item.
+//
+// Regras de 30/09/2026 (antes nenhuma existia — dava para reclamar peça de
+// pedido que nem tinha saído, de pedido cancelado, e reclamar as mesmas peças
+// quantas vezes quisesse):
+//   • pedido CANCELADO não abre garantia;
+//   • o teto de cada peça é a quantidade ENVIADA, menos o que já está em
+//     outras reivindicações do mesmo pedido (exceto as recusadas).
+// `reivIdAtual`: na edição/reenvio, a própria reivindicação não conta contra
+// ela mesma.
+async function resolverPedidoPecas(tx, numeroPedido, user, pecas, reivIdAtual = null) {
   const eid = user.papel === 'admin' ? null : user.empresaId;
   const ped = await new sql.Request(tx)
     .input('num', sql.VarChar(20), numeroPedido)
     .input('eid', sql.Int, eid)
-    .query(`SELECT PedidoId, Tipo FROM dbo.Pedido
+    .query(`SELECT PedidoId, Tipo, Status FROM dbo.Pedido
              WHERE NumeroPedido = @num AND (@eid IS NULL OR EmpresaId = @eid)`);
   if (!ped.recordset.length) return { erro: 'Pedido não encontrado: ' + numeroPedido };
   if (ped.recordset[0].Tipo === 'garantia')
     return { erro: 'Este pedido é uma reposição de garantia e não abre nova garantia.' };
+  if (ped.recordset[0].Status === 'Cancelado')
+    return { erro: `O pedido ${numeroPedido} foi cancelado e não abre garantia. Se uma peça enviada chegou com defeito, fale com o Suporte.` };
   const pedidoId = ped.recordset[0].PedidoId;
 
   const itens = (await new sql.Request(tx).input('pid', sql.Int, pedidoId)
-    .query('SELECT Sku, NomeProduto, Quantidade FROM dbo.PedidoItem WHERE PedidoId = @pid')).recordset;
-  // Agrega por SKU (o mesmo item pode aparecer em mais de uma linha): guarda o
-  // nome e a quantidade TOTAL comprada — o teto do que pode ser reivindicado.
+    .query('SELECT Sku, NomeProduto, Quantidade, QuantidadeEnviada FROM dbo.PedidoItem WHERE PedidoId = @pid')).recordset;
+  // Agrega por SKU (o mesmo item pode aparecer em mais de uma linha).
   const porSku = new Map();
   for (const i of itens) {
     const cur = porSku.get(i.Sku);
-    if (cur) cur.quantidade += i.Quantidade;
-    else porSku.set(i.Sku, { nome: i.NomeProduto, quantidade: i.Quantidade });
+    if (cur) { cur.quantidade += i.Quantidade; cur.enviada += i.QuantidadeEnviada; }
+    else porSku.set(i.Sku, { nome: i.NomeProduto, quantidade: i.Quantidade, enviada: i.QuantidadeEnviada });
   }
+  const jaReclamado = new Map((await new sql.Request(tx)
+    .input('pid', sql.Int, pedidoId)
+    .input('rid', sql.Int, reivIdAtual)
+    .query(`SELECT rp.Sku, SUM(rp.Quantidade) AS Qtd
+              FROM dbo.ReivindicacaoPeca rp
+              JOIN dbo.Reivindicacao r ON r.ReivindicacaoId = rp.ReivindicacaoId
+             WHERE r.PedidoId = @pid AND r.Status <> 'Recusada'
+               AND (@rid IS NULL OR r.ReivindicacaoId <> @rid)
+             GROUP BY rp.Sku`)).recordset.map(r => [r.Sku, r.Qtd]));
 
   const pecasResolvidas = [];
   for (const p of pecas) {
     const item = porSku.get(p.sku);
     if (!item)
       return { erro: `A peça ${p.sku} não está no pedido ${numeroPedido}.` };
-    // Não se pode reivindicar mais peças do que se comprou naquele pedido.
-    if (p.quantidade > item.quantidade)
-      return { erro: `A peça ${p.sku} teve ${item.quantidade} un. no pedido ${numeroPedido}; não é possível reivindicar ${p.quantidade}.` };
+    if (!item.enviada)
+      return { erro: `A peça ${p.sku} ainda não foi enviada — só peças já enviadas podem entrar na garantia.` };
+    const reclamada = jaReclamado.get(p.sku) || 0;
+    const livre = Math.max(0, item.enviada - reclamada);
+    if (p.quantidade > livre)
+      return {
+        erro: `A peça ${p.sku} teve ${item.enviada} un. enviada(s)` +
+          (reclamada ? ` e ${reclamada} já está(ão) em outra reivindicação deste pedido` : '') +
+          `; é possível reivindicar no máximo ${livre}.`
+      };
     pecasResolvidas.push({ sku: p.sku, nome: item.nome, quantidade: p.quantidade });
   }
   return { pedidoId, pecasResolvidas };
@@ -290,7 +318,7 @@ const SELECT_REIV =
           r.Devolvido, r.Reenviada, r.FaltaInformacao, r.Descricao, r.DataAbertura,
           r.AtualizadoEm, r.DataAprovacao, r.ValorGarantia, r.EmpresaId,
           r.NumeroPeca, r.DataDefeito, r.Horimetro, r.Quilometragem,
-          r.Origem, r.PedidoId, ped.NumeroPedido AS NumeroPedido,
+          r.Origem, r.PedidoId, ped.NumeroPedido AS NumeroPedido, ped.Status AS PedidoStatus,
           e.RazaoSocial AS Empresa, v.Niv AS Niv
      FROM dbo.Reivindicacao r
      LEFT JOIN dbo.Empresa e ON e.EmpresaId = r.EmpresaId
@@ -331,6 +359,9 @@ function montar(r, extras, req) {
     tipo: r.Tipo,
     origem: r.Origem || 'veiculo',
     numeroPedido: r.NumeroPedido || '',
+    // Status do pedido de origem (varejo): o admin precisa ver, ao decidir,
+    // se o pedido foi cancelado depois da abertura (decisão de 30/09/2026).
+    pedidoStatus: r.PedidoStatus || null,
     niv: r.Niv || '',
     status: r.Status,
     preAuth: r.PreAutorizacao ? 'Sim' : 'Não',
@@ -454,6 +485,14 @@ router.post('/reivindicacoes', requireAuth, requireArea('reivindicacoes'), async
 
     await tx.commit();
 
+    if (varejo) {
+      await registrarEventoPedido({
+        pedidoId: rv.pedidoId, tipo: 'garantia', titulo: `Reivindicação ${numero} aberta`,
+        detalhe: resumoPecas(rv.pecasResolvidas) + (dados.descricao ? ' — ' + dados.descricao : ''),
+        referencia: numero, user: req.user
+      });
+    }
+
     // Reivindicação de VEÍCULO entra no histórico do chassi. A de varejo é
     // sobre uma peça de pedido, sem chassi a que se ligar. Fica FORA da
     // transação de propósito: o histórico não pode desfazer uma abertura.
@@ -508,7 +547,7 @@ router.put('/reivindicacoes/:numero', requireAuth, requireArea('reivindicacoes')
     const dados = parsed.dados;
 
     const rv = varejo
-      ? await resolverPedidoPecas(tx, dados.numeroPedido, req.user, dados.pecas)
+      ? await resolverPedidoPecas(tx, dados.numeroPedido, req.user, dados.pecas, reivId)
       : preEntrega
         ? await resolverVeicPreEntrega(tx, dados.niv, dados.pecas, req.user)
         : await resolverVeicPecas(tx, dados.niv, dados.pecas, req.user);
@@ -537,6 +576,13 @@ router.put('/reivindicacoes/:numero', requireAuth, requireArea('reivindicacoes')
     await inserirPecas(tx, reivId, rv.pecasResolvidas);
 
     await tx.commit();
+    if (varejo) {
+      await registrarEventoPedido({
+        pedidoId: rv.pedidoId, tipo: 'garantia', user: req.user, referencia: req.params.numero,
+        titulo: `Reivindicação ${req.params.numero} ${reenviada ? 'reenviada' : 'atualizada'}`,
+        detalhe: resumoPecas(rv.pecasResolvidas)
+      });
+    }
     const rows = await query(SELECT_REIV + ' WHERE r.ReivindicacaoId = @id', { id: reivId });
     res.json((await montarLista(rows, req))[0]);
   } catch (e) {
@@ -654,6 +700,22 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
   if (!STATUS_VALIDOS.includes(status))
     return res.status(400).json({ erro: 'Status inválido.' });
 
+  // Toda garantia precisa de no mínimo 3 fotos/vídeos para ser APROVADA
+  // (decisão de 30/09/2026 — varejo, moto e pré-entrega). As fotos sobem
+  // depois da abertura, então a trava fica aqui, na aprovação: sem elas o
+  // admin devolve ao revendedor pedindo o que falta.
+  if (status === 'Aprovada') {
+    const nFotos = (await query(
+      `SELECT COUNT(*) AS n FROM dbo.ReivindicacaoAnexo a
+         JOIN dbo.Reivindicacao r ON r.ReivindicacaoId = a.ReivindicacaoId
+        WHERE r.Numero = @num`, { num: req.params.numero }))[0]?.n || 0;
+    if (nFotos < FOTOS_MINIMAS)
+      return res.status(409).json({
+        erro: `Para aprovar, a reivindicação precisa de no mínimo ${FOTOS_MINIMAS} fotos ou vídeos ` +
+          `(tem ${nFotos}). Use "Devolver ao revendedor" pedindo as fotos que faltam.`
+      });
+  }
+
   // Aprovação mexe em estoque: atualiza o espelho local com o saldo real do
   // Tiny antes (mesma checagem do checkout). Falha não bloqueia a aprovação.
   if (status === 'Aprovada') {
@@ -720,6 +782,21 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
     await tx.commit();
     if (pedidoGarantia) processarExportacoes(); // fire-and-forget: cria/aprova no Tiny
 
+    if (reiv.PedidoId) {
+      await registrarEventoPedido({
+        pedidoId: reiv.PedidoId, tipo: 'garantia', user: req.user, referencia: reiv.Numero,
+        titulo: `Reivindicação ${reiv.Numero} ${status.toLowerCase()}`,
+        detalhe: pedidoGarantia ? `Pedido de reposição gerado: ${pedidoGarantia}` : null
+      });
+    }
+    if (pedidoGarantia) {
+      await registrarEventoPedido({
+        numeroPedido: pedidoGarantia, tipo: 'criado', user: req.user, referencia: reiv.Numero,
+        titulo: 'Pedido de garantia gerado',
+        detalhe: `Reposição sem cobrança da reivindicação ${reiv.Numero}`
+      });
+    }
+
     // O desfecho da garantia é o que mais importa no histórico do chassi:
     // é ele que conta se aquele defeito foi coberto ou não.
     if (reiv.VeiculoId) {
@@ -750,7 +827,7 @@ router.put('/reivindicacoes/:numero/devolver', requireAuth, requireAdmin, async 
   if (!falta) return res.status(400).json({ erro: 'Descreva o que falta antes de devolver.' });
   try {
     const cur = await query(
-      'SELECT Status, VeiculoId, EmpresaId FROM dbo.Reivindicacao WHERE Numero = @num',
+      'SELECT Status, VeiculoId, EmpresaId, PedidoId FROM dbo.Reivindicacao WHERE Numero = @num',
       { num: req.params.numero });
     if (!cur.length) return res.status(404).json({ erro: 'Reivindicação não encontrada.' });
     if (STATUS_TERMINAIS.includes(cur[0].Status))
@@ -763,6 +840,12 @@ router.put('/reivindicacoes/:numero/devolver', requireAuth, requireAdmin, async 
       { falta, num: req.params.numero }
     );
 
+    if (cur[0].PedidoId) {
+      await registrarEventoPedido({
+        pedidoId: cur[0].PedidoId, tipo: 'garantia', user: req.user, referencia: req.params.numero,
+        titulo: `Reivindicação ${req.params.numero} devolvida ao revendedor`, detalhe: 'Falta: ' + falta
+      });
+    }
     if (cur[0].VeiculoId) {
       await registrarEvento({
         veiculoId: cur[0].VeiculoId, tipo: 'reivindicacao',
