@@ -2621,6 +2621,11 @@
       '<div class="adm-card"><div class="c-head">Pedidos que precisam de atenção no Tiny</div>' +
       '<div class="c-body" id="ty-alertas"><span class="muted">Carregando…</span></div></div>' +
 
+      // Cadastro das concessionárias no Tiny: a edição feita em "Minha conta"
+      // que não chegou lá (contato duplicado, Tiny fora...) antes era invisível.
+      '<div class="adm-card"><div class="c-head">Cadastros de clientes com problema no Tiny</div>' +
+      '<div class="c-body" id="ty-contatos"><span class="muted">Carregando…</span></div></div>' +
+
       '<div class="adm-card"><div class="c-head">Produtos no Tiny — importação</div><div class="c-body">' +
       '<div class="fnd-add-row">' +
       '<input id="ty-busca" type="text" placeholder="Pesquisar por nome ou código no Tiny">' +
@@ -2672,6 +2677,37 @@
     }, function () {
       if (!vigenteTiny()) return;
       document.getElementById('ty-alertas').innerHTML = '<span class="muted">Não foi possível carregar os avisos.</span>';
+    });
+
+    /* ----- cadastro das concessionárias no Tiny ----- */
+    FG.tinyContatos().then(function (rows) {
+      if (!vigenteTiny()) return;
+      var box = document.getElementById('ty-contatos');
+      var probs = (rows || []).filter(function (x) { return x.problema; });
+      if (!probs.length) {
+        box.innerHTML = '<span class="muted">Nenhum problema — o cadastro de todas as ' + (rows || []).length +
+          ' concessionária(s) está em dia com o Tiny.</span>';
+        return;
+      }
+      box.innerHTML = '<table class="tbl"><thead><tr><th>Concessionária</th><th>CNPJ</th><th>Contato no Tiny</th>' +
+        '<th>Situação</th><th>Detalhe</th></tr></thead><tbody>' +
+        probs.map(function (x) {
+          var sit = x.pendente ? 'Sem vínculo no Tiny'
+            : x.alterado ? 'Edição do portal ainda não chegou ao Tiny'
+            : 'Erro na última sincronização';
+          var det = (x.ultimoStatus === 'erro' && x.ultimaMensagem ? x.ultimaMensagem : '') +
+            (x.alterado ? (x.ultimaMensagem && x.ultimoStatus === 'erro' ? ' · ' : '') +
+              'O sistema tenta enviar de novo a cada 30 min; enquanto isso o cadastro do Tiny não é trazido por cima.' : '');
+          return '<tr><td><b>' + esc(x.empresa) + '</b></td><td>' + esc(x.cnpj) + '</td>' +
+            '<td class="muted">' + esc(x.tinyContatoId || '—') + '</td>' +
+            '<td><span class="pill-status bloqueado">' + esc(sit) + '</span></td>' +
+            '<td style="max-width:420px;">' + esc(det || '—') +
+            (x.ultimaData ? '<br><span class="muted" style="font-size:11px;">' + FG.fmtDateTime(x.ultimaData) + '</span>' : '') +
+            '</td></tr>';
+        }).join('') + '</tbody></table>';
+    }, function () {
+      if (!vigenteTiny()) return;
+      document.getElementById('ty-contatos').innerHTML = '<span class="muted">Não foi possível carregar os cadastros.</span>';
     });
 
     /* ----- importação (lista paginada do Tiny) -----

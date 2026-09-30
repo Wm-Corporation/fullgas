@@ -117,6 +117,9 @@ router.put('/conta/empresa', requireAuth, requireGestor, async (req, res, next) 
         .input('tel', sql.VarChar(30), telefone || null)
         .query(`UPDATE dbo.Empresa
                    SET Cnpj = @cnpj, InscricaoEstadual = @ie, Email = @email, Telefone = @tel,
+                       -- Edição ainda não entregue ao Tiny: o cron re-tenta o
+                       -- envio em vez de trazer o cadastro de lá por cima.
+                       TinyContatoAlterado = 1,
                        AtualizadoEm = SYSUTCDATETIME()
                  WHERE EmpresaId = @eid`);
 

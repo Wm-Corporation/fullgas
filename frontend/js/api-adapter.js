@@ -1104,6 +1104,11 @@
   FG.tinyPedidos = function (pedido) {
     return api('/tiny/pedidos' + (pedido ? '?pedido=' + encodeURIComponent(pedido) : ''));
   };
+  // Situação do cadastro de cada concessionária no Tiny (vínculo, edição do
+  // portal ainda não entregue, último registro). REJEITA em erro.
+  FG.tinyContatos = function () {
+    return api('/tiny/contatos');
+  };
   // Força nova tentativa de uma exportação com erro.
   FG.tinyReexportar = function (exportId) {
     return req('POST', '/tiny/pedidos/' + exportId + '/reexportar');
