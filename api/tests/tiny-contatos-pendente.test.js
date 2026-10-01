@@ -54,8 +54,9 @@ describe('E2 — edição do portal não é desfeita pelo cron', () => {
   it('com edição pendente, o cron ENVIA de novo e não traz o contato do Tiny', async () => {
     empresas = [{ ...EMP, TinyContatoAlterado: true }];
     await sincronizarContatosDoTiny();
-    expect(chamadas).toContain('alterar:714643632');
-    expect(chamadas.some(c => c.startsWith('obter:'))).toBe(false);
+    // Lê o contato só para preservar a observação, e ENVIA — o último passo é
+    // o alterar; nada do Tiny é aplicado no cadastro local.
+    expect(chamadas).toEqual(['obter:714643632', 'alterar:714643632']);
   });
 
   it('o envio que dá certo limpa a marca', async () => {

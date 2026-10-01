@@ -189,6 +189,10 @@ app.use('/uploads/miniaturas', express.static(PASTA_MINIATURAS, {
   setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=2592000, immutable')
 }));
 app.use('/uploads/miniaturas', (_req, res) => res.status(404).end());
+// Arquivo de catálogo que não existe (ex.: diagrama do Finder apagado do
+// disco) responde 404 seco — antes caía no 404 genérico, que devolve a
+// página de login inteira (HTML) no lugar de uma imagem.
+app.use('/uploads', (_req, res) => res.status(404).end());
 
 /* Log de requisições — sem a QUERY STRING.
    ------------------------------------------------------------

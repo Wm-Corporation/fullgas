@@ -13,7 +13,7 @@
 
   // Conta interna (sub-dealer) sem a área "finder" volta ao portal.
   if (!FG.temArea(sess, 'finder')) {
-    alert('Sua conta não tem acesso ao Parts Finder. Fale com o gestor da concessionária.');
+    alert('Sua conta não tem acesso ao Localizador de Peças. Fale com o gestor da concessionária.');
     location.href = '/portal'; return;
   }
 
@@ -69,11 +69,11 @@
   /* ---------- painel de busca: expandir/recolher e reset ---------- */
   var spBody = document.getElementById('sp-body');
   var spToggle = document.getElementById('sp-toggle');
-  function recolherBusca() { spBody.classList.add('hidden'); spToggle.textContent = '▸ Search'; }
+  function recolherBusca() { spBody.classList.add('hidden'); spToggle.textContent = '▸ Buscar'; }
   spToggle.addEventListener('click', function () {
     var aberto = !spBody.classList.contains('hidden');
     spBody.classList.toggle('hidden', aberto);
-    spToggle.textContent = (aberto ? '▸' : '▾') + ' Search';
+    spToggle.textContent = (aberto ? '▸' : '▾') + ' Buscar';
   });
   document.getElementById('sp-reset').addEventListener('click', function (e) {
     e.preventDefault();
@@ -84,7 +84,7 @@
     atual = { modelo: null, lado: 'chassi' };
     fdView.innerHTML = '';
     spBody.classList.remove('hidden');
-    spToggle.textContent = '▾ Search';
+    spToggle.textContent = '▾ Buscar';
   });
 
   /* ---------- árvore de seleção (filtro em cascata) ---------------------
@@ -261,9 +261,9 @@
       fdView.innerHTML =
         '<div class="finder-model-name">' + esc(m.label) + '</div>' +
         '<div class="finder-links">' +
-        '<button id="fl-img">🖼 Show Image</button>' +
-        '<a href="#/modelo/' + esc(m.id) + '/' + outro + '">Switch To ' + (outro === 'engine' ? 'Engine' : 'Frame') + '</a>' +
-        '<button id="fl-doc">📘 Technical documentation</button>' +
+        '<button id="fl-img">🖼 Ver imagem</button>' +
+        '<a href="#/modelo/' + esc(m.id) + '/' + outro + '">Ver ' + (outro === 'engine' ? 'motor' : 'chassi') + '</a>' +
+        '<button id="fl-doc">📘 Documentação técnica</button>' +
         '</div>' +
         (secoes.length
           ? '<div class="finder-layout">' +
@@ -277,7 +277,7 @@
             }).join('') + '</div>' +
             '</div>'
           : '<p class="muted">Nenhuma seção cadastrada para o lado ' +
-            (lado === 'engine' ? 'Engine' : 'Frame') + ' deste modelo.</p>');
+            (lado === 'engine' ? 'motor' : 'chassi') + ' deste modelo.</p>');
 
       Array.prototype.forEach.call(fdView.querySelectorAll('[data-id]'), function (el) {
         function abrir() { location.hash = '#/secao/' + el.getAttribute('data-id'); }
@@ -367,7 +367,7 @@
               // Quantidade que o diagrama pede desta peça no conjunto — é
               // referência de montagem, não o que vai à cesta (esse é o campo
               // editável ao lado).
-              '<span class="pr-ref">Uds. <b>' + p.quantidade + '</b></span>' +
+              '<span class="pr-ref">Qtd. no conjunto: <b>' + p.quantidade + '</b></span>' +
               statusPeca(p) +
             '</span>' +
             '<span class="pr-acao">' +
@@ -384,15 +384,15 @@
       fdView.innerHTML =
         '<div class="finder-crumb"><a href="#/modelo/' + esc(s.modelo.id) + '/' + s.lado + '">' + esc(s.modelo.label) + '</a>' +
         ' <span class="chev">›</span> ' + esc(s.nome) +
-        '<button class="link-action crumb-print" id="fa-print">🖨 Print</button></div>' +
+        '<button class="link-action crumb-print" id="fa-print">🖨 Imprimir</button></div>' +
         '<div class="fnd-actions">' +
-        '<button class="btn" id="fa-next"' + (s.vizinhos.proxima ? '' : ' disabled') + '>NEXT CATEGORY</button>' +
-        '<a class="btn" href="#/modelo/' + esc(s.modelo.id) + '/' + outro + '">SWITCH TO ' + (outro === 'engine' ? 'ENGINE' : 'FRAME') + '</a>' +
+        '<button class="btn" id="fa-next"' + (s.vizinhos.proxima ? '' : ' disabled') + '>PRÓXIMA SEÇÃO</button>' +
+        '<a class="btn" href="#/modelo/' + esc(s.modelo.id) + '/' + outro + '">VER ' + (outro === 'engine' ? 'MOTOR' : 'CHASSI') + '</a>' +
         '</div>' +
         '<div class="part-layout">' +
         '<div class="part-col">' +
         '<div class="part-toolbar"><span class="muted">' + esc(s.numero) + ' — ' + esc(s.nome) + '</span>' +
-        '<button class="btn" id="fa-cart">🛒 ADD ITEM(S) TO BASKET</button></div>' +
+        '<button class="btn" id="fa-cart">🛒 ADICIONAR À CESTA</button></div>' +
         (linhas
           ? '<div class="pt-busca"><span class="lupa">🔍</span>' +
             '<input type="search" id="pt-busca" autocomplete="off"' +
@@ -760,7 +760,7 @@
       // o VOLTAR encontra ao sair de um modelo/seção.
       fdView.innerHTML = '';
       spBody.classList.remove('hidden');
-      spToggle.textContent = '▾ Search';
+      spToggle.textContent = '▾ Buscar';
     }
     window.scrollTo(0, 0);
   }

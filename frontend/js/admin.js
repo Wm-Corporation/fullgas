@@ -1186,7 +1186,7 @@
       '<div class="field"><label>Estoque</label><input id="mp-est" type="number" min="0"' + trava + ' value="' + (p ? p.estoque : 0) + '"></div>' +
       '<div class="field"><label>Previsão de chegada (se sem estoque)</label><input id="mp-prev" type="text" placeholder="dd/mm/aa" value="' + (p && p.previsao ? p.previsao : '') + '"></div>' +
       '<div class="field"><label>Descrição</label><textarea id="mp-desc" rows="3"' + trava + '>' + (p ? esc(p.descricao) : '') + '</textarea></div>' +
-      '<div class="field"><label>Foto da peça (miniatura no Parts Finder)</label>' +
+      '<div class="field"><label>Foto da peça (miniatura no Localizador de Peças)</label>' +
       '<div class="fnd-foto-row">' +
       (p ? fotoProduto(p) : '<span class="fnd-thumb vazio">sem foto</span>') +
       '<input id="mp-foto" type="file" accept="image/*"' + trava + '>' +
@@ -1928,7 +1928,7 @@
 
   /* ---------- nível 1: modelos ---------- */
   function renderFinderModelos() {
-    h1.textContent = 'Parts Finder — modelos'; setOn('finder');
+    h1.textContent = 'Localizador de Peças — modelos'; setOn('finder');
     view.innerHTML = '<div class="adm-card"><div class="c-body muted">Carregando…</div></div>';
     var vigente = telaVigente();
     FG.finderModelos(true).then(function (modelos) {
@@ -2035,7 +2035,7 @@
       '</div>' +
       '<div class="field"><label>Documentação técnica (link http)</label>' +
       '<input id="fm-doc" type="url" placeholder="https://..." value="' + val('docTecnica') + '"></div>' +
-      '<div class="field"><label>Foto do modelo (botão "Show Image" do finder)</label>' +
+      '<div class="field"><label>Foto do modelo (botão "Ver imagem" do Localizador de Peças)</label>' +
       '<div class="fnd-foto-row">' + thumbCell(m && m.imagem, 'foto') +
       '<input id="fm-foto" type="file" accept="image/*">' +
       (m && m.imagem ? '<button class="btn-line btn-mini" id="fm-foto-del" type="button">Remover foto</button>' : '') +
@@ -2131,7 +2131,7 @@
     var vigente = telaVigente();
     FG.finderModelo(codigo).then(function (m) {
       if (!vigente()) return;
-      h1.textContent = 'Parts Finder — ' + m.label;
+      h1.textContent = 'Localizador de Peças — ' + m.label;
       var lado = ladoAtivo === 'engine' ? 'engine' : 'chassi';
       var secoes = m[lado] || [];
 
@@ -2251,7 +2251,7 @@
     var vigente = telaVigente();
     FG.finderSecao(secaoId).then(function (sec) {
       if (!vigente()) return;
-      h1.textContent = 'Parts Finder — ' + sec.numero + ' ' + sec.nome;
+      h1.textContent = 'Localizador de Peças — ' + sec.numero + ' ' + sec.nome;
 
       view.innerHTML =
         fndCrumb([['Modelos', '#finder'],

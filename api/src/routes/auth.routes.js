@@ -331,6 +331,46 @@ router.post('/senha/verificar', limiteVerificacaoSenha, async (req, res, next) =
   } catch (e) { next(e); }
 });
 
+// POST /api/auth/senha/trocar  { atual, nova }  (logado)
+// Troca a própria senha dentro do portal (30/09/2026): antes o único caminho
+// era o "esqueci minha senha" por e-mail. Exige a senha ATUAL (sessão
+// esquecida aberta num computador de balcão não basta para trocar), derruba
+// as outras sessões (TokenVersion + 1) e reemite a desta aba, para quem
+// trocou continuar logado. Não vale em identidade assumida: a Fullgas não
+// troca a senha do cliente por ele.
+router.post('/senha/trocar', requireAuth, limiteVerificacaoSenha, async (req, res, next) => {
+  try {
+    if (req.user.imp)
+      return res.status(403).json({ erro: 'Em identidade assumida não é possível trocar a senha do cliente.' });
+    const atual = String(req.body?.atual || '');
+    const nova = String(req.body?.nova || '');
+    if (!atual || !nova) return res.status(400).json({ erro: 'Informe a senha atual e a nova.' });
+
+    const u = (await query(
+      `SELECT u.UsuarioId, u.Nome, u.Email, u.SenhaHash, u.Papel, u.Status, u.EmpresaId,
+              u.Gestor, u.Permissoes, u.TokenVersion
+         FROM dbo.Usuario u WHERE u.UsuarioId = @id`, { id: req.user.id }))[0];
+    if (!u) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+    const hashStr = u.SenhaHash ? Buffer.from(u.SenhaHash).toString('utf8') : '';
+    if (!hashStr || !(await bcrypt.compare(atual, hashStr)))
+      return res.status(400).json({ erro: 'Senha atual incorreta.' });
+    if (atual === nova) return res.status(400).json({ erro: 'A nova senha precisa ser diferente da atual.' });
+    const errSenha = erroSenha(nova, { email: u.Email, nome: u.Nome });
+    if (errSenha) return res.status(400).json({ erro: errSenha });
+
+    const hash = await bcrypt.hash(nova, 10);
+    await query(
+      `UPDATE dbo.Usuario
+          SET SenhaHash = @hash, TokenVersion = TokenVersion + 1, AtualizadoEm = SYSUTCDATETIME()
+        WHERE UsuarioId = @id`,
+      { hash: Buffer.from(hash, 'utf8'), id: u.UsuarioId });
+    invalidarCacheSessao(u.UsuarioId);
+    // Reemite a sessão DESTA aba com a versão nova; as demais caem.
+    abrirSessao(res, signToken({ ...u, TokenVersion: (u.TokenVersion ?? 0) + 1 }));
+    res.json({ ok: true, msg: 'Senha alterada. As outras sessões abertas com a senha antiga foram encerradas.' });
+  } catch (e) { next(e); }
+});
+
 // POST /api/auth/senha/redefinir  { token, senha }
 router.post('/senha/redefinir', limiteVerificacaoSenha, async (req, res, next) => {
   try {

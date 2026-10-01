@@ -13,7 +13,7 @@
   if (!sess) return;
 
   if (!FG.temArea(sess, 'finder')) {
-    alert('Sua conta não tem acesso ao Parts Finder. Fale com o gestor da concessionária.');
+    alert('Sua conta não tem acesso ao Localizador de Peças. Fale com o gestor da concessionária.');
     location.href = '/portal'; return;
   }
 
@@ -31,7 +31,7 @@
   var titulo = document.getElementById('uso-titulo');
   var tabelaBox = document.getElementById('uso-tabela');
 
-  var LADO_ROTULO = { chassi: 'Frame', engine: 'Engine' };
+  var LADO_ROTULO = { chassi: 'Chassi', engine: 'Motor' };
   var linhasAtuais = [];   // último resultado (para o filtro rápido)
 
   document.getElementById('uso-voltar').addEventListener('click', function () {
@@ -41,14 +41,14 @@
   // Monta a tabela de resultados (colunas inspiradas na tela de referência).
   function render(linhas) {
     if (!linhas.length) {
-      tabelaBox.innerHTML = '<div class="usage-vazio">No items to display</div>';
+      tabelaBox.innerHTML = '<div class="usage-vazio">Nenhum resultado.</div>';
       return;
     }
     var thead =
       '<thead><tr>' +
-      '<th>Model Year</th><th>Model Name</th><th>Category</th>' +
-      '<th>ComponentGroup</th><th>Model articlenumber</th>' +
-      '<th>Article</th><th>Engine/Frame</th><th></th>' +
+      '<th>Ano</th><th>Modelo</th><th>Categoria</th>' +
+      '<th>Seção</th><th>Código no modelo</th>' +
+      '<th>Peça</th><th>Motor/Chassi</th><th></th>' +
       '</tr></thead>';
     var tbody = '<tbody>' + linhas.map(function (l) {
       var hash = '#/secao/' + l.secaoId;
@@ -96,7 +96,7 @@
       FG.toast('Digite o número do artigo (SKU) ou a descrição.');
       return;
     }
-    titulo.textContent = 'Search Text: ' + (sku || desc);
+    titulo.textContent = 'Busca: ' + (sku || desc);
     tabelaBox.innerHTML = '<div class="usage-vazio">Buscando…</div>';
     inpQuick.value = '';
     FG.finderUso(sku, desc).then(function (linhas) {

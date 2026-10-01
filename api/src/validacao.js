@@ -64,6 +64,19 @@ export function formatarCnpj(v) {
   return soDigitosCnpj(v).replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
 }
 
+// CPF (comprador da moto): dígitos verificadores, como o CNPJ.
+export function cpfValido(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  const dv = (n) => {
+    let soma = 0;
+    for (let i = 0; i < n; i++) soma += Number(d[i]) * (n + 1 - i);
+    const r = (soma * 10) % 11;
+    return r === 10 ? 0 : r;
+  };
+  return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
+}
+
 // Mensagem de erro para o CNPJ, ou null se estiver bom.
 export function erroCnpj(v) {
   if (!soDigitosCnpj(v)) return 'Informe o CNPJ da empresa.';
