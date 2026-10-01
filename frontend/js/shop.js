@@ -201,6 +201,9 @@
     });
     if (termoBusca != null) FG.logSearch(termoBusca, todos.length);
 
+    // Disponíveis primeiro (30/09/2026): antes o indisponível aparecia no topo
+    // da lista e empurrava o que dá para comprar para a página seguinte.
+    todos.sort(function (a, b) { return (FG.compravel(b.artigo) ? 1 : 0) - (FG.compravel(a.artigo) ? 1 : 0); });
     var totalPag = Math.max(1, Math.ceil(todos.length / POR_PAGINA));
     if (pagina > totalPag) pagina = totalPag;
     var lista = todos.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
@@ -248,7 +251,7 @@
       '<div class="shop-tools">' +
       '<span class="avail' + (soDisponiveis ? ' on' : '') + '" id="tg-avail" role="switch" aria-checked="' + soDisponiveis + '" tabindex="0">' +
       'MOSTRAR SOMENTE PRODUTOS DISPONÍVEIS <span class="switch"></span></span>' +
-      '<select id="sel-moto"><option value="">BUSCAR POR MOTO — EX.: FG 300 2026</option>' +
+      '<select id="sel-moto"><option value="">BUSCAR POR MOTO (TODAS)</option>' +
       FG.all('models').map(function (m) {
         return '<option value="' + m.id + '"' + (m.id === motoFiltro ? ' selected' : '') + '>' + esc(m.nome + ' ' + m.ano) + '</option>';
       }).join('') + '</select>' +
@@ -260,8 +263,8 @@
         '<div><div class="prod-name"><a href="#/produto/' + esc(p.artigo) + '">' + esc(p.nome) + '</a></div>' +
         '<div class="prod-desc">' + esc(p.descricao) + '</div>' +
         '<div class="prod-meta">' +
-        '<div class="m"><b>Article No.</b>' + esc(p.artigo) + '</div>' +
-        '<div class="m"><b>Stock</b>' + stockHTML(p) + '</div>' +
+        '<div class="m"><b>Código</b>' + esc(p.artigo) + '</div>' +
+        '<div class="m"><b>Estoque</b>' + stockHTML(p) + '</div>' +
         '<div class="m"><b>Preço</b>' + FG.fmtMoney(p.preco) + '</div>' +
         (FG.compravel(p.artigo)
           ? '<div class="prod-buy"><input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + esc(p.artigo) + '">' +
@@ -346,10 +349,10 @@
       '<div class="prod-page">' +
       '<div class="big-img">' + prodImg(p, 240, true) + '</div>' +
       '<div><div class="prod-name">' + esc(p.nome) + '</div>' +
-      '<p class="muted">Article No. ' + esc(p.artigo) + '</p>' +
+      '<p class="muted">Código ' + esc(p.artigo) + '</p>' +
       '<div class="prod-desc prod-desc-full">' + esc(p.descricao) + '</div>' +
       '<div class="price-big">' + FG.fmtMoney(p.preco) + '</div>' +
-      '<p><b>Stock:</b> ' + stockHTML(p) + (p.estoque > 0 ? ' <span class="muted">(' + p.estoque + ' un.)</span>' : '') + '</p>' +
+      '<p><b>Estoque:</b> ' + stockHTML(p) + (p.estoque > 0 ? ' <span class="muted">(' + p.estoque + ' un.)</span>' : '') + '</p>' +
       (FG.compravel(p.artigo)
         ? '<div class="prod-buy" style="margin:0 0 18px;justify-content:flex-start;">' +
           '<input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + esc(p.artigo) + '">' +
@@ -367,7 +370,7 @@
       var cods = Object.keys(mods);
       if (!cods.length || location.hash.indexOf(p.artigo) < 0) return;
       var alvo = view.querySelector('.prod-page > div:last-child');
-      if (alvo) alvo.insertAdjacentHTML('beforeend', '<p class="muted" style="font-size:12px;">Aplicação (Parts Finder): ' +
+      if (alvo) alvo.insertAdjacentHTML('beforeend', '<p class="muted" style="font-size:12px;">Aplicação (Localizador de Peças): ' +
         cods.map(function (c) { return '<a href="/finder#/modelo/' + esc(c) + '/chassi">' + esc(mods[c]) + '</a>'; }).join(' · ') + '</p>');
     }, function () {});
   }
@@ -376,16 +379,16 @@
      ROTA: quick order
      ========================================================= */
   function renderQuickOrder() {
-    setBand('Quick Order', [{ nome: 'Quick Order' }]);
+    setBand('Pedido rápido', [{ nome: 'Pedido rápido' }]);
     var LINHAS = 5;
     var html = '<div class="qo-head"><span class="muted">Digite o número do artigo e a quantidade.</span>' +
-      '<span><button class="link-action" id="qo-reset">RESET FORM</button> ' +
+      '<span><button class="link-action" id="qo-reset">LIMPAR</button> ' +
       '<button class="btn dark" id="qo-add">ADICIONAR AO CARRINHO</button></span></div>' +
       '<div class="qo-row" style="border-bottom:2px solid #ccc;font-weight:600;font-size:12px;">' +
-      '<span>Article No.</span><span>Stock</span><span>Quantity</span><span></span></div>';
+      '<span>Código</span><span>Estoque</span><span>Quantidade</span><span></span></div>';
     for (var i = 0; i < LINHAS; i++) {
       html += '<div class="qo-row">' +
-        '<input class="art" data-i="' + i + '" type="text" placeholder="Enter Article No.">' +
+        '<input class="art" data-i="' + i + '" type="text" placeholder="Digite o código">' +
         '<span class="qo-stock" data-i="' + i + '"></span>' +
         '<input class="qty-in qo-qty" data-i="' + i + '" type="number" min="1" value="1">' +
         '<button class="del" data-i="' + i + '" title="Limpar linha">✕</button></div>';
@@ -535,7 +538,7 @@
   var verEmpresa = false;
 
   function renderHistorico() {
-    setBand('Order History', [{ nome: 'Histórico' }]);
+    setBand('Histórico de pedidos', [{ nome: 'Histórico' }]);
     view.innerHTML = '<div id="hist-body"></div>';
     var body = document.getElementById('hist-body');
 
@@ -544,13 +547,13 @@
     });
     if (sess.papel === 'admin' && !orders.length && !verEmpresa) orders = FG.all('orders');
     if (!orders.length) {
-      body.innerHTML = '<div class="empty-box">No Orders Found<br>' +
-        '<button class="btn red" id="ho-all">Show all orders of company</button></div>';
+      body.innerHTML = '<div class="empty-box">Nenhum pedido seu encontrado.<br>' +
+        '<button class="btn red" id="ho-all">Ver todos os pedidos da empresa</button></div>';
       document.getElementById('ho-all').addEventListener('click', function () { verEmpresa = true; renderHistorico(); });
       return;
     }
     body.innerHTML =
-      '<p class="right muted" style="font-size:11px;">SHOW ALL ORDERS OF COMPANY ' +
+      '<p class="right muted" style="font-size:11px;">VER TODOS OS PEDIDOS DA EMPRESA ' +
       '<input type="checkbox" id="ho-chk"' + (verEmpresa ? ' checked' : '') + '></p>' +
       orders.map(function (o) {
         // O número linka direto para o detalhe do pedido na aba Pedidos do portal.

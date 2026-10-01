@@ -35,7 +35,7 @@ export const CATEGORIAS = [
   },
   {
     codigo: 'finder',
-    nome: 'Parts Finder',
+    nome: 'Localizador de Peças',
     descricao: 'Diagrama, explosão ou código de peça de um modelo.'
   },
   {

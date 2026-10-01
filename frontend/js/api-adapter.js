@@ -597,6 +597,12 @@
             function (e) { return { ok: false, msg: (e && e.message) || 'Falha no cadastro.' }; });
   };
 
+  // Troca a própria senha (logado). A API reemite a sessão desta aba e derruba
+  // as demais. Promise<{ ok, msg }>.
+  FG.trocarSenha = function (atual, nova) {
+    return req('POST', '/auth/senha/trocar', { atual: atual, nova: nova });
+  };
+
   /* ---------- esqueci minha senha ----------
      Nenhuma das três revela se o e-mail existe: a mensagem de sucesso é
      sempre a mesma, venha o cadastro de onde vier. */

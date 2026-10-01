@@ -97,7 +97,7 @@ function montarContato(emp, comId = false) {
     nome: emp.RazaoSocial,
     tipo_pessoa: dig.length === 11 ? 'F' : 'J',
     situacao: 'A',
-    obs: 'Sincronizado pelo portal Fullgas B2B.'
+    obs: emp.ObsTiny || 'Sincronizado pelo portal Fullgas B2B.'
   };
   if (dig) c.cpf_cnpj = dig;
   if (comId && emp.TinyContatoId) c.id = String(emp.TinyContatoId);
@@ -197,7 +197,7 @@ export async function vincularContatoTiny(empresaId) {
 export async function atualizarContatoTiny(empresaId) {
   if (!clientesLigado()) return null;
 
-  const emp = await carregarEmpresa(empresaId);
+  let emp = await carregarEmpresa(empresaId);
   if (!emp) return null;
   if (!emp.TinyContatoId) return vincularContatoTiny(empresaId);  // ainda sem contato
 
@@ -213,6 +213,13 @@ export async function atualizarContatoTiny(empresaId) {
         || await pesquisarContatoPorCpfCnpj(dig);
       if (dono && String(dono.id) !== alvo) alvo = await revincular(emp, dono.id);
     }
+
+    // O contato.alterar SUBSTITUI o registro: a observação escrita por quem
+    // usa o Tiny seria trocada pela nossa. Lê a atual e preserva (30/09/2026).
+    try {
+      const atual = await obterContato(alvo);
+      if (atual?.obs) emp = { ...emp, ObsTiny: atual.obs };
+    } catch { /* sem a obs atual, segue com a padrão */ }
 
     try {
       await alterarContato(montarContato({ ...emp, TinyContatoId: alvo }, true));

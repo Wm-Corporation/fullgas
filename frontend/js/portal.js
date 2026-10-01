@@ -163,11 +163,14 @@
     // agrupa reivindicações por criador para a mini tabela
     var grupos = {};
     claims.forEach(function (c) {
-      var g = grupos[c.criador] || (grupos[c.criador] = { total: 0, dar: 0, imp: 0, hq: 0, novas: 0 });
+      // Colunas em português e só com o que existe (30/09/2026): antes eram
+      // "Claims/DAR/IMP/HQ/New", com DAR sempre 0 e "New" contando rascunhos
+      // que ficam só no navegador.
+      var g = grupos[c.criador] || (grupos[c.criador] = { total: 0, analise: 0, aprovadas: 0, recusadas: 0 });
       g.total++;
-      if (c.tipo === 'Implícito') g.imp++;
-      if (c.status === 'Em processo') g.hq++;
-      if (c.status === 'Esboço') g.novas++;
+      if (c.status === 'Em processo') g.analise++;
+      if (c.status === 'Aprovada') g.aprovadas++;
+      if (c.status === 'Recusada') g.recusadas++;
     });
     var nomes = Object.keys(grupos).sort();
 
@@ -184,13 +187,14 @@
       '<span class="num">' + disp + '</span><span class="sub">em estoque</span></div></div>';
 
     html += '<div><div class="card-title">Reivindicações (' + claims.length + ')</div>' +
-      '<table class="claims-mini"><thead><tr><th></th><th>Claims</th><th>DAR</th><th>IMP</th><th>HQ</th><th>New</th></tr></thead><tbody>';
+      '<table class="claims-mini"><thead><tr><th></th><th>Total</th><th>Em análise</th><th>Aprovadas</th><th>Recusadas</th></tr></thead><tbody>';
     nomes.forEach(function (n) {
       var g = grupos[n];
       html += '<tr><td>' + esc(n) + '</td><td class="num"><b>' + g.total + '</b></td>' +
-        '<td class="num">' + g.dar + '</td><td class="num">' + g.imp + '</td>' +
-        '<td class="hq">' + g.hq + '</td><td class="num">' + g.novas + '</td></tr>';
+        '<td class="hq">' + g.analise + '</td><td class="num">' + g.aprovadas + '</td>' +
+        '<td class="num">' + g.recusadas + '</td></tr>';
     });
+    if (!nomes.length) html += '<tr><td colspan="5" class="muted">Nenhuma reivindicação ainda.</td></tr>';
     html += '</tbody></table></div></div>';
 
     html += '<div class="home-heroes">' +
@@ -331,7 +335,7 @@
       '<button class="tool" id="cl-limpar">✖ Limpar filtros</button>' +
       '</div>' +
       '<div class="claim-head"><span>N° da reivindicação</span><span>Data da reivindicação</span>' +
-      '<span>Creator Country</span><span>Criador da reivindicação</span><span>Tipo</span><span>Status</span><span></span></div>' +
+      '<span>País</span><span>Criador da reivindicação</span><span>Tipo</span><span>Status</span><span></span></div>' +
       '<div class="claim-filters">' +
       '<input class="cl-filter" data-col="numero" placeholder="Filtrar...">' +
       '<input class="cl-filter" data-col="data" placeholder="Filtrar...">' +
@@ -418,7 +422,7 @@
           '<div><label class="cl-check"><input type="checkbox" class="cl-sel" data-cid="' + esc(c.id) + '"></label> ' +
           '<span class="cell-label">N° da reivindicação</span><span class="cell-value cl-num">' + c.id + '</span></div>' +
           '<div><span class="cell-label">Data</span><span class="cell-value">' + FG.fmtDate(c.data) + '</span></div>' +
-          '<div><span class="cell-label">Creator Country</span><span class="cell-value">' + esc(c.pais) + '</span></div>' +
+          '<div><span class="cell-label">País</span><span class="cell-value">' + esc(c.pais) + '</span></div>' +
           '<div><span class="cell-label">Criado por</span><span class="cell-value">' + esc(c.criador) + '</span>' +
           (c.pecas && c.pecas.length ? '<br><span class="cell-label">Peças</span><span class="cell-value">' + c.pecas.map(function (p) { return esc(p.sku) + ' ×' + p.quantidade; }).join(', ') + '</span>' : '') +
           (c.anexos && c.anexos.length ? ' <span class="muted">📎 ' + c.anexos.length + '</span>' : '') +
@@ -1687,7 +1691,7 @@
           ? '<span class="muted" style="font-size:12px;align-self:center;">A garantia começa ao registrar a venda.</span>' : '') +
         (sess.papel === 'admin' ? '<button class="btn" id="av-transf">Transferir revendedor</button>' : '') +
         '<a class="btn" href="#reivindicacoes">Criar reivindicação</a>' +
-        '<a class="btn" href="/finder">Abrir no Parts Finder</a>' +
+        '<a class="btn" href="/finder">Abrir no Localizador de Peças</a>' +
         '</div>' +
         /* ---- histórico do chassi ---- */
         '<div class="hist-bloco">' +
@@ -1838,21 +1842,25 @@
       '<div class="fin-card"><div class="muted">Documentos</div><div class="v">' + inv.length + '</div></div>' +
       '</div>' +
       '<div class="toolbar"><button class="tool" id="fi-csv">📄 Export. p/ Excel</button></div>' +
+      // Pedido de origem e situação na lista (30/09/2026): antes o cliente não
+      // sabia de qual pedido era cada fatura (a API já mandava).
       '<table class="table"><thead><tr><th class="filt">Tipo</th><th class="filt">N° da fatura</th>' +
-      '<th class="filt">Data da fatura ↓</th><th class="right filt">Quantia cobrada</th><th></th></tr></thead><tbody>' +
+      '<th class="filt">Pedido</th><th class="filt">Data da fatura ↓</th><th>Situação</th>' +
+      '<th class="right filt">Quantia cobrada</th><th></th></tr></thead><tbody>' +
       (inv.length ? inv.map(function (i, idx) {
-        return '<tr><td>' + esc(i.tipo) +
-          (i.status && i.status !== 'Emitida' ? ' <span class="pill-status ' + esc(i.status) + '">' + esc(i.status) + '</span>' : '') +
-          '</td><td>' + i.numero + '</td><td>' + FG.fmtDate(i.data) + '</td>' +
+        return '<tr><td>' + esc(i.tipo) + '</td><td>' + esc(i.numero) + '</td>' +
+          '<td>' + ((i.pedidos || []).map(function (n) { return '<a href="#pedido/' + esc(n) + '">' + esc(n) + '</a>'; }).join(', ') || '—') + '</td>' +
+          '<td>' + FG.fmtDate(i.data) + '</td>' +
+          '<td>' + (i.status ? '<span class="pill-status ' + esc(i.status) + '">' + esc(i.status) + '</span>' : '—') + '</td>' +
           '<td class="right">' + i.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + '</td>' +
           '<td class="nowrap"><button class="pdf-ico pdf-baixar" data-i="' + idx + '">⬇ Baixar PDF</button> ' +
           '<button class="pdf-ico pdf-imprimir" data-i="' + idx + '">🖨 Imprimir</button></td></tr>';
-      }).join('') : '<tr><td colspan="5" class="muted">Nenhuma fatura.</td></tr>') +
+      }).join('') : '<tr><td colspan="7" class="muted">Nenhuma fatura.</td></tr>') +
       '</tbody></table>' + garantiasHTML + preVendaHTML;
 
     document.getElementById('fi-csv').addEventListener('click', function () {
-      var linhas = [['Tipo', 'N°', 'Data', 'Valor']];
-      inv.forEach(function (i) { linhas.push([i.tipo, i.numero, FG.fmtDate(i.data), i.valor.toFixed(2)]); });
+      var linhas = [['Tipo', 'N°', 'Pedido', 'Data', 'Situação', 'Valor']];
+      inv.forEach(function (i) { linhas.push([i.tipo, i.numero, (i.pedidos || []).join(' '), FG.fmtDate(i.data), i.status || '', i.valor.toFixed(2)]); });
       FG.exportCSV('faturas', linhas);
     });
     Array.prototype.forEach.call(view.querySelectorAll('.pdf-baixar'), function (b) {
@@ -2082,7 +2090,7 @@
      Conta interna vê tudo somente-leitura.
      ========================================================= */
   var AREA_LABELS = {
-    loja: 'Loja', finder: 'Parts Finder', pedidos: 'Pedidos',
+    loja: 'Loja', finder: 'Localizador de Peças', pedidos: 'Pedidos',
     financeiro: 'Conta financeira', reivindicacoes: 'Reivindicações',
     estoque: 'Estoque do revendedor', acoes: 'Ações do veículo'
   };
@@ -2136,9 +2144,34 @@
         '</div>' +
         (gestor ? '<button class="btn red" id="ct-salvar" type="button">Salvar dados da empresa</button>' : '') +
         // A gestão de sub-dealers vive na aba "Subdealers" (só o gestor a vê).
-        (gestor ? '<p class="muted" style="font-size:12px;margin-top:18px;">As contas internas (sub-dealers) são gerenciadas na aba <a href="#subdealers">Subdealers</a>.</p>' : '');
+        (gestor ? '<p class="muted" style="font-size:12px;margin-top:18px;">As contas internas (sub-dealers) são gerenciadas na aba <a href="#subdealers">Subdealers</a>.</p>' : '') +
+        // Trocar a própria senha (30/09/2026) — vale para gestor e conta
+        // interna. Some na identidade assumida: a Fullgas não troca por ele.
+        (FG.identidadeAssumida() ? '' :
+          '<h3 class="sec-title">Trocar minha senha</h3>' +
+          '<div class="conta-grid">' +
+          '<div class="field"><label for="ts-atual">Senha atual</label><input id="ts-atual" type="password" autocomplete="current-password"></div>' +
+          '<div class="field"><label for="ts-nova">Nova senha (mín. 8 caracteres)</label><input id="ts-nova" type="password" autocomplete="new-password"></div>' +
+          '<div class="field"><label for="ts-conf">Repita a nova senha</label><input id="ts-conf" type="password" autocomplete="new-password"></div>' +
+          '</div><button class="btn" id="ts-salvar" type="button">Trocar senha</button>');
 
       view.innerHTML = html;
+
+      var tsBtn = document.getElementById('ts-salvar');
+      if (tsBtn) tsBtn.addEventListener('click', async function () {
+        var atual = document.getElementById('ts-atual').value;
+        var nova = document.getElementById('ts-nova').value;
+        var conf = document.getElementById('ts-conf').value;
+        if (!atual || !nova) { FG.toast('Informe a senha atual e a nova.', 'erro'); return; }
+        if (nova !== conf) { FG.toast('A confirmação não bate com a nova senha.', 'erro'); return; }
+        tsBtn.disabled = true; tsBtn.textContent = 'Trocando…';
+        var r = await FG.trocarSenha(atual, nova);
+        tsBtn.disabled = false; tsBtn.textContent = 'Trocar senha';
+        if (!r.ok) { FG.toast(r.msg || 'Não foi possível trocar a senha.', 'erro'); return; }
+        ['ts-atual', 'ts-nova', 'ts-conf'].forEach(function (id) { document.getElementById(id).value = ''; });
+        FG.toast(r.msg || 'Senha alterada.');
+      });
+
       if (!gestor) return;
 
       /* máscaras + ViaCEP no cadastro da empresa */
@@ -2745,7 +2778,7 @@
     }
     if (mods.length) {
       html += '<h3 style="margin-top:18px;">Modelos</h3><table class="table"><tbody>' + mods.map(function (m) {
-        return '<tr><td>' + esc(m.label) + '</td><td><a href="/finder#/modelo/' + m.id + '/chassi">Abrir no Parts Finder</a></td></tr>';
+        return '<tr><td>' + esc(m.label) + '</td><td><a href="/finder#/modelo/' + m.id + '/chassi">Abrir no Localizador de Peças</a></td></tr>';
       }).join('') + '</tbody></table>';
     }
     if (prods.length) {

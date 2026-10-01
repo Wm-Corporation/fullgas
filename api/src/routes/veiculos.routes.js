@@ -8,6 +8,7 @@ import {
   registrarEvento, historicoDoVeiculo, TIPOS_MANUAIS
 } from '../historico-veiculo.js';
 import { FABRICA, sqlEhFabrica, sqlNaFabrica } from '../fabrica.js';
+import { cpfValido } from '../validacao.js';
 
 const router = Router();
 
@@ -245,9 +246,10 @@ router.post('/veiculos/:niv/venda', requireAuth, requireArea('acoes'), async (re
     if (!nome) return res.status(400).json({ erro: 'Informe o nome do cliente.' });
     if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
       return res.status(400).json({ erro: 'E-mail do cliente inválido.' });
-    // CPF: aceita com ou sem máscara, mas precisa ter 11 dígitos se informado.
-    if (cpf && (String(cpf).replace(/\D/g, '').length !== 11))
-      return res.status(400).json({ erro: 'CPF do cliente inválido.' });
+    // CPF: aceita com ou sem máscara, mas precisa ser um CPF válido (dígitos
+    // verificadores) — a venda não pode ser corrigida depois.
+    if (cpf && !cpfValido(cpf))
+      return res.status(400).json({ erro: 'CPF do cliente inválido — confira os dígitos.' });
 
     const veic = await acharVeiculo(req.params.niv, req.user);
     if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });

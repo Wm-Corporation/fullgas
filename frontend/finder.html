@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fullgas SpareParts Finder</title>
+  <title>Fullgas — Localizador de Peças</title>
   <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
   <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
   <link rel="stylesheet" href="css/styles.css?v=20261001a">
@@ -14,7 +14,7 @@
     <div>
       <!-- Único botão VOLTAR do finder (o comportamento está no finder.js). -->
       <button class="btn-voltar" id="fd-voltar" type="button">Voltar</button>
-      <h1>SparePartsFinder</h1>
+      <h1>Localizador de Peças</h1>
       <div class="who" id="fd-who"></div>
     </div>
     <div class="finder-top-right">
@@ -24,35 +24,35 @@
     </div>
   </div>
 
-  <button class="btn usage-btn" id="btn-usage" type="button">Usage list</button>
+  <button class="btn usage-btn" id="btn-usage" type="button">Onde a peça é usada</button>
 
   <main class="finder">
 
     <!-- ====== painel de busca ====== -->
     <div class="search-panel" id="search-panel">
-      <button class="sp-title" id="sp-toggle" type="button">▾ Search</button>
-      <a href="#" class="reset" id="sp-reset">[Reset]</a>
+      <button class="sp-title" id="sp-toggle" type="button">▾ Buscar</button>
+      <a href="#" class="reset" id="sp-reset">[Limpar]</a>
 
       <div id="sp-body">
         <div class="sp-grid">
           <div>
-            <label for="sp-vin">Search by VIN</label>
+            <label for="sp-vin">Buscar pelo chassi (NIV)</label>
             <input id="sp-vin" type="text" placeholder="">
 
-            <label for="sp-eng" style="margin-top:12px;">Engine Number</label>
+            <label for="sp-eng" style="margin-top:12px;">Número do motor</label>
             <input id="sp-eng" type="text" placeholder="">
 
-            <label style="margin-top:12px;">Category</label>
+            <label style="margin-top:12px;">Parte da moto</label>
             <div class="radio-line">
-              <label><input type="radio" name="sp-cat" value="engine"> Engine</label>
-              <label><input type="radio" name="sp-cat" value="chassi" checked> Frame</label>
+              <label><input type="radio" name="sp-cat" value="engine"> Motor</label>
+              <label><input type="radio" name="sp-cat" value="chassi" checked> Chassi</label>
             </div>
 
-            <button class="btn" id="sp-search" type="button">Search</button>
+            <button class="btn" id="sp-search" type="button">Buscar</button>
           </div>
 
           <div>
-            <label>Select Model</label>
+            <label>Escolher o modelo</label>
             <!-- Árvore de seleção em cascata: Marca › Modalidade › Categoria ›
                  Modelo › Ano. Os níveis saem dos campos do modelo (painel
                  admin), então acompanham qualquer edição. -->
@@ -73,9 +73,9 @@
 
   <script src="js/config.js?v=20260727a"></script>
   <script src="js/store.js?v=20261001a"></script>
-  <script src="js/api-adapter.js?v=20261001a"></script>
+  <script src="js/api-adapter.js?v=20261001b"></script>
   <script src="js/ao-vivo.js?v=20260831a"></script>
-  <script src="js/finder.js?v=20260916b"></script>
+  <script src="js/finder.js?v=20261001b"></script>
   <script src="js/suporte.js?v=20260831a"></script>
 </body>
 </html>
