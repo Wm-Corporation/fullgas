@@ -111,6 +111,10 @@
      bater com o conteúdo, e clicar de novo na aba não faria nada (o endereço
      já é aquele) — a página parecia travada até recarregar. Cada troca de
      tela ganha um número; quem busca guarda o seu e confere na volta. */
+  // Mínimo de fotos/vídeos em toda reivindicação (30/09/2026). A API trava a
+  // APROVAÇÃO sem elas; a tela avisa antes, no envio.
+  var FOTOS_MINIMAS = 3;
+
   var telaSeq = 0;
   function telaVigente() {
     var minha = telaSeq;
@@ -873,6 +877,12 @@
     document.getElementById('nc-env').addEventListener('click', async function () {
       var d = coletar();
       if (!validarEnvio(d)) return;
+      var jaEnviadas = (modo === 'editar' && ctx.claim && ctx.claim.anexos) ? ctx.claim.anexos.length : 0;
+      if (jaEnviadas + midia.arquivos().length < FOTOS_MINIMAS) {
+        FG.toast('Envie no mínimo ' + FOTOS_MINIMAS + ' fotos ou vídeos' +
+          (jaEnviadas ? ' (já há ' + jaEnviadas + ').' : '.'), 'erro');
+        return;
+      }
 
       // A cortina cobre o overlay INTEIRO (não o .modal, que rola): assim a
       // mensagem fica sempre centralizada na tela, mesmo com o formulário longo
@@ -947,9 +957,26 @@
   // revendedor escolhe um pedido seu; a lista de peças oferece SOMENTE os itens
   // daquele pedido. Sem NIV/prazo. Mesma estrutura (descrição + fotos/vídeos).
   function modalClaimVarejo() {
-    // Só pedidos de venda (exclui reposições de garantia). Cliente já vê apenas
-    // os seus; admin vê todos.
-    var orders = FG.all('orders').filter(function (o) { return !o.garantia; });
+    // Só pedidos de venda (exclui reposições de garantia) e não cancelados
+    // (30/09/2026). Cliente já vê apenas os seus; admin vê todos.
+    var orders = FG.all('orders').filter(function (o) { return !o.garantia && o.status !== 'Cancelado'; });
+
+    // Quanto de cada peça ainda pode entrar em garantia: o que foi ENVIADO,
+    // menos o que já está em outras reivindicações do pedido (fora as
+    // recusadas). A API confere a mesma conta — a tela só evita o erro.
+    function livrePorSku(o) {
+      var reclamado = {};
+      FG.all('claims').forEach(function (c) {
+        if (c.numeroPedido !== o.id || c.status === 'Recusada') return;
+        (c.pecas || []).forEach(function (p) { reclamado[p.sku] = (reclamado[p.sku] || 0) + p.quantidade; });
+      });
+      var livre = {};
+      (o.itens || []).forEach(function (it) {
+        livre[it.artigo] = { enviada: it.qtdEnviada || 0, reclamada: reclamado[it.artigo] || 0,
+          livre: Math.max(0, (it.qtdEnviada || 0) - (reclamado[it.artigo] || 0)) };
+      });
+      return livre;
+    }
     var back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML =
@@ -962,6 +989,8 @@
       }).join('') +
       '</select>' +
       (orders.length ? '' : '<div class="muted" style="font-size:11px;margin-top:4px;">Você ainda não tem pedidos de venda.</div>') +
+      '<div class="muted" style="font-size:11px;margin-top:4px;">Só peças já enviadas podem entrar na garantia. ' +
+      'Envie no mínimo 3 fotos ou vídeos da peça.</div>' +
       '</div>' +
       '<div class="field"><label>Peça(s) do pedido *</label>' +
       '<div class="peca-add">' +
@@ -990,10 +1019,13 @@
     var pecasBox = document.getElementById('vj-pecas-list');
     var pecas = [];
 
-    // Itens do pedido escolhido (SKUs disponíveis para reivindicar).
+    // Itens do pedido escolhido que ainda têm saldo para reivindicar.
     function itensDoPedido() {
       var o = orders.find(function (x) { return x.id === selPedido.value; });
-      return (o && o.itens) || [];
+      if (!o) return [];
+      var livre = livrePorSku(o);
+      return (o.itens || []).filter(function (it) { return livre[it.artigo].livre > 0; })
+        .map(function (it) { return Object.assign({}, it, { saldo: livre[it.artigo] }); });
     }
 
     // Item atualmente selecionado no seletor de peça (ou null).
@@ -1008,11 +1040,12 @@
     // de ajuda e reduz o valor digitado se ele passar do teto.
     function atualizarMaxQtd() {
       var it = itemSelecionado();
-      var max = it ? (it.qtd || 1) : 1;
+      var max = it ? it.saldo.livre : 1;
       inpQtd.max = max;
       if ((parseInt(inpQtd.value, 10) || 0) > max) inpQtd.value = max;
       hintQtd.textContent = it
-        ? 'Máximo para esta peça: ' + max + ' un. (quantidade do pedido).'
+        ? 'Máximo para esta peça: ' + max + ' un. (' + it.saldo.enviada + ' enviada(s)' +
+          (it.saldo.reclamada ? ', ' + it.saldo.reclamada + ' já em outra reivindicação' : '') + ').'
         : '';
     }
     function renderPecas() {
@@ -1040,7 +1073,7 @@
       pecas = []; renderPecas();
       var itens = itensDoPedido();
       if (!selPedido.value || !itens.length) {
-        selItem.innerHTML = '<option value="">' + (selPedido.value ? 'Pedido sem itens' : 'Escolha o pedido primeiro') + '</option>';
+        selItem.innerHTML = '<option value="">' + (selPedido.value ? 'Nenhuma peça enviada disponível para garantia' : 'Escolha o pedido primeiro') + '</option>';
         selItem.disabled = true; btnAdd.disabled = true;
         return;
       }
@@ -1055,10 +1088,10 @@
     selItem.addEventListener('change', atualizarMaxQtd);
     inpQtd.addEventListener('input', function () {
       var it = itemSelecionado();
-      var max = it ? (it.qtd || 1) : 1;
+      var max = it ? it.saldo.livre : 1;
       if ((parseInt(inpQtd.value, 10) || 0) > max) {
         inpQtd.value = max;
-        FG.toast('Máximo para esta peça: ' + max + ' un. (quantidade do pedido).', 'erro');
+        FG.toast('Máximo para esta peça: ' + max + ' un. (enviadas e ainda não reclamadas).', 'erro');
       }
     });
 
@@ -1067,9 +1100,9 @@
       if (!sku) { FG.toast('Selecione uma peça do pedido.', 'erro'); return; }
       var it = itensDoPedido().find(function (x) { return x.artigo === sku; });
       if (!it) { FG.toast('Peça não pertence ao pedido.', 'erro'); return; }
-      var max = it.qtd || 1;
+      var max = it.saldo.livre;
       var q = Math.max(1, parseInt(inpQtd.value, 10) || 1);
-      if (q > max) { q = max; FG.toast('Máximo para esta peça: ' + max + ' un. (quantidade do pedido).', 'erro'); }
+      if (q > max) { q = max; FG.toast('Máximo para esta peça: ' + max + ' un. (enviadas e ainda não reclamadas).', 'erro'); }
       var ex = pecas.find(function (x) { return x.sku === sku; });
       if (ex) ex.quantidade = q; else pecas.push({ sku: sku, nome: it.nome, quantidade: q });
       inpQtd.value = '1';
@@ -1082,6 +1115,9 @@
       if (!numeroPedido) { FG.toast('Selecione o pedido.', 'erro'); return; }
       if (!pecas.length) { FG.toast('Adicione ao menos uma peça do pedido.', 'erro'); return; }
       if (!descricao) { FG.toast('Descreva o problema.', 'erro'); return; }
+      if (midia.arquivos().length < FOTOS_MINIMAS) {
+        FG.toast('Envie no mínimo ' + FOTOS_MINIMAS + ' fotos ou vídeos da peça.', 'erro'); return;
+      }
 
       var cortina = document.createElement('div');
       cortina.className = 'claim-envio';
@@ -1350,6 +1386,9 @@
             '<td>' + (f.status ? '<span class="pill-status ' + esc(f.status) + '">' + esc(f.status) + '</span>' : '—') + '</td>' +
             '<td class="right">' + (f.valor != null ? FG.fmtMoney(f.valor) : '—') + '</td></tr>';
         }).join('') + '</tbody></table>';
+
+    // Linha do tempo: compra, aprovação/Tiny, envios, garantias (30/09/2026).
+    html += '<h3 class="sec-title">Histórico do pedido</h3>' + FG.historicoPedidoHTML(d.historico);
 
     view.innerHTML = html;
     });
@@ -1642,7 +1681,10 @@
         '</div>' +
         '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
         (v.status === 'Disponível' ? '<button class="btn red" id="av-venda">Registrar venda</button>' : '') +
-        (!v.garantia ? '<button class="btn" id="av-gar">Ativar garantia</button>' : '') +
+        // Sem "Ativar garantia" avulso (30/09/2026): a garantia começa no
+        // registro da venda — ligá-la antes encurtava a do comprador.
+        (!v.garantia && v.status === 'Disponível'
+          ? '<span class="muted" style="font-size:12px;align-self:center;">A garantia começa ao registrar a venda.</span>' : '') +
         (sess.papel === 'admin' ? '<button class="btn" id="av-transf">Transferir revendedor</button>' : '') +
         '<a class="btn" href="#reivindicacoes">Criar reivindicação</a>' +
         '<a class="btn" href="/finder">Abrir no Parts Finder</a>' +
@@ -1660,13 +1702,6 @@
       if (bv) bv.addEventListener('click', function () { modalVenda(v, buscar); });
       var bt = document.getElementById('av-transf');
       if (bt) bt.addEventListener('click', function () { modalTransferir(v, buscar); });
-      var bg = document.getElementById('av-gar');
-      if (bg) bg.addEventListener('click', async function () {
-        var r = await FG.ativarGarantia(v.niv);
-        if (!r.ok) { FG.toast(r.msg || 'Não foi possível ativar a garantia.'); return; }
-        FG.toast('Garantia ativada.');
-        buscar();
-      });
 
       var bh = document.getElementById('av-hist-novo');
       if (bh) bh.addEventListener('click', function () {

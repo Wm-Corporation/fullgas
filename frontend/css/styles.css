@@ -563,6 +563,10 @@ main.portal { padding: 0 22px 60px; }
 /* A cor do ícone diz o peso do evento sem precisar ler: recall chama atenção,
    garantia e venda são marcos, o resto é rotina. */
 .hist-recall .hist-ico { background: #fee2e2; }
+/* Histórico do PEDIDO (30/09/2026): mesmas cores de leitura do chassi. */
+.hist-cancelado .hist-ico, .hist-aviso .hist-ico { background: #fee2e2; }
+.hist-aprovado .hist-ico, .hist-tiny .hist-ico, .hist-entregue .hist-ico { background: #dcfce7; }
+.hist-envio .hist-ico { background: #ede9fe; }
 .hist-garantia .hist-ico, .hist-reivindicacao .hist-ico { background: #fff3cd; }
 .hist-venda .hist-ico { background: #dcfce7; }
 .hist-transferencia .hist-ico, .hist-atribuicao .hist-ico { background: #dbeafe; }

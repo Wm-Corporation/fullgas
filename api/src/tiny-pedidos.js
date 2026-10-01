@@ -48,6 +48,7 @@ import {
   obterSituacaoPedido
 } from './tiny.js';
 import { atualizarContatoTiny, clientesLigado } from './tiny-contatos.js';
+import { registrarEventoPedido } from './historico-pedido.js';
 
 // Depois disso o cron para de insistir; o admin pode reexportar pelo painel
 // (o botão zera as tentativas).
@@ -254,6 +255,13 @@ export async function exportarPedido(exportId) {
           SET Status = 'enviado', ExportadoEm = SYSUTCDATETIME(), UltimoErro = NULL
         WHERE ExportId = @id`, { id: exportId });
     console.log(`✓ Exportação Tiny #${exportId}: pedido ${tinyId} criado e aprovado no Tiny.`);
+    const nTiny = (await query('SELECT TinyNumero FROM dbo.TinyPedidoExport WHERE ExportId = @id', { id: exportId }))[0]?.TinyNumero;
+    await registrarEventoPedido({
+      pedidoId: exp.PedidoId, tipo: 'tiny', referencia: nTiny || String(tinyId),
+      titulo: (exp.Escopo === 'backorder' ? 'Pré-venda criada e aprovada no Tiny' : 'Pedido criado e aprovado no Tiny') +
+        (nTiny ? ` (nº ${nTiny})` : ''),
+      detalhe: 'O estoque do Tiny foi descontado.'
+    });
 
     // O pedido.incluir casa o cliente pelo CNPJ POR CONTA PRÓPRIA e, se não
     // achar, CRIA um contato — sem avisar e sem respeitar o nosso vínculo.
@@ -276,6 +284,14 @@ export async function exportarPedido(exportId) {
       { msg: String(e.message).slice(0, 500), id: exportId }
     ).catch(err => console.error('TinyPedidoExport não atualizou:', err.message));
     console.error(`✗ Exportação Tiny #${exportId} falhou: ${e.message}`);
+    // Só a PRIMEIRA falha entra no histórico — o cron re-tenta a cada rodada e
+    // cada tentativa viraria uma linha igual.
+    if (!exp.Tentativas) {
+      await registrarEventoPedido({
+        pedidoId: exp.PedidoId, tipo: 'aviso', titulo: 'Falha ao enviar ao Tiny — o sistema vai tentar de novo',
+        detalhe: String(e.message).slice(0, 300)
+      });
+    }
     return 'erro';
   }
 }
@@ -321,7 +337,10 @@ async function avisarMudancaNoTiny(r, aviso) {
      OUTPUT inserted.ExportId
       WHERE ExportId = @id AND UltimoErro IS NULL`,
     { msg: msg.slice(0, 500), id: r.ExportId });
-  if (marcou?.length) console.warn(`⚠ ${msg}`);
+  if (marcou?.length) {
+    console.warn(`⚠ ${msg}`);
+    await registrarEventoPedido({ pedidoId: r.PedidoId, tipo: 'aviso', titulo: aviso, detalhe: msg, referencia: String(r.TinyPedidoId) });
+  }
 }
 const RE_NAO_LOCALIZADO = /n[ãa]o\s+(foi\s+)?(localizad|encontrad)/i;
 
@@ -395,16 +414,28 @@ export async function cancelarExportacoesDoPedido(pedidoId, { pecasEnviadas = 0 
       { id: r.ExportId, msg: manual }
     );
     if (!r.TinyPedidoId) continue; // nunca chegou ao Tiny: nada a desfazer lá
-    if (manual) { console.warn(`⚠ Exportação Tiny #${r.ExportId}: ${manual}`); continue; }
+    if (manual) {
+      console.warn(`⚠ Exportação Tiny #${r.ExportId}: ${manual}`);
+      await registrarEventoPedido({ pedidoId, tipo: 'aviso', titulo: 'Tiny precisa de ajuste manual', detalhe: manual });
+      continue;
+    }
     try {
       await alterarSituacaoPedido(r.TinyPedidoId, 'cancelado');
       console.log(`✓ Exportação Tiny #${r.ExportId}: pedido ${r.TinyPedidoId} cancelado no Tiny.`);
+      await registrarEventoPedido({
+        pedidoId, tipo: 'tiny', titulo: 'Pedido cancelado no Tiny', detalhe: 'O estoque do Tiny foi devolvido.',
+        referencia: String(r.TinyPedidoId)
+      });
     } catch (e) {
       await query(
         'UPDATE dbo.TinyPedidoExport SET UltimoErro = @msg WHERE ExportId = @id',
         { msg: `Cancele manualmente no Tiny (pedido ${r.TinyPedidoId}): ${e.message}`.slice(0, 500), id: r.ExportId }
       ).catch(() => {});
       console.error(`✗ Cancelamento no Tiny falhou (export #${r.ExportId}): ${e.message}`);
+      await registrarEventoPedido({
+        pedidoId, tipo: 'aviso', titulo: 'Cancele o pedido manualmente no Tiny',
+        detalhe: `O cancelamento automático falhou: ${e.message}`, referencia: String(r.TinyPedidoId)
+      });
     }
   }
 }
