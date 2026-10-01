@@ -258,6 +258,9 @@
         }
         return data;
       });
+    }, function (e) {
+      // Queda de rede: o navegador diz "Failed to fetch", que ninguém entende.
+      throw new Error('Sem conexão com o servidor. Confira sua internet e tente de novo.');
     });
   }
 
@@ -710,7 +713,12 @@
       '<button type="button" class="imp-sair">Voltar para minha conta</button>';
     bar.querySelector('b').textContent = atual.nome || '—';
     bar.querySelector('.imp-emp').textContent = atual.empresa ? ' (' + atual.empresa + ')' : '';
-    bar.querySelector('.imp-sair').addEventListener('click', function () { FG.voltarIdentidade(); });
+    bar.querySelector('.imp-sair').addEventListener('click', function () {
+      // Trava e avisa: navegar logo depois do clique cancelava a volta, e o
+      // admin seguia como cliente sem perceber (30/09/2026).
+      this.disabled = true; this.textContent = 'Voltando…';
+      FG.voltarIdentidade();
+    });
     document.body.insertBefore(bar, document.body.firstChild);
     document.body.classList.add('com-imp-bar');
   }
@@ -730,7 +738,12 @@
   // Sair. Passa pelo mesmo encerrarSessao do guardião — o servidor precisa
   // apagar o fg_sess httpOnly, que este arquivo não alcança. Sem `motivo`,
   // vai para a home limpa: sair por vontade própria não é um erro a explicar.
-  FG.logout = function () { encerrarSessao(null, '/'); };
+  // Em identidade assumida, "Sair" volta à conta do admin (antes derrubava o
+  // admin também e ele precisava entrar de novo).
+  FG.logout = function () {
+    if (FG.identidadeAssumida()) { FG.voltarIdentidade(); return; }
+    encerrarSessao(null, '/');
+  };
 
   // Produtos (admin) — gravações que atualizam o cache no fim. Após gravar,
   // recarrega também o rastreador de pré-venda (repor estoque muda o status
@@ -809,6 +822,27 @@
   // Muda o status do pedido (admin). Promise<{ ok, ... }>.
   FG.setOrderStatus = function (id, status) {
     return putPedido('/pedidos/' + encodeURIComponent(id) + '/status', { status: status });
+  };
+
+  // SKUs que o Finder liga a um modelo (filtro "Buscar por moto" da loja).
+  // O modelo da loja só traz id/nome/ano — as peças moram nas seções do Finder,
+  // então buscamos uma vez por modelo e guardamos. Resolve com [] em erro.
+  var skusDoModelo = {};
+  FG.artigosDoModelo = function (codigo) {
+    if (skusDoModelo[codigo]) return skusDoModelo[codigo];
+    skusDoModelo[codigo] = api('/finder/modelos/' + encodeURIComponent(codigo)).then(function (m) {
+      var secoes = [].concat(m.chassi || [], m.engine || []);
+      return Promise.all(secoes.map(function (s) {
+        return api('/finder/secoes/' + s.id).then(function (d) {
+          return (d.pecas || []).map(function (p) { return p.sku || p.artigo; });
+        }, function () { return []; });
+      })).then(function (listas) {
+        var set = {};
+        listas.forEach(function (l) { l.forEach(function (k) { if (k) set[k] = true; }); });
+        return Object.keys(set);
+      });
+    }).catch(function () { delete skusDoModelo[codigo]; return []; });
+    return skusDoModelo[codigo];
   };
 
   // Linha do tempo do pedido (vem no detalhe, campo `historico`). HTML pronto,

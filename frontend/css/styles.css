@@ -1459,3 +1459,27 @@ body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
   background: #e5e7eb; color: #374151; border-radius: 6px;
   padding: 10px 14px; font-size: 13px; margin-top: 14px;
 }
+
+/* =========================================================
+   CELULAR (30/09/2026) — nada pode escapar da largura da tela
+   ---------------------------------------------------------
+   Achado da varredura: 7 de 12 telas ganhavam rolagem lateral em 390 px.
+   Três causas: (1) colunas de grid "1fr" não encolhem abaixo do conteúdo
+   (precisam de minmax(0, 1fr)); (2) tabelas largas empurravam a página;
+   (3) o zoom de 1.15 da interface alarga tudo ~15% — em celular não vale.
+   ========================================================= */
+@media (max-width: 640px) {
+  :root { --zoom-ui: 1; }
+  html, body { max-width: 100%; overflow-x: hidden; }
+  .side-layout, .shop-layout, .finder-layout { grid-template-columns: minmax(0, 1fr); }
+  .side-layout > *, .shop-layout > *, .finder-layout > * { min-width: 0; }
+  /* tabelas: rolam dentro de si mesmas, não a página */
+  table.table, table.tbl { display: block; overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
+  /* títulos de faixa e barras do topo quebram linha em vez de estourar */
+  #page-title, .band-title, h1, h2 { overflow-wrap: anywhere; }
+  #page-title { font-size: 18px; padding-left: 18px; }
+  .finder-top-right { flex-wrap: wrap; gap: 10px; }
+  .finder-top-right img, .topbar img { max-width: 100%; height: auto; }
+  .toolbar { flex-wrap: wrap; }
+  .tabs { flex-wrap: wrap; }
+}

@@ -357,7 +357,8 @@ body.auth .field:nth-of-type(n+4) { animation-delay: .18s; }
    formulário ocupa a largura toda. */
 @media (max-width: 720px) {
   body.auth .auth-wrap { padding: 24px 14px; }
-  body.auth .auth-card { grid-template-columns: 1fr; border-radius: 16px; clip-path: inset(0 round 16px); }
+  body.auth .auth-card { grid-template-columns: minmax(0, 1fr); border-radius: 16px; clip-path: inset(0 round 16px); }
+  body.auth .auth-marca, body.auth .auth-painel { min-width: 0; }
   body.auth .auth-marca {
     padding: 26px 24px 22px;
     border-right: none;

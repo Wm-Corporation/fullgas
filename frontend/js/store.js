@@ -369,8 +369,7 @@
       var s = FG.session();
       if (!s) { location.href = '/'; return null; }
       if (papel === 'admin' && s.papel !== 'admin') {
-        alert('Acesso restrito a administradores.');
-        location.href = '/portal'; return null;
+        location.href = '/portal'; return null;   // sem alert(): ele travava a aba
       }
       return s;
     },
@@ -546,6 +545,9 @@
     },
 
     /* ---- util ---- */
+    // Valor que pode ter sido ESCONDIDO pela API (conta sem a área financeiro):
+    // ausente vira "—", não "R$ 0,00" (zero é um valor, e engana).
+    fmtMoneyOpt: function (v) { return v == null ? '—' : fmtMoney(v); },
     fmtMoney: fmtMoney, fmtDate: fmtDate, fmtDateTime: fmtDateTime, esc: esc, uid: uid, pad: pad,
 
     /* ---- máscaras de formulário (formatam enquanto digita) ---- */

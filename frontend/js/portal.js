@@ -1276,7 +1276,7 @@
       (meus.length ? meus.map(function (o, i) {
         var statusCol = '<span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span>' +
           (o.garantia ? ' <span class="pill-status Garantia">Garantia</span>' : '') +
-          (o.progresso && o.progresso.parcial ? ' <span class="pill-status Parcial">Parcial</span>' : '') +
+          (o.progresso && o.progresso.parcial && o.status !== 'Parcial' && o.status !== 'Cancelado' ? ' <span class="pill-status Parcial">Parcial</span>' : '') +
           (o.temBackorder ? '<br><span class="muted" style="font-size:11px;">contém pré-venda</span>' : '');
         return '<tr><td><a href="#pedido/' + esc(o.id) + '">' + esc(o.id) + '</a>' +
           ' <button class="link-action pd-open" data-i="' + i + '" title="Ver itens">⤢</button>' +
@@ -1284,7 +1284,7 @@
           o.itens.map(function (it) { return '<div class="muted">' + it.qtd + '× ' + esc(it.nome) + ' (' + it.artigo + ')</div>'; }).join('') +
           '</div></td>' +
           '<td>Peças de reposição</td><td>' + FG.fmtDateTime(o.data) + '</td>' +
-          '<td>' + statusCol + '</td><td class="right">' + FG.fmtMoney(o.total) + '</td></tr>';
+          '<td>' + statusCol + '</td><td class="right">' + FG.fmtMoneyOpt(o.total) + '</td></tr>';
       }).join('') : '<tr><td colspan="5" class="muted">Vazio</td></tr>') +
       '</tbody></table>';
 
@@ -1299,7 +1299,7 @@
     });
     document.getElementById('pd-csv').addEventListener('click', function () {
       var linhas = [['Pedido', 'Data', 'Status', 'Total']];
-      meus.forEach(function (o) { linhas.push([o.id, FG.fmtDateTime(o.data), o.status, o.total.toFixed(2)]); });
+      meus.forEach(function (o) { linhas.push([o.id, FG.fmtDateTime(o.data), o.status, o.total == null ? '' : o.total.toFixed(2)]); });
       FG.exportCSV('pedidos', linhas);
     });
   }
@@ -1335,8 +1335,8 @@
           (it.garantiaNumero ? ' <span class="pill-status Garantia" title="Peça com garantia de varejo aprovada">Garantia Nº ' + esc(it.garantiaNumero) + '</span>' : '') +
           '</td>' +
           '<td class="right">' + it.qtd + '</td><td class="right">' + it.qtdEnviada + '</td>' +
-          '<td class="right">' + FG.fmtMoney(it.preco) + '</td>' +
-          '<td class="right">' + FG.fmtMoney(it.preco * it.qtd) + '</td></tr>';
+          '<td class="right">' + FG.fmtMoneyOpt(it.preco) + '</td>' +
+          '<td class="right">' + (it.preco == null ? '—' : FG.fmtMoney(it.preco * it.qtd)) + '</td></tr>';
       }).join('') + '</tbody></table>';
   }
 
@@ -1353,18 +1353,18 @@
     var normais = d.itens.filter(function (i) { return !i.backorder; });
     var preVenda = d.itens.filter(function (i) { return i.backorder; });
     var pg = d.progresso;
+    var cancelado = String(d.status || '').toLowerCase() === 'cancelado';
 
     // O VOLTAR fica só na trilha (botão padrão) — não se repete aqui dentro.
     var html =
       '<div class="ped-det-head"><h2 style="margin:0;">Pedido ' + esc(d.id) + '</h2>' +
       '<span class="pill-status ' + esc(d.status) + '">' + esc(d.status) + '</span>' +
       (d.garantia ? ' <span class="pill-status Garantia">Garantia — reposição sem cobrança</span>' : '') +
-      (pg.parcial ? ' <span class="pill-status Parcial">Parcial</span>' : '') + '</div>' +
-      '<p class="muted">' + FG.fmtDateTime(d.data) + ' · ' + esc(d.empresa) + ' · Total ' + FG.fmtMoney(d.total) + '</p>' +
+      (pg.parcial && d.status !== 'Parcial' && !cancelado ? ' <span class="pill-status Parcial">Parcial</span>' : '') + '</div>' +
+      '<p class="muted">' + FG.fmtDateTime(d.data) + ' · ' + esc(d.empresa) + ' · Total ' + FG.fmtMoneyOpt(d.total) + '</p>' +
       '<div class="prog-wrap"><div class="prog-bar"><div class="prog-fill" style="width:' + pg.pct + '%;"></div></div>' +
-      '<span class="prog-label">' + pg.pct + '% (' + pg.enviada + ' de ' + pg.qtd + ' enviadas)</span></div>';
-
-    var cancelado = String(d.status || '').toLowerCase() === 'cancelado';
+      '<span class="prog-label">' + (cancelado ? 'Pedido cancelado — ' + pg.enviada + ' de ' + pg.qtd + ' peças tinham sido enviadas'
+        : pg.pct + '% (' + pg.enviada + ' de ' + pg.qtd + ' enviadas)') + '</span></div>';
 
     if (normais.length)
       html += '<h3 class="sec-title">Itens em envio normal</h3>' + tabelaItens(normais, cancelado);
@@ -1736,8 +1736,10 @@
       '<table class="table"><thead><tr><th class="filt">NIV</th><th class="filt">Modelo</th>' +
       (admin ? '<th>Localização</th>' : '') +
       '<th class="filt">Status</th><th>Entrada</th><th></th></tr></thead><tbody>' +
+      (vehs.length ? '' : '<tr><td colspan="' + (admin ? 6 : 5) + '" class="muted">Nenhuma moto no seu estoque ainda. ' +
+        'Quando a Fullgas atribuir chassis à sua concessionária, eles aparecem aqui.</td></tr>') +
       vehs.map(function (v) {
-        return '<tr><td>' + v.niv + '</td><td>' + esc(modelName(v.modeloId)) + '</td>' +
+        return '<tr><td>' + esc(v.niv) + '</td><td>' + esc(modelName(v.modeloId)) + '</td>' +
           (admin ? '<td>' + (v.fabrica ? FG.seloFabrica() : esc(v.empresa || '—')) + '</td>' : '') +
           '<td>' + (v.status === 'Disponível' ? '<span class="stock-ok">Disponível</span>' : esc(v.status)) + '</td>' +
           '<td>' + FG.fmtDate(v.entrada) + '</td>' +
@@ -1932,7 +1934,9 @@
 
       /* ---- cabeçalho: título + logo ---- */
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">' +
-      '<h1 style="margin:0;font-size:36px;letter-spacing:.5px;">Fatura</h1>' +
+      '<h1 style="margin:0;font-size:36px;letter-spacing:.5px;">Fatura' +
+      (i.status === 'Anulada' ? ' <span style="color:#b91c1c;border:3px solid #b91c1c;padding:0 10px;font-size:26px;margin-left:10px;">ANULADA</span>' : '') +
+      '</h1>' +
       logo +
       '</div>' +
 
@@ -2447,7 +2451,8 @@
 
       if (!lista.length) {
         html += '<p class="muted">' + (todos.length
-          ? 'Nenhum chamado neste filtro.'
+          ? 'Nenhum chamado neste filtro.' + (todos.some(function (c) { return c.naoLidas; })
+            ? ' Há respostas novas em chamados encerrados — veja em "Encerrados" ou "Todos".' : '')
           : 'Você ainda não abriu nenhum chamado.') + '</p>';
       } else {
         html += '<table class="table sup-tabela"><thead><tr>' +
