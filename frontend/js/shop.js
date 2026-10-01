@@ -174,7 +174,22 @@
 
     // Numa categoria de topo, inclui os produtos das suas subcategorias.
     var catIds = (termoBusca != null || !cat) ? null : FG.categoriaEDescendentes(catId);
-    var artigosModelo = motoFiltro ? FG.modelArticles(motoFiltro) : null;
+    // Filtro por moto: as peças do modelo vêm do Finder (assíncrono, com cache).
+    // Enquanto não chegam, desenha a tela de "carregando" e redesenha em seguida.
+    var artigosModelo = null;
+    if (motoFiltro) {
+      var pronto = FG._artigosModelo && FG._artigosModelo[motoFiltro];
+      if (!pronto) {
+        view.innerHTML = '<div class="empty-box">Buscando as peças da moto…</div>';
+        var alvo = motoFiltro;
+        FG.artigosDoModelo(alvo).then(function (l) {
+          FG._artigosModelo = FG._artigosModelo || {}; FG._artigosModelo[alvo] = l;
+          if (motoFiltro === alvo) renderCategoria(catId, termoBusca);
+        });
+        return;
+      }
+      artigosModelo = pronto;
+    }
     var todos = FG.all('products').filter(function (p) {
       if (termoBusca != null) {
         var t = termoBusca.toLowerCase();
@@ -254,7 +269,8 @@
           : '<div class="prod-buy"><button class="btn dark" disabled style="opacity:.55;cursor:not-allowed;">Indisponível</button></div>') +
         '</div></div></div>';
     }).join('');
-    if (!lista.length) rows = '<div class="empty-box">Nenhum artigo encontrado com os filtros atuais.</div>';
+    if (!lista.length) rows = '<div class="empty-box">Nenhum artigo encontrado com os filtros atuais.' +
+      (motoFiltro ? '<br><button class="btn" id="limpa-moto">Limpar filtro de moto</button>' : '') + '</div>';
 
     view.innerHTML = '<div class="shop-layout">' + side + '<section>' + subChips + tools + rows + '</section></div>';
 
@@ -269,6 +285,8 @@
     tg.addEventListener('click', toggleAvail);
     tg.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAvail(); } });
 
+    var lm = document.getElementById('limpa-moto');
+    if (lm) lm.addEventListener('click', function () { motoFiltro = ''; pagina = 1; renderCategoria(catId, termoBusca); });
     /* filtro por moto */
     document.getElementById('sel-moto').addEventListener('change', function (e) {
       motoFiltro = e.target.value; pagina = 1; renderCategoria(catId, termoBusca);
@@ -296,7 +314,8 @@
       b.addEventListener('click', function () {
         var art = b.getAttribute('data-art');
         var inp = view.querySelector('.qty-in[data-art="' + art + '"]');
-        var qtd = Math.max(1, Number(inp && inp.value) || 1);
+        var qtd = Math.max(1, Math.floor(Number(inp && inp.value)) || 1);
+        if (inp) inp.value = qtd;
         var lim = FG.limiteCompra(art);
         var jaNoCarro = (FG.cart().find(function (i) { return i.artigo === art; }) || {}).qtd || 0;
         var ajustou = (jaNoCarro + qtd) > lim;
@@ -321,7 +340,7 @@
     setBand(p.nome, [{ nome: cat ? cat.nome : '', href: '#/categoria/' + esc(p.cat) }, { nome: p.artigo }]);
 
     /* modelos que usam o artigo (link para o finder) */
-    var usados = FG.all('models').filter(function (m) { return FG.modelArticles(m.id).indexOf(p.artigo) >= 0; });
+    var usados = [];
 
     view.innerHTML =
       '<div class="prod-page">' +
@@ -342,6 +361,15 @@
         usados.map(function (m) { return '<a href="/finder#/modelo/' + esc(m.id) + '/chassi">' + esc(m.nome + ' ' + m.ano) + '</a>'; }).join(' · ') + '</p>' : '') +
       '</div></div>';
     bindAddCart();
+    // Aplicação (Parts Finder): quais modelos usam a peça — vem do Finder.
+    FG.finderUso(p.artigo, '').then(function (l) {
+      var mods = {}; (l || []).forEach(function (u) { mods[u.modeloCodigo] = u.modeloLabel + ' ' + u.ano; });
+      var cods = Object.keys(mods);
+      if (!cods.length || location.hash.indexOf(p.artigo) < 0) return;
+      var alvo = view.querySelector('.prod-page > div:last-child');
+      if (alvo) alvo.insertAdjacentHTML('beforeend', '<p class="muted" style="font-size:12px;">Aplicação (Parts Finder): ' +
+        cods.map(function (c) { return '<a href="/finder#/modelo/' + esc(c) + '/chassi">' + esc(mods[c]) + '</a>'; }).join(' · ') + '</p>');
+    }, function () {});
   }
 
   /* =========================================================
@@ -384,23 +412,24 @@
     });
     document.getElementById('qo-reset').addEventListener('click', renderQuickOrder);
     document.getElementById('qo-add').addEventListener('click', function () {
-      var add = 0, ajustados = 0, indisp = 0;
+      var add = 0, ajustados = 0, indisp = 0, naoAchou = 0, linhasOk = 0;
       for (var i = 0; i < LINHAS; i++) {
         var art = view.querySelector('.art[data-i="' + i + '"]').value.trim();
         if (!art) continue;
         var p = FG.product(art.toUpperCase()) || FG.product(art);
-        if (!p) continue;
+        if (!p) { naoAchou++; continue; }
         if (!FG.compravel(p.artigo)) { indisp++; continue; }   // indisponível: ignora
-        var qtd = Math.max(1, Number(view.querySelector('.qo-qty[data-i="' + i + '"]').value) || 1);
+        var qtd = Math.max(1, Math.floor(Number(view.querySelector('.qo-qty[data-i="' + i + '"]').value)) || 1);
         var ja = (FG.cart().find(function (c) { return c.artigo === p.artigo; }) || {}).qtd || 0;
         if (ja + qtd > FG.limiteCompra(p.artigo)) ajustados++;
-        FG.cartAdd(p.artigo, qtd); add += qtd;
+        FG.cartAdd(p.artigo, qtd); add += qtd; linhasOk++;
       }
       if (add) {
-        FG.toast(add + ' item(ns) adicionados à cesta.' +
+        FG.toast(linhasOk + ' artigo(s) adicionado(s) à cesta (' + add + ' un.).' +
+          (naoAchou ? ' ' + naoAchou + ' não encontrado(s) — ignorado(s).' : '') +
           (ajustados ? ' ' + ajustados + ' ajustado(s) ao estoque disponível.' : '') +
           (indisp ? ' ' + indisp + ' indisponível(is) ignorado(s).' : ''),
-          (ajustados || indisp) ? 'erro' : undefined);
+          (ajustados || indisp || naoAchou) ? 'erro' : undefined);
         refreshCart(); location.hash = '#/carrinho';
       } else if (indisp) {
         FG.toast(indisp + ' produto(s) indisponível(is) — nada adicionado.', 'erro');
@@ -466,7 +495,7 @@
     Array.prototype.forEach.call(view.querySelectorAll('.ct-qty'), function (inp) {
       inp.addEventListener('change', function () {
         var art = inp.getAttribute('data-art');
-        var pedido = Math.max(0, Number(inp.value) || 0);
+        var pedido = Math.max(0, Math.floor(Number(inp.value)) || 0);
         var lim = FG.limiteCompra(art);
         FG.cartSet(art, pedido);
         if (pedido > lim) FG.toast('Estoque disponível: ' + lim + ' un. Quantidade ajustada.', 'erro');
@@ -478,9 +507,13 @@
     });
     document.getElementById('ct-limpar').addEventListener('click', function () { FG.cartClear(); refreshCart(); renderCarrinho(); });
     document.getElementById('ct-enviar').addEventListener('click', async function () {
+      var btn = this;
+      if (btn.disabled) return;
+      // Trava durante o envio: dois cliques geravam dois pedidos e duas faturas.
+      btn.disabled = true; btn.textContent = 'Enviando pedido…';
       var o = await FG.createOrder();
       refreshCart();
-      if (!o) return;
+      if (!o) { btn.disabled = false; btn.textContent = 'Enviar pedido'; return; }
       var backHTML = (o.itensEmBackorder && o.itensEmBackorder.length) ?
         '<div class="backorder-aviso" style="max-width:540px;margin:14px auto;text-align:left;">' +
         '<b>⚠ Itens em pré-venda:</b> serão enviados quando o estoque for reposto.<ul>' +
@@ -526,10 +559,10 @@
           (o.garantia ? ' <span class="pill-status Garantia">Garantia</span>' : '') + '</span>' +
           '<span>' + FG.fmtDateTime(o.data) + '</span>' +
           '<span><span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span></span>' +
-          '<span style="margin-left:auto;"><b>' + FG.fmtMoney(o.total) + '</b></span></div>' +
+          '<span style="margin-left:auto;"><b>' + FG.fmtMoneyOpt(o.total) + '</b></span></div>' +
           '<div class="oc-items">' + o.itens.map(function (it) {
             return '<div>' + it.qtd + '× <a href="#/produto/' + esc(it.artigo) + '">' + esc(it.nome) + '</a> ' +
-              '<span class="muted">(' + esc(it.artigo) + ')</span> — ' + FG.fmtMoney(it.preco * it.qtd) + '</div>';
+              '<span class="muted">(' + esc(it.artigo) + ')</span> — ' + (it.preco == null ? '—' : FG.fmtMoney(it.preco * it.qtd)) + '</div>';
           }).join('') + '</div></div>';
       }).join('');
     document.getElementById('ho-chk').addEventListener('change', function (e) { verEmpresa = e.target.checked; renderHistorico(); });

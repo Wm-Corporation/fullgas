@@ -173,7 +173,9 @@
      ========================================================= */
   function renderDash() {
     h1.textContent = 'Painel de Controle'; setOn('dashboard');
-    var orders = FG.all('orders');
+    // Só vendas de verdade: pedido cancelado não é venda, e pedido de garantia
+    // (R$ 0, reposição) puxaria o ticket médio para baixo (30/09/2026).
+    var orders = FG.all('orders').filter(function (o) { return o.status !== 'Cancelado' && !o.garantia; });
     var totalVendas = orders.reduce(function (t, o) { return t + o.total; }, 0);
     var ticket = orders.length ? totalVendas / orders.length : 0;
 
@@ -181,8 +183,12 @@
     var dias = [], qtds = [], receita7 = 0, qtd7 = 0;
     for (var i = 6; i >= 0; i--) {
       var d = new Date(); d.setDate(d.getDate() - i);
-      var chave = d.toISOString().slice(0, 10);
-      var doDia = orders.filter(function (o) { return o.data.slice(0, 10) === chave; });
+      // Dia LOCAL (Brasil), não UTC: pedido das 21h entrava no dia seguinte.
+      var chave = d.getFullYear() + '-' + FG.pad(d.getMonth() + 1, 2) + '-' + FG.pad(d.getDate(), 2);
+      var doDia = orders.filter(function (o) {
+        var od = new Date(o.data);
+        return od.getFullYear() + '-' + FG.pad(od.getMonth() + 1, 2) + '-' + FG.pad(od.getDate(), 2) === chave;
+      });
       dias.push(FG.pad(d.getDate(), 2) + '/' + FG.pad(d.getMonth() + 1, 2));
       qtds.push(doDia.length);
       doDia.forEach(function (o) { receita7 += o.total; qtd7 += o.itens.reduce(function (n, it) { return n + it.qtd; }, 0); });
@@ -200,17 +206,16 @@
     var top = Object.keys(agg).map(function (k) { return { artigo: k, nome: agg[k].nome, preco: agg[k].preco, qtd: agg[k].qtd }; })
       .sort(function (a, b) { return b.qtd - a.qtd; }).slice(0, 5);
 
-    var buscas = FG.all('searches').slice(0, 5);
+    var buscas = [];
 
     view.innerHTML =
-      '<div class="adm-banner">ℹ️ É hora de <b>mudar sua senha</b>.</div>' +
       '<div class="adm-bar"><span class="grow"></span><button class="btn-orange" id="dz-reload">Recarregar</button></div>' +
 
       '<div class="dash-grid">' +
 
       /* coluna esquerda */
       '<div>' +
-      '<div class="kpi"><div class="k-lbl">Período de Vendas</div><div class="k-val">' + FG.fmtMoney(totalVendas) + '</div></div>' +
+      '<div class="kpi"><div class="k-lbl">Total vendido (sem cancelados)</div><div class="k-val">' + FG.fmtMoney(totalVendas) + '</div></div>' +
       '<div class="kpi"><div class="k-lbl">Ticket Médio</div><div class="k-val">' + FG.fmtMoney(ticket) + '</div></div>' +
 
       '<div class="adm-card"><div class="c-head">Últimos Pedidos</div><div class="c-body">' +
@@ -220,12 +225,6 @@
         return '<tr><td>' + esc(o.empresa) + '</td><td class="r">' + n + '</td><td class="r">' + FG.fmtMoney(o.total) + '</td></tr>';
       }).join('') + '</tbody></table></div></div>' +
 
-      '<div class="adm-card"><div class="c-head">Últimas Buscas</div><div class="c-body">' +
-      '<table class="tbl"><thead><tr><th>Termo de pesquisa</th><th class="r">Resultados</th></tr></thead><tbody>' +
-      (buscas.length ? buscas.map(function (s) {
-        return '<tr><td>' + esc(s.termo) + '</td><td class="r">' + s.resultados + '</td></tr>';
-      }).join('') : '<tr><td colspan="2" class="muted">Sem buscas registradas ainda.</td></tr>') +
-      '</tbody></table></div></div>' +
       '</div>' +
 
       /* coluna direita */
@@ -237,8 +236,6 @@
       '<div class="chart-x">' + dias.map(function (d) { return '<span>' + d + '</span>'; }).join('') + '</div>' +
       '<div class="chart-stats">' +
       '<div class="s"><b>Receita</b><span class="v">' + FG.fmtMoney(receita7) + '</span></div>' +
-      '<div class="s"><b>Taxas</b><span class="v">' + FG.fmtMoney(0) + '</span></div>' +
-      '<div class="s"><b>Entrega</b><span class="v">' + FG.fmtMoney(receita7 ? 102.26 : 0) + '</span></div>' +
       '<div class="s"><b>Quantidade</b><span class="v">' + qtd7 + '</span></div>' +
       '</div></div></div>' +
 
