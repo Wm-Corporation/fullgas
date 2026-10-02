@@ -22,6 +22,7 @@ import {
   processarExportacoes, cancelarExportacoesDoPedido
 } from '../tiny-pedidos.js';
 import { registrarEventoPedido, historicoDoPedido, resumoPecas } from '../historico-pedido.js';
+import { listaDaEmpresa, aplicarPercentual } from '../lista-preco.js';
 
 const router = Router();
 
@@ -359,6 +360,13 @@ router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async 
   try { await atualizarEstoqueCesta([...merged.keys()]); }
   catch (e) { console.warn('⚠ Checagem de estoque no Tiny indisponível:', e.message); }
 
+  // Preço da lista da empresa (migration 048), calculado AQUI — nunca vem
+  // da cesta. Admin não compra; se comprasse, seria pelo preço base.
+  let lista = null;
+  try { lista = req.user.papel === 'admin' ? null : await listaDaEmpresa(req.user.empresaId); }
+  catch (e) { return next(e); }
+  const pct = lista?.percentual || 0;
+
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
   try {
@@ -412,10 +420,11 @@ router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async 
         backorder = true;
       }
 
-      const preco = Number(row.Preco);
+      const preco = aplicarPercentual(row.Preco, pct);
       itensSnap.push({ produtoId: row.ProdutoId, sku: skuItem, nome: row.Nome, preco, qtd, backorder });
       total += preco * qtd;
     }
+    total = Math.round(total * 100) / 100;
 
     // Numeração no banco: NumeroPedido por SEQUENCE global ('0005' + 6 dígitos)
     // — o ÚNICO código do pedido (o antigo CodigoCx "CX..." foi aposentado).
@@ -431,9 +440,12 @@ router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async 
       .input('eid', sql.Int, req.user.empresaId)
       .input('data', sql.DateTime2, Agora)
       .input('total', sql.Decimal(12, 2), total)
-      .query(`INSERT INTO dbo.Pedido (NumeroPedido, UsuarioId, EmpresaId, DataPedido, Status, Total)
+      .input('lid', sql.Int, lista?.id ?? null)
+      .input('lpct', sql.Decimal(7, 2), lista ? lista.percentual : null)
+      .query(`INSERT INTO dbo.Pedido (NumeroPedido, UsuarioId, EmpresaId, DataPedido, Status, Total,
+                                      ListaPrecoId, ListaPrecoPercentual)
               OUTPUT inserted.PedidoId
-              VALUES (@num, @uid, @eid, @data, 'Pendente', @total)`);
+              VALUES (@num, @uid, @eid, @data, 'Pendente', @total, @lid, @lpct)`);
     const pedidoId = insPed.recordset[0].PedidoId;
 
     for (const it of itensSnap) {

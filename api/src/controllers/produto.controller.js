@@ -5,6 +5,7 @@
 // ============================================================
 import * as service from '../services/produto.service.js';
 import { miniaturaDe, prepararMiniaturas } from '../miniaturas.js';
+import { percentualDoUsuario, aplicarPercentual } from '../lista-preco.js';
 
 // URL relativa do banco (/uploads/...) → absoluta, usando o host da requisição.
 // URLs já absolutas (ex.: imagem hospedada no Tiny) passam intactas.
@@ -15,12 +16,13 @@ function urlAbs(req, rel) {
 }
 
 // Linha do banco → formato que o front (store.js) já espera.
-function toProduto(req, r) {
+// `pct` = % da lista de preço de quem pede (0 para admin: preço base).
+function toProduto(req, r, pct = 0) {
   return {
     artigo: r.Sku,
     nome: r.Nome,
     cat: r.CategoriaCodigo,
-    preco: Number(r.Preco),
+    preco: aplicarPercentual(r.Preco, pct),
     estoque: r.Estoque,
     descricao: r.Descricao || '',
     previsao: r.PrevisaoChegada || null,
@@ -34,15 +36,15 @@ function toProduto(req, r) {
 
 export async function listar(req, res, next) {
   try {
-    const rows = await service.listar(req.query.categoria);
-    res.json(rows.map(r => toProduto(req, r)));
+    const [rows, pct] = await Promise.all([service.listar(req.query.categoria), percentualDoUsuario(req.user)]);
+    res.json(rows.map(r => toProduto(req, r, pct)));
   } catch (e) { next(e); }
 }
 
 export async function obter(req, res, next) {
   try {
-    const row = await service.obter(req.params.sku);
-    res.json(toProduto(req, row));
+    const [row, pct] = await Promise.all([service.obter(req.params.sku), percentualDoUsuario(req.user)]);
+    res.json(toProduto(req, row, pct));
   } catch (e) { next(e); }
 }
 

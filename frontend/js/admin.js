@@ -301,7 +301,7 @@
         { k: 'status', rotulo: 'Status', opcoes: [['pendente', 'Pendente'], ['aprovado', 'Aprovado'], ['bloqueado', 'Bloqueado']] },
         { k: 'tipo', rotulo: 'Tipo', opcoes: [['gestor', 'Conta principal'], ['interna', 'Conta interna']] }
       ], 'Buscar por nome, e-mail, empresa ou CNPJ') +
-      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>CNPJ</th><th>Endereço</th><th>Tipo</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
+      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>CNPJ</th><th>Endereço</th><th>Tipo</th><th>Lista de preço</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
       (users.length ? users.map(function (u) {
         var e = u.endereco;
         // Resumo compacto na tabela; os dados completos ficam na linha
@@ -333,9 +333,10 @@
           '<td>' + (u.gestor === false
             ? '<span class="pill-status ps-interna">Conta interna</span>'
             : '<span class="pill-status ps-gestor">Conta principal</span>') + '</td>' +
+          '<td>' + celulaLista(u) + '</td>' +
           '<td>' + pill(u.status) + '</td><td>' + acoesUsuario(u) + '</td></tr>' +
-          '<tr class="usr-det hidden" data-det="' + u.id + '"><td colspan="8">' + det + '</td></tr>';
-      }).join('') : vazioFiltro(8, 'Nenhum cliente com esse filtro.')) + '</tbody></table></div></div>';
+          '<tr class="usr-det hidden" data-det="' + u.id + '"><td colspan="9">' + det + '</td></tr>';
+      }).join('') : vazioFiltro(9, 'Nenhum cliente com esse filtro.')) + '</tbody></table></div></div>';
 
     bindFiltro(renderClientes);
 
@@ -351,6 +352,18 @@
     });
 
     bindGerenciar(renderClientes);
+  }
+
+  // Lista de preço da EMPRESA na tabela de clientes. Pendente ainda não tem:
+  // a lista é escolhida na aprovação.
+  function celulaLista(u) {
+    var l = u.listaPreco;
+    if (!l) return u.status === 'pendente'
+      ? '<span class="muted" style="font-size:12px;">definir ao aprovar</span>'
+      : '<span class="muted" style="font-size:12px;">Preço cheio</span>';
+    return '<div class="lp-cel">' + esc(l.descricao) +
+      '<small>' + esc(FG.textoPercentual(l.percentual)) + '</small>' +
+      (l.ativa ? '' : '<small class="lp-sumiu">⚠ não existe mais no Tiny</small>') + '</div>';
   }
 
   /* ---------------------------------------------------------
@@ -492,10 +505,25 @@
         ' vê. Uma tarja fica no topo e você volta para a sua conta quando quiser.',
         'Entrar na conta', 'destaque']);
 
+    // A lista de preço é da EMPRESA (vale para a conta principal e as
+    // internas). É escolhida ao aprovar o cadastro e pode ser trocada depois
+    // pela conta principal. Seletor preenchido em carregarListas().
+    var seletorLista = '<div class="lp-escolha">' +
+      '<select class="lp-sel" disabled><option>Carregando listas…</option></select>' +
+      '<button type="button" class="link-action lp-tiny">Atualizar do Tiny</button>' +
+      '<div class="lp-aviso hidden"></div></div>';
+
     if (u.status === 'pendente')
       cards.push(['aprovar', '✅', 'Aprovar cadastro',
-        'Libera o primeiro acesso. Enquanto está pendente, esta pessoa não consegue entrar no portal.',
-        'Aprovar agora', 'ok']);
+        ehAdmin
+          ? 'Libera o primeiro acesso. Enquanto está pendente, esta pessoa não consegue entrar no portal.'
+          : 'Libera o primeiro acesso. Escolha antes a <strong>lista de preço</strong> do Tiny que esta concessionária vai pagar.',
+        'Aprovar agora', 'ok', ehAdmin ? '' : seletorLista]);
+    else if (!ehAdmin && !interna)
+      cards.push(['lista', '🏷', 'Lista de preço',
+        'Define o preço que ' + esc(u.empresa || 'a empresa') + ' vê e paga na loja e no Localizador. ' +
+        'Vale para todas as contas da empresa, a partir do próximo pedido.',
+        'Salvar lista', '', seletorLista]);
 
     cards.push(['papel', ehAdmin ? '⬇' : '⬆',
       ehAdmin ? 'Rebaixar para cliente' : 'Promover a administrador',
@@ -533,13 +561,16 @@
         ? FG.seloFabrica()
         : esc(u.empresa || '—') + (u.fabrica ? ' ' + FG.seloFabrica() : '') +
           (u.cnpj ? ' <span class="muted">· ' + esc(u.cnpj) + '</span>' : '')) + '</div>' +
+      (ehAdmin || u.status === 'pendente' ? '' : '<div class="usr-ficha-emp">Lista de preço: ' + (u.listaPreco
+        ? '<b>' + esc(u.listaPreco.descricao) + '</b> <span class="muted">· ' + esc(FG.textoPercentual(u.listaPreco.percentual)) + '</span>'
+        : '<b>Preço cheio</b>') + '</div>') +
       '</div></div>' +
       /* ---- ações ---- */
       '<div class="usr-acoes">' +
       cards.map(function (c) {
         return '<div class="usr-acao ' + c[5] + '">' +
           '<div class="usr-acao-ico">' + c[1] + '</div>' +
-          '<div class="usr-acao-txt"><b>' + c[2] + '</b><span>' + c[3] + '</span></div>' +
+          '<div class="usr-acao-txt"><b>' + c[2] + '</b><span>' + c[3] + '</span>' + (c[6] || '') + '</div>' +
           '<button class="usr-acao-btn" data-ac="' + c[0] + '">' + c[4] + '</button></div>';
       }).join('') +
       '</div></div></div>';
@@ -548,9 +579,68 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
 
+    /* ---- seletor de lista de preço (aprovar / trocar) ---- */
+    var selLista = back.querySelector('.lp-sel');
+    var btnLista = selLista && back.querySelector('[data-ac="aprovar"], [data-ac="lista"]');
+    var atualLista = u.listaPreco ? String(u.listaPreco.id) : (u.status === 'pendente' ? '' : 'cheio');
+    // Aprovar exige uma escolha; trocar exige uma escolha DIFERENTE da atual.
+    function estadoBotaoLista() {
+      if (!btnLista) return;
+      var v = selLista.value;
+      btnLista.disabled = selLista.disabled || !v ||
+        (btnLista.getAttribute('data-ac') === 'lista' && v === atualLista);
+    }
+    // Lê o espelho local; se estiver vazio (ou se pedirem), busca no Tiny.
+    async function carregarListas(doTiny) {
+      var aviso = back.querySelector('.lp-aviso');
+      selLista.disabled = true; estadoBotaoLista();
+      selLista.innerHTML = '<option>' + (doTiny ? 'Buscando no Tiny…' : 'Carregando listas…') + '</option>';
+      aviso.classList.add('hidden');
+      var listas = doTiny ? [] : await FG.listasPreco();
+      var msg = '';
+      if (doTiny || !listas.length) {
+        var r = await FG.sincronizarListasPreco();
+        if (r.ok) listas = r.listas || [];
+        else { msg = r.msg; if (!listas.length) listas = await FG.listasPreco(); }
+        if (r.ok && doTiny) FG.toast('Listas atualizadas do Tiny: ' + (r.resumo ? r.resumo.total : listas.length) + ' encontrada(s).');
+      }
+      var ativas = listas.filter(function (l) { return l.ativa; });
+      if (!msg && !ativas.length) msg = 'Nenhuma lista de preço encontrada no Tiny. Cadastre as listas lá e clique em "Atualizar do Tiny" — ou aprove com preço cheio.';
+      var opts = '';
+      if (atualLista === '') opts += '<option value="" selected disabled>Escolha a lista de preço…</option>';
+      opts += '<option value="cheio">Preço cheio (sem lista)</option>';
+      opts += ativas.map(function (l) {
+        return '<option value="' + l.id + '">' + esc(l.descricao) + ' — ' + esc(FG.textoPercentual(l.percentual)) + '</option>';
+      }).join('');
+      // A lista atual que sumiu do Tiny aparece (marcada), mas não pode ser escolhida de novo.
+      if (u.listaPreco && !u.listaPreco.ativa)
+        opts += '<option value="' + u.listaPreco.id + '" disabled>' + esc(u.listaPreco.descricao) + ' — não existe mais no Tiny</option>';
+      selLista.innerHTML = opts;
+      if (atualLista) selLista.value = atualLista;
+      selLista.disabled = false;
+      if (msg) { aviso.textContent = msg; aviso.classList.remove('hidden'); }
+      estadoBotaoLista();
+    }
+    if (selLista) {
+      selLista.addEventListener('change', estadoBotaoLista);
+      back.querySelector('.lp-tiny').addEventListener('click', function () { carregarListas(true); });
+      carregarListas(false);
+    }
+    function listaEscolhida() { return selLista.value === 'cheio' ? null : Number(selLista.value); }
+
     Array.prototype.forEach.call(back.querySelectorAll('[data-ac]'), function (b) {
       b.addEventListener('click', async function () {
         var ac = b.getAttribute('data-ac');
+
+        if (ac === 'lista') {
+          b.disabled = true;
+          var rl = await FG.definirListaPreco(u.empresaId, listaEscolhida());
+          if (!rl.ok) { FG.toast(rl.msg || 'Não foi possível trocar a lista.', 'erro'); estadoBotaoLista(); return; }
+          await FG.recarregarUsuarios();
+          FG.toast('Lista de preço de ' + (u.empresa || 'a empresa') + ' atualizada — vale a partir do próximo pedido.');
+          fechar(); voltar();
+          return;
+        }
 
         if (ac === 'identidade') {
           b.disabled = true; b.textContent = 'Entrando…';
@@ -571,7 +661,13 @@
         }
 
         var patch = null, msg = '';
-        if (ac === 'aprovar') { patch = { status: 'aprovado' }; msg = 'Cadastro aprovado.'; }
+        if (ac === 'aprovar') {
+          patch = { status: 'aprovado' }; msg = 'Cadastro aprovado.';
+          if (selLista) {
+            if (!selLista.value) { FG.toast('Escolha a lista de preço antes de aprovar.', 'erro'); return; }
+            patch.listaPrecoId = listaEscolhida();
+          }
+        }
         else if (ac === 'papel') {
           // Trocar o papel move a conta de aba — o aviso evita a impressão de
           // que o usuário "sumiu" da lista onde ele estava.
@@ -587,6 +683,8 @@
         b.disabled = true;
         var r2 = await FG.setUser(u.id, patch);
         if (r2 && r2.ok === false) { FG.toast(r2.msg || 'Não foi possível atualizar o usuário.', 'erro'); b.disabled = false; return; }
+        // A aprovação gravou a lista da EMPRESA: relê para a tabela mostrá-la.
+        if ('listaPrecoId' in patch) await FG.recarregarUsuarios();
         FG.toast(msg);
         fechar(); refreshBell(); voltar();
       });

@@ -118,10 +118,12 @@ export async function montarPayload(exp) {
     `SELECT p.PedidoId, p.NumeroPedido, p.DataPedido, p.EmpresaId, p.Tipo,
             u.Email AS UsuarioEmail,
             e.RazaoSocial, e.NomeFantasia, e.Cnpj, e.InscricaoEstadual,
-            e.Email AS EmpresaEmail, e.Telefone
+            e.Email AS EmpresaEmail, e.Telefone,
+            p.ListaPrecoId, lp.Ativa AS ListaAtiva
        FROM dbo.Pedido p
        JOIN dbo.Usuario u ON u.UsuarioId = p.UsuarioId
        JOIN dbo.Empresa e ON e.EmpresaId = p.EmpresaId
+       LEFT JOIN dbo.ListaPreco lp ON lp.ListaPrecoId = p.ListaPrecoId
       WHERE p.PedidoId = @pid`,
     { pid: exp.PedidoId }
   ))[0];
@@ -193,7 +195,7 @@ export async function montarPayload(exp) {
     if (end.Uf) cliente.uf = end.Uf;
   }
 
-  return {
+  const payload = {
     data_pedido: fmtData(exp.CriadoEm || ped.DataPedido),
     cliente,
     itens: itens.map(i => ({
@@ -219,6 +221,12 @@ export async function montarPayload(exp) {
             (faltam ? `; faltam ${faltam} peça(s), que virão em remessa seguinte` : ' (envio concluído)')
           : `Pedido Fullgas ${ped.NumeroPedido} aprovado no B2B`) + ` — usuário ${ped.UsuarioEmail}.`
   };
+  // Lista de preço com que o pedido foi precificado (migration 048). Só
+  // IDENTIFICA a lista no Tiny: o valor_unitario de cada item (obrigatório
+  // na API) já sai com o % aplicado. Lista que sumiu do Tiny não vai —
+  // um id inexistente faria o Tiny recusar o pedido inteiro.
+  if (ped.ListaPrecoId && ped.ListaAtiva) payload.id_lista_preco = ped.ListaPrecoId;
+  return payload;
 }
 
 /* ---------------- processamento da fila ---------------- */
