@@ -6,7 +6,7 @@
   <title>Fullgas — Loja do revendedor</title>
   <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
   <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
-  <link rel="stylesheet" href="css/styles.css?v=20261001a">
+  <link rel="stylesheet" href="css/styles.css?v=20261002a">
 </head>
 <body data-cache="products categories models orders">
 
@@ -20,22 +20,25 @@
     <button class="menu-btn" id="menu-btn" type="button"><span id="menu-x">☰</span> MENU</button>
     <nav class="shop-mega" id="shop-mega"></nav>
 
-    <a class="pf-link" href="/finder" style="font-size:11px;font-weight:700;line-height:1.2;">
-      🔍 LOCALIZADOR<br>DE PEÇAS
-    </a>
-
     <form class="sh-search" id="sh-search">
       <input id="sh-q" type="text" placeholder="Buscar artigos...">
       <button type="submit" aria-label="Buscar">🔍</button>
     </form>
 
-    <div class="sh-icons">
-      <a href="#/carrinho" title="Carrinho">🛒<span class="cart-n" id="cart-n">0</span></a>
-      <a href="#/quick-order" title="Pedido rápido">⚡</a>
-      <a href="#/pedidos" title="Histórico de pedidos">🧾</a>
-      <!-- Sem seta de voltar aqui: o VOLTAR padrão fica na faixa da página
-           (e o logo FULLGAS ao lado já leva ao portal). -->
-      <a class="sh-brand" href="/portal" title="Voltar ao portal" style="text-decoration:none;display:inline-flex;align-items:center;"><img src="img/Fullgas_logo003.png?v=20260730a" alt="FULLGAS" style="height:28px;width:auto;display:block;"></a>
+    <!-- Localizador à DIREITA, no mesmo bloco dos ícones (quebram de linha
+         juntos em tela estreita): entre o MENU e a busca ele ficava
+         espremido e se confundia com os dois. -->
+    <div class="sh-direita">
+      <a class="pf-link" href="/finder">🔍 LOCALIZADOR DE PEÇAS</a>
+
+      <div class="sh-icons">
+        <a href="#/carrinho" title="Carrinho">🛒<span class="cart-n" id="cart-n">0</span></a>
+        <a href="#/quick-order" title="Pedido rápido">⚡</a>
+        <a href="#/pedidos" title="Histórico de pedidos">🧾</a>
+        <!-- Sem seta de voltar aqui: o VOLTAR padrão fica na faixa da página
+             (e o logo FULLGAS ao lado já leva ao portal). -->
+        <a class="sh-brand" href="/portal" title="Voltar ao portal" style="text-decoration:none;display:inline-flex;align-items:center;"><img src="img/Fullgas_logo003.png?v=20260730a" alt="FULLGAS" style="height:28px;width:auto;display:block;"></a>
+      </div>
     </div>
   </header>
 
