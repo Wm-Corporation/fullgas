@@ -8,9 +8,16 @@
 //   - dbo.ListaPreco espelha as listas do Tiny. Quem atualiza é o
 //     cron (a cada rodada) e o botão "Atualizar do Tiny" do painel —
 //     mudar o % de uma lista no Tiny vale para todos os clientes dela.
-//   - Empresa.ListaPrecoId é escolhida pelo admin AO APROVAR o
-//     cadastro (PATCH /usuarios/:id) e pode ser trocada depois
-//     (PUT /empresas/:id/lista-preco). NULL = preço cheio.
+//   - Empresa.ListaPrecoId vem do CONTATO no Tiny (id_lista_preco),
+//     lido no cadastro (vincularContatoTiny) e a cada rodada do cron
+//     (sincronizarContatosDoTiny) — origem 'tiny'. O Tiny manda: o
+//     painel não troca essa lista, muda-se no contato lá.
+//   - Contato sem lista no Tiny (ou sem contato): a empresa fica SEM
+//     lista (preço cheio) e marcada em vermelho no painel, até um
+//     responsável escolher uma das listas que já existem no Tiny —
+//     origem 'manual' (migration 049). Não existe "criar lista" aqui.
+//     A escolha é na aprovação (PATCH /usuarios/:id) ou depois
+//     (PUT /empresas/:id/lista-preco).
 //   - O cliente vê e compra pelo preço da lista; o admin vê sempre o
 //     preço base (é o que ele cadastra e edita no catálogo).
 //
@@ -18,7 +25,7 @@
 // do usuário — as listas da casa não usam exceção).
 // ============================================================
 import { query } from './db.js';
-import { listarListasPreco } from './tiny.js';
+import { listarListasPreco, registrarLog } from './tiny.js';
 
 // Limites do CHECK da tabela: -100% zeraria o preço; acima de +1000% é
 // quase certo erro de digitação no Tiny. Fora disso a lista é ignorada.
@@ -35,17 +42,21 @@ export function aplicarPercentual(preco, percentual) {
   return Math.max(0, Math.round(base * (100 + pct)) / 100);
 }
 
-// Lista da empresa: { id, descricao, percentual, ativa } ou null (preço cheio).
-// Lista que sumiu do Tiny (ativa = false) continua valendo com o último %
-// conhecido — o painel avisa, e o cliente não muda de preço de surpresa.
+// Lista da empresa: { id, descricao, percentual, ativa, origem } ou null
+// (preço cheio). Lista que sumiu do Tiny (ativa = false) continua valendo
+// com o último % conhecido — o painel avisa, e o cliente não muda de preço
+// de surpresa.
 export async function listaDaEmpresa(empresaId) {
   if (!empresaId) return null;
   const r = (await query(
-    `SELECT l.ListaPrecoId, l.Descricao, l.Percentual, l.Ativa
+    `SELECT l.ListaPrecoId, l.Descricao, l.Percentual, l.Ativa, e.ListaPrecoOrigem
        FROM dbo.Empresa e
        JOIN dbo.ListaPreco l ON l.ListaPrecoId = e.ListaPrecoId
       WHERE e.EmpresaId = @eid`, { eid: empresaId }))[0];
-  return r ? { id: r.ListaPrecoId, descricao: r.Descricao, percentual: Number(r.Percentual), ativa: !!r.Ativa } : null;
+  return r ? {
+    id: r.ListaPrecoId, descricao: r.Descricao, percentual: Number(r.Percentual),
+    ativa: !!r.Ativa, origem: r.ListaPrecoOrigem || 'manual'
+  } : null;
 }
 
 // O % que vale para quem está pedindo. Admin vê o preço base (0). Durante
@@ -112,11 +123,13 @@ export async function sincronizarListasPreco() {
   return resumo;
 }
 
-// Valida a escolha do painel (`listaPrecoId` do corpo da requisição):
-// null ou '' = preço cheio; número = lista ATIVA do espelho.
-// Devolve { lista } (lista null = preço cheio) ou { erro }.
+// Valida a escolha do painel (`listaPrecoId` do corpo da requisição): tem
+// de ser uma lista ATIVA do espelho. "Preço cheio" não é escolha — sem
+// lista é justamente o estado que o painel marca em vermelho.
+// Devolve { lista } ou { erro }.
 export async function resolverListaEscolhida(valor) {
-  if (valor === null || valor === '') return { lista: null };
+  if (valor === null || valor === undefined || valor === '')
+    return { erro: 'Escolha uma das listas de preço do Tiny.' };
   const id = Number(valor);
   if (!Number.isInteger(id) || id <= 0) return { erro: 'Lista de preço inválida.' };
   const r = (await query(
@@ -131,4 +144,46 @@ export async function resolverListaEscolhida(valor) {
 export function rotuloLista(l) {
   if (!l) return 'preço cheio';
   return l.descricao + ' (' + (l.percentual > 0 ? '+' : '') + l.percentual + '%)';
+}
+
+// Aplica na empresa a lista que o CONTATO tem no Tiny (contato.obter →
+// id_lista_preco). Chamada no cadastro, pelo cron e pelo botão "Buscar no
+// Tiny". Devolve:
+//   'aplicada'     a empresa passou a usar essa lista (origem 'tiny');
+//   'igual'        já estava com ela;
+//   'sem-lista'    o contato não tem lista lá — NADA muda (a lista manual,
+//                  se houver, continua; sem nenhuma, segue em vermelho);
+//   'desconhecida' o id não existe no espelho nem depois de atualizá-lo.
+// Uma lista nova no Tiny ainda não espelhada é trazida na hora (uma
+// chamada a mais, só nesse caso).
+export async function aplicarListaDoTiny(empresaId, idListaTiny, contatoId = null) {
+  const id = Number(idListaTiny);
+  if (!Number.isInteger(id) || id <= 0) return 'sem-lista';
+
+  const buscar = async () => (await query(
+    'SELECT ListaPrecoId, Descricao, Percentual, Ativa FROM dbo.ListaPreco WHERE ListaPrecoId = @id', { id }))[0];
+  let lista = await buscar();
+  if (!lista || !lista.Ativa) {
+    try { await sincronizarListasPreco(); lista = await buscar(); }
+    catch { /* Tiny fora: decide com o que o espelho tem */ }
+  }
+  if (!lista || !lista.Ativa) {
+    await registrarLog(contatoId, null, 'contato', 'erro',
+      `Empresa ${empresaId}: o contato no Tiny usa a lista de preço ${id}, que não foi encontrada.`);
+    return 'desconhecida';
+  }
+
+  const emp = (await query(
+    'SELECT RazaoSocial, ListaPrecoId, ListaPrecoOrigem FROM dbo.Empresa WHERE EmpresaId = @eid',
+    { eid: empresaId }))[0];
+  if (!emp) return 'desconhecida';
+  if (emp.ListaPrecoId === id && emp.ListaPrecoOrigem === 'tiny') return 'igual';
+
+  await query(
+    `UPDATE dbo.Empresa SET ListaPrecoId = @lid, ListaPrecoOrigem = 'tiny', AtualizadoEm = SYSUTCDATETIME()
+      WHERE EmpresaId = @eid`, { eid: empresaId, lid: id });
+  await registrarLog(contatoId, null, 'contato', 'ok',
+    `Empresa "${emp.RazaoSocial}": lista de preço "${lista.Descricao}" (${Number(lista.Percentual)}%) ` +
+    'aplicada a partir do contato no Tiny.');
+  return 'aplicada';
 }

@@ -35,6 +35,7 @@ import { query } from './db.js';
 import {
   pesquisarContatoPorCpfCnpj, incluirContato, alterarContato, obterContato, registrarLog
 } from './tiny.js';
+import { aplicarListaDoTiny } from './lista-preco.js';
 
 export function clientesLigado() {
   return !!process.env.TINY_TOKEN && process.env.TINY_SINCRONIZAR_CLIENTES === '1';
@@ -101,6 +102,10 @@ function montarContato(emp, comId = false) {
   };
   if (dig) c.cpf_cnpj = dig;
   if (comId && emp.TinyContatoId) c.id = String(emp.TinyContatoId);
+  // Lista de preço que o contato JÁ tem no Tiny (lida antes do alterar).
+  // O alterar substitui o registro e o portal nunca escolhe a lista de lá —
+  // reenviar a atual é o que evita que uma edição do cadastro a apague.
+  if (emp.ListaTiny) c.id_lista_preco = String(emp.ListaTiny);
   if (emp.NomeFantasia) c.fantasia = emp.NomeFantasia;
   if (emp.InscricaoEstadual) c.ie = emp.InscricaoEstadual;
   if (emp.Email) c.email = emp.Email;
@@ -171,6 +176,18 @@ export async function vincularContatoTiny(empresaId) {
     );
     await registrarLog(contato.id, null, 'contato', 'ok',
       `Empresa "${emp.RazaoSocial}" (CNPJ ${fmtCnpj(dig)}): ${acao}.`);
+    // Contato que já existia: traz a lista de preço que ele tem no Tiny.
+    // Contato criado agora não tem lista — a empresa fica em vermelho no
+    // painel até alguém escolher uma. Falha aqui não desfaz o vínculo: o
+    // cron lê o contato de novo na próxima rodada.
+    if (acao !== 'contato criado no Tiny') {
+      try {
+        const c = await obterContato(contato.id);
+        await aplicarListaDoTiny(empresaId, c?.id_lista_preco, contato.id);
+      } catch (e) {
+        console.warn(`⚠ Lista de preço do contato ${contato.id} não lida: ${e.message}`);
+      }
+    }
     // Vinculou a um contato que JÁ existia: o que foi editado no portal ainda
     // precisa ir para lá. (Contato criado agora já nasceu com os dados atuais.)
     if (acao !== 'contato criado no Tiny') {
@@ -216,9 +233,11 @@ export async function atualizarContatoTiny(empresaId) {
 
     // O contato.alterar SUBSTITUI o registro: a observação escrita por quem
     // usa o Tiny seria trocada pela nossa. Lê a atual e preserva (30/09/2026).
+    // Mesma coisa com a lista de preço do contato (ver montarContato).
     try {
       const atual = await obterContato(alvo);
       if (atual?.obs) emp = { ...emp, ObsTiny: atual.obs };
+      if (Number(atual?.id_lista_preco) > 0) emp = { ...emp, ListaTiny: atual.id_lista_preco };
     } catch { /* sem a obs atual, segue com a padrão */ }
 
     try {
@@ -423,6 +442,9 @@ export async function sincronizarContatosDoTiny() {
       }
 
       await aplicarContatoLocal(emp, c);
+      // Lista de preço do contato: o Tiny manda. Contato sem lista não apaga
+      // a escolhida à mão no painel (ver aplicarListaDoTiny).
+      await aplicarListaDoTiny(emp.EmpresaId, c.id_lista_preco, emp.TinyContatoId);
     } catch (e) {
       await registrarLog(emp.TinyContatoId, null, 'contato', 'erro',
         `Leitura do contato no Tiny (empresa "${emp.RazaoSocial}"): ${e.message}`);

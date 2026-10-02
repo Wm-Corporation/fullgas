@@ -517,9 +517,16 @@
   };
   // Traz as listas do Tiny agora. Promise<{ ok, listas?, resumo?, msg? }>.
   FG.sincronizarListasPreco = function () { return req('POST', '/listas-preco/sincronizar'); };
-  // Troca a lista de uma empresa (null = preço cheio). Promise<{ ok, msg? }>.
+  // Escolhe à mão a lista de uma empresa cujo contato não tem lista no Tiny.
+  // Promise<{ ok, msg? }>.
   FG.definirListaPreco = function (empresaId, listaPrecoId) {
     return req('PUT', '/empresas/' + encodeURIComponent(empresaId) + '/lista-preco', { listaPrecoId: listaPrecoId });
+  };
+  // Relê o contato da empresa no Tiny e aplica a lista que ele tiver lá.
+  // Promise<{ ok, resultado?, lista?, msg? }> — resultado: 'aplicada' |
+  // 'igual' | 'sem-lista' | 'desconhecida'.
+  FG.buscarListaNoTiny = function (empresaId) {
+    return req('POST', '/empresas/' + encodeURIComponent(empresaId) + '/lista-preco/tiny');
   };
   // % do Tiny → texto: -20 → "20% de desconto"; 5 → "5% de acréscimo".
   FG.textoPercentual = function (p) {

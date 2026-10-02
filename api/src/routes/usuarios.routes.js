@@ -39,9 +39,11 @@ function toUsuario(r) {
     telefone: r.Telefone || '',
     tinyContatoId: r.TinyContatoId || null,   // contato do Tiny atrelado ao CNPJ
     // Lista de preço da EMPRESA (migration 048); null = preço cheio.
+    // origem 'tiny' = veio do contato no Tiny; 'manual' = escolhida no painel.
     listaPreco: r.ListaPrecoId ? {
       id: r.ListaPrecoId, descricao: r.ListaDescricao,
-      percentual: Number(r.ListaPercentual), ativa: !!r.ListaAtiva
+      percentual: Number(r.ListaPercentual), ativa: !!r.ListaAtiva,
+      origem: r.ListaPrecoOrigem || 'manual'
     } : null,
     criadoEm: r.CriadoEm,
     endereco: r.Logradouro ? {
@@ -55,7 +57,7 @@ const SELECT_USUARIO =
   `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.Gestor, u.CriadoEm, u.EmpresaId,
           e.RazaoSocial AS Empresa, e.Cnpj, e.InscricaoEstadual, e.Telefone, e.TinyContatoId,
           ${sqlNaFabrica('u.EmpresaId')} AS Fabrica,
-          e.ListaPrecoId, lp.Descricao AS ListaDescricao, lp.Percentual AS ListaPercentual, lp.Ativa AS ListaAtiva,
+          e.ListaPrecoId, e.ListaPrecoOrigem, lp.Descricao AS ListaDescricao, lp.Percentual AS ListaPercentual, lp.Ativa AS ListaAtiva,
           en.Logradouro, en.Numero, en.Complemento, en.Bairro, en.Cidade, en.Uf, en.Cep
      FROM dbo.Usuario u
      JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
@@ -142,10 +144,10 @@ router.post('/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
 });
 
 // PATCH /api/usuarios/:id — altera status e/ou papel.
-// APROVAR um cliente pendente exige `listaPrecoId` no corpo (número = lista
-// do Tiny; null = preço cheio): é a hora em que o admin define o preço que a
-// concessionária vai pagar. A lista é da EMPRESA e é gravada junto com o
-// status, na mesma transação.
+// APROVAR um cliente pendente exige que a EMPRESA saia com lista de preço:
+//   - lista vinda do contato no Tiny (origem 'tiny'): aprova direto;
+//   - sem lista: `listaPrecoId` no corpo, uma das listas do Tiny, gravada
+//     como 'manual' junto com o status, na mesma transação.
 const PAPEIS = ['admin', 'cliente'];
 const STATUS = ['pendente', 'aprovado', 'bloqueado'];
 router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) => {
@@ -166,12 +168,20 @@ router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) 
       const atual = (await query(
         'SELECT Status, Papel, EmpresaId FROM dbo.Usuario WHERE UsuarioId = @id', { id }))[0];
       if (!atual) return res.status(404).json({ erro: 'Usuário não encontrado.' });
-      if (atual.Status === 'pendente' && atual.Papel === 'cliente' && papel !== 'admin') {
-        if (!('listaPrecoId' in req.body))
-          return res.status(400).json({ erro: 'Escolha a lista de preço do cliente para aprovar o cadastro.' });
-        const { lista, erro } = await resolverListaEscolhida(req.body.listaPrecoId);
-        if (erro) return res.status(400).json({ erro });
-        aprovacao = { empresaId: atual.EmpresaId, lista };
+      const emp = (await query(
+        'SELECT ListaPrecoId, ListaPrecoOrigem FROM dbo.Empresa WHERE EmpresaId = @eid', { eid: atual.EmpresaId }))[0] || {};
+      atual.ListaPrecoId = emp.ListaPrecoId;
+      const temListaDoTiny = emp.ListaPrecoId && emp.ListaPrecoOrigem === 'tiny';
+      if (atual.Status === 'pendente' && atual.Papel === 'cliente' && papel !== 'admin' && !temListaDoTiny) {
+        // Sem lista do Tiny: a escolha manual é obrigatória — exceto se a
+        // empresa já tem uma manual (outra conta dela aprovada antes).
+        if (req.body.listaPrecoId != null || !atual.ListaPrecoId) {
+          const { lista, erro } = await resolverListaEscolhida(req.body.listaPrecoId);
+          if (erro) return res.status(400).json({
+            erro: 'O contato desta empresa não tem lista de preço no Tiny. ' + erro
+          });
+          aprovacao = { empresaId: atual.EmpresaId, lista };
+        }
       }
     }
 
@@ -198,9 +208,10 @@ router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) 
     if (aprovacao) {
       // Um único lote em transação: ou aprova COM a lista, ou nada muda.
       request.input('eid', sql.Int, aprovacao.empresaId);
-      request.input('lid', sql.Int, aprovacao.lista?.id ?? null);
+      request.input('lid', sql.Int, aprovacao.lista.id);
       texto = `SET XACT_ABORT ON; BEGIN TRAN;
-               UPDATE dbo.Empresa SET ListaPrecoId = @lid, AtualizadoEm = SYSUTCDATETIME() WHERE EmpresaId = @eid;
+               UPDATE dbo.Empresa SET ListaPrecoId = @lid, ListaPrecoOrigem = 'manual', AtualizadoEm = SYSUTCDATETIME()
+                WHERE EmpresaId = @eid;
                ${texto}
                COMMIT;`;
     }
