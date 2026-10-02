@@ -73,34 +73,6 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .brand.big { font-size: 26px; }
 .brand.white, .brand.white .g-badge { color: var(--ink); border-color: var(--ink); }
 
-/* ---------- easter egg do "F" (tela de acesso) ----------
-   Reusa o padrão visual do .modal-back, mas sem a moldura branca com header
-   de formulário: aqui é só o vídeo, centralizado, com um X discreto por
-   cima. z-index acima do .modal-back (90) — não que os dois coexistam hoje,
-   mas para o dia em que alguém abrir um modal de verdade por cima. */
-.egg-back {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, .82); z-index: 95;
-  display: flex; align-items: center; justify-content: center; padding: 24px;
-}
-/* min-width/min-height: 0 são o que impede o vídeo de VAZAR da tela em
-   celular. Item de flex tem `min-width:auto` por padrão, que para um
-   elemento substituído (vídeo, imagem) resolve para o tamanho INTRÍNSECO —
-   576px de largura neste vídeo vertical — e isso vence o max-width, porque
-   min sempre tem prioridade sobre max no cálculo do flexbox. Sem zerar o
-   min, o vídeo ficava mais largo que o celular e saía cortado dos dois
-   lados, mesmo com max-width:92vw escrito bem ali do lado. */
-.egg-box { position: relative; max-width: 92vw; max-height: 88vh; min-width: 0; min-height: 0; }
-.egg-video {
-  display: block; max-width: 92vw; max-height: 88vh; min-width: 0; min-height: 0;
-  border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, .5);
-}
-.egg-x {
-  position: absolute; top: -14px; right: -14px; width: 32px; height: 32px;
-  border-radius: 50%; border: none; background: #fff; color: var(--ink);
-  font-size: 20px; line-height: 1; cursor: pointer; box-shadow: var(--shadow);
-}
-.egg-x:hover { background: var(--red); color: #fff; }
-
 /* ---------- botões ---------- */
 .btn {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
@@ -585,11 +557,21 @@ main.portal { padding: 0 22px 60px; }
 .shop-head .sh-user { font-size: 11px; opacity: .95; }
 .shop-head a { color: #fff; }
 .shop-head .menu-btn { background: none; border: none; color: var(--ink); font-weight: 700; cursor: pointer; font-size: 14px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
-.shop-head .sh-search { display: flex; align-items: center; border-bottom: 1px solid var(--ink); }
-.shop-head .sh-search input { background: transparent; border: none; color: var(--ink); padding: 6px 4px; width: 200px; }
+/* A busca ocupa o meio do cabeçalho: cresce até 560px e encolhe até 260px
+   antes de o cabeçalho quebrar linha. */
+.shop-head .sh-search { display: flex; align-items: center; border-bottom: 1px solid var(--ink); flex: 1 1 260px; max-width: 560px; }
+.shop-head .sh-search input { background: transparent; border: none; color: var(--ink); padding: 7px 4px; width: 100%; min-width: 0; font-size: 14px; }
 .shop-head .sh-search input::placeholder { color: rgba(28, 28, 28, .55); }
 .shop-head .sh-search button { background: none; border: none; color: var(--ink); cursor: pointer; }
-.shop-head .sh-icons { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+/* Bloco da direita (Localizador + ícones), empurrado para a ponta. */
+.shop-head .sh-direita { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 12px 20px; margin-left: auto; }
+.shop-head .sh-icons { display: flex; align-items: center; gap: 12px; }
+/* Localizador: botão de contorno escuro. Em texto branco sobre o amarelo
+   ele mal aparecia. */
+.shop-head .pf-link {
+  color: var(--ink); border: 1.5px solid var(--ink); border-radius: 19px;
+  padding: 8px 14px; font-size: 11.5px; letter-spacing: .3px; white-space: nowrap; line-height: 1;
+}
 /* Ícones do cabeçalho em CÍRCULOS PRETOS — sobre o amarelo eles sumiam;
    o que era preto/escuro dentro do círculo vira branco. */
 .shop-head .sh-icons a, .shop-head .sh-icons button {
@@ -1096,9 +1078,10 @@ main.finder { padding: 8px 28px 70px; }
 }
 .media-item .midia-x:hover { background: #b91c1c; }
 
-/* Visualizador em tela cheia — mesmo desenho do .egg-back (fundo escuro, X
-   redondo no canto), acima do modal (90) e da cortina de envio (95). Os
-   `min-*: 0` evitam que foto/vídeo grande vaze da tela (ver .egg-box). */
+/* Visualizador em tela cheia — fundo escuro e X redondo no canto, acima do
+   modal (90) e da cortina de envio (95). Os `min-*: 0` evitam que foto/vídeo
+   grande vaze da tela: item de flex tem `min-width:auto`, que para vídeo e
+   imagem resolve para o tamanho INTRÍNSECO e vence o max-width. */
 .midia-viewer {
   position: fixed; inset: 0; background: rgba(0, 0, 0, .85); z-index: 96;
   display: flex; align-items: center; justify-content: center; padding: 24px;
@@ -1246,7 +1229,7 @@ main.finder { padding: 8px 28px 70px; }
 }
 /* No cabeçalho AMARELO da loja o hover amarelo sumiria — lá o hover do
    link do finder fica preto sublinhado (sem contorno). */
-.shop-head .pf-link:hover { color: var(--ink); text-decoration: underline; }
+.shop-head .pf-link:hover { color: #fff; background: var(--ink); text-decoration: none; }
 
 /* Anexos nas notificações do portal (enviados pelo admin). */
 .notif .nt-img { max-width: 340px; max-height: 240px; display: block; margin: 8px 0 2px; border: 1px solid var(--line); border-radius: 4px; }
