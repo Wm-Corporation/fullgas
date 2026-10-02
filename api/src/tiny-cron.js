@@ -76,15 +76,17 @@ async function rodada() {
     // estava fora na hora do registro, etc.) — barato quando não há pendência.
     await processarContatosPendentes();
 
-    // Reflete no cadastro local o que mudou nos contatos vinculados do Tiny
-    // (razão social, IE, e-mail, telefone, endereço). Sentido Tiny → Fullgas.
-    await sincronizarContatosDoTiny();
-
     // Listas de preço (nome e %): mudar o % de uma lista no Tiny vale para
     // todos os clientes dela a partir desta rodada. Uma chamada por página
-    // de 100 listas. Falha aqui não pode impedir o espelho de produtos.
+    // de 100 listas. Vem ANTES dos contatos, que apontam para essas listas.
+    // Falha aqui não pode impedir o resto da rodada.
     try { await sincronizarListasPreco(); }
     catch (e) { console.warn('⚠ Sync Tiny (cron): listas de preço não atualizadas:', e.message); }
+
+    // Reflete no cadastro local o que mudou nos contatos vinculados do Tiny
+    // (razão social, IE, e-mail, telefone, endereço e lista de preço).
+    // Sentido Tiny → Fullgas.
+    await sincronizarContatosDoTiny();
 
     const resultados = await sincronizarLote(null, 'cron');
     // O log do cron só guarda os 3 últimos registros de cada produto — o
