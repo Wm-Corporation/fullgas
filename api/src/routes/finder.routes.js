@@ -22,6 +22,7 @@ import { EXT_IMAGEM, nomeArquivo, filtroImagem } from '../middlewares/upload-com
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin, requireArea } from '../auth.js';
 import { slugModelo, arvoreModelo, MARCA_PADRAO, MODALIDADE_PADRAO } from '../utils/modelo-moto.js';
+import { percentualDoUsuario, aplicarPercentual } from '../lista-preco.js';
 
 const router = Router();
 
@@ -112,13 +113,14 @@ function toSecao(req, r) {
   };
 }
 
-function toPeca(req, r) {
+// `pct` = % da lista de preço de quem pede (0 para admin: preço base).
+function toPeca(req, r, pct = 0) {
   return {
     id: r.PecaSecaoId,
     produtoId: r.ProdutoId,
     sku: r.Sku,
     nome: r.NomeProduto,
-    preco: Number(r.Preco),
+    preco: aplicarPercentual(r.Preco, pct),
     estoque: r.Estoque,
     previsao: r.PrevisaoChegada || null,
     imagem: urlAbs(req, r.ProdutoImagem),
@@ -312,7 +314,7 @@ router.get('/finder/secoes/:id', requireAuth, requireArea('finder'), async (req,
     if (!s) return res.status(404).json({ erro: 'Seção não encontrada.' });
 
     const admin = req.user.papel === 'admin';
-    const [pecas, hotspots, irmas] = await Promise.all([
+    const [pecas, hotspots, irmas, pct] = await Promise.all([
       query(
         SELECT_PECAS + ' WHERE ps.SecaoId = @id' + (admin ? '' : ' AND ps.Ativo = 1') +
         ' ORDER BY ps.Ordem, ps.PecaSecaoId', { id }
@@ -326,7 +328,8 @@ router.get('/finder/secoes/:id', requireAuth, requireArea('finder'), async (req,
           WHERE ModeloId = @mid AND Lado = @lado
           ORDER BY Ordem, Numero, SecaoId`,
         { mid: s.ModeloId, lado: s.Lado }
-      )
+      ),
+      percentualDoUsuario(req.user)
     ]);
 
     const idx = irmas.findIndex(x => x.SecaoId === id);
@@ -342,7 +345,7 @@ router.get('/finder/secoes/:id', requireAuth, requireArea('finder'), async (req,
       ordem: s.Ordem,
       imagem: urlAbs(req, s.ImagemUrl),
       modelo: { id: s.ModeloCodigo, nome: s.ModeloNome, ano: s.Ano, label: s.Etiqueta || (s.ModeloNome + ' ' + s.Ano) },
-      pecas: pecas.map(p => toPeca(req, p)),
+      pecas: pecas.map(p => toPeca(req, p, pct)),
       hotspots: hotspots.map(toHotspot),
       vizinhos: { anterior, proxima }
     });

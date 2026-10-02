@@ -509,6 +509,26 @@
     });
   };
 
+  /* Listas de preço do Tiny (admin) — ver api/src/lista-preco.js.
+     A lista é da EMPRESA e define o preço que a concessionária paga. */
+  // Promise<[{ id, descricao, percentual, ativa, empresas }]> ([] se falhar).
+  FG.listasPreco = function () {
+    return apiGet('/listas-preco').then(function (l) { return l || []; });
+  };
+  // Traz as listas do Tiny agora. Promise<{ ok, listas?, resumo?, msg? }>.
+  FG.sincronizarListasPreco = function () { return req('POST', '/listas-preco/sincronizar'); };
+  // Troca a lista de uma empresa (null = preço cheio). Promise<{ ok, msg? }>.
+  FG.definirListaPreco = function (empresaId, listaPrecoId) {
+    return req('PUT', '/empresas/' + encodeURIComponent(empresaId) + '/lista-preco', { listaPrecoId: listaPrecoId });
+  };
+  // % do Tiny → texto: -20 → "20% de desconto"; 5 → "5% de acréscimo".
+  FG.textoPercentual = function (p) {
+    p = Number(p) || 0;
+    if (!p) return 'sem desconto';
+    var n = String(Math.abs(p)).replace('.', ',') + '%';
+    return p < 0 ? n + ' de desconto' : n + ' de acréscimo';
+  };
+
   function recarregarProdutos() {
     return apiGet('/produtos').then(function (l) { if (l) CACHE.products = l; return l; });
   }

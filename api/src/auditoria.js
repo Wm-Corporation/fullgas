@@ -26,7 +26,9 @@ export const ACOES = {
   ADMIN_CRIADO: 'admin_criado',
   PAPEL_ALTERADO: 'papel_alterado',
   STATUS_ALTERADO: 'status_alterado',
-  USUARIO_EXCLUIDO: 'usuario_excluido'
+  USUARIO_EXCLUIDO: 'usuario_excluido',
+  // Preço que a concessionária paga (migration 048).
+  LISTA_PRECO_ALTERADA: 'lista_preco_alterada'
 };
 
 // Grava uma linha na trilha. NÃO devolve promessa que valha a pena aguardar

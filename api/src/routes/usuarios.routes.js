@@ -17,6 +17,7 @@ import { requireAuth, requireAdmin, signToken, parsePermissoes, abrirSessao, inv
 import { auditar, ACOES } from '../auditoria.js';
 import { erroSenha } from '../validacao.js';
 import { sqlNaFabrica } from '../fabrica.js';
+import { resolverListaEscolhida, rotuloLista } from '../lista-preco.js';
 
 const router = Router();
 
@@ -37,6 +38,11 @@ function toUsuario(r) {
     inscricaoEstadual: r.InscricaoEstadual || '',
     telefone: r.Telefone || '',
     tinyContatoId: r.TinyContatoId || null,   // contato do Tiny atrelado ao CNPJ
+    // Lista de preço da EMPRESA (migration 048); null = preço cheio.
+    listaPreco: r.ListaPrecoId ? {
+      id: r.ListaPrecoId, descricao: r.ListaDescricao,
+      percentual: Number(r.ListaPercentual), ativa: !!r.ListaAtiva
+    } : null,
     criadoEm: r.CriadoEm,
     endereco: r.Logradouro ? {
       logradouro: r.Logradouro, numero: r.Numero || '', complemento: r.Complemento || '',
@@ -49,9 +55,11 @@ const SELECT_USUARIO =
   `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.Gestor, u.CriadoEm, u.EmpresaId,
           e.RazaoSocial AS Empresa, e.Cnpj, e.InscricaoEstadual, e.Telefone, e.TinyContatoId,
           ${sqlNaFabrica('u.EmpresaId')} AS Fabrica,
+          e.ListaPrecoId, lp.Descricao AS ListaDescricao, lp.Percentual AS ListaPercentual, lp.Ativa AS ListaAtiva,
           en.Logradouro, en.Numero, en.Complemento, en.Bairro, en.Cidade, en.Uf, en.Cep
      FROM dbo.Usuario u
      JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
+     LEFT JOIN dbo.ListaPreco lp ON lp.ListaPrecoId = e.ListaPrecoId
      OUTER APPLY (
        SELECT TOP 1 d.Logradouro, d.Numero, d.Complemento, d.Bairro, d.Cidade, d.Uf, d.Cep
          FROM dbo.Endereco d
@@ -134,6 +142,10 @@ router.post('/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
 });
 
 // PATCH /api/usuarios/:id — altera status e/ou papel.
+// APROVAR um cliente pendente exige `listaPrecoId` no corpo (número = lista
+// do Tiny; null = preço cheio): é a hora em que o admin define o preço que a
+// concessionária vai pagar. A lista é da EMPRESA e é gravada junto com o
+// status, na mesma transação.
 const PAPEIS = ['admin', 'cliente'];
 const STATUS = ['pendente', 'aprovado', 'bloqueado'];
 router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) => {
@@ -147,6 +159,21 @@ router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) 
     if (status && !STATUS.includes(status)) return res.status(400).json({ erro: 'Status inválido.' });
     if (papel && !PAPEIS.includes(papel)) return res.status(400).json({ erro: 'Papel inválido.' });
     if (!status && !papel) return res.status(400).json({ erro: 'Nada para atualizar.' });
+
+    // Aprovação de cadastro de cliente: a lista de preço é obrigatória.
+    let aprovacao = null;
+    if (status === 'aprovado') {
+      const atual = (await query(
+        'SELECT Status, Papel, EmpresaId FROM dbo.Usuario WHERE UsuarioId = @id', { id }))[0];
+      if (!atual) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+      if (atual.Status === 'pendente' && atual.Papel === 'cliente' && papel !== 'admin') {
+        if (!('listaPrecoId' in req.body))
+          return res.status(400).json({ erro: 'Escolha a lista de preço do cliente para aprovar o cadastro.' });
+        const { lista, erro } = await resolverListaEscolhida(req.body.listaPrecoId);
+        if (erro) return res.status(400).json({ erro });
+        aprovacao = { empresaId: atual.EmpresaId, lista };
+      }
+    }
 
     const request = (await getPool()).request().input('id', sql.Int, id);
     const sets = [];
@@ -167,14 +194,28 @@ router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) 
     if (status === 'bloqueado' || papel) sets.push('TokenVersion = TokenVersion + 1');
     sets.push('AtualizadoEm = SYSUTCDATETIME()');
 
-    const r = await request.query(`UPDATE dbo.Usuario SET ${sets.join(', ')} WHERE UsuarioId = @id`);
-    if (!r.rowsAffected[0]) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+    let texto = `UPDATE dbo.Usuario SET ${sets.join(', ')} WHERE UsuarioId = @id;`;
+    if (aprovacao) {
+      // Um único lote em transação: ou aprova COM a lista, ou nada muda.
+      request.input('eid', sql.Int, aprovacao.empresaId);
+      request.input('lid', sql.Int, aprovacao.lista?.id ?? null);
+      texto = `SET XACT_ABORT ON; BEGIN TRAN;
+               UPDATE dbo.Empresa SET ListaPrecoId = @lid, AtualizadoEm = SYSUTCDATETIME() WHERE EmpresaId = @eid;
+               ${texto}
+               COMMIT;`;
+    }
+    const r = await request.query(texto);
+    if (!r.rowsAffected[r.rowsAffected.length - 1]) return res.status(404).json({ erro: 'Usuário não encontrado.' });
     invalidarCacheSessao(id);
 
     // Promover alguém a admin e bloquear uma conta são as duas mudanças de
     // privilégio que mais interessam numa investigação. Ficam na trilha.
     if (papel) auditar({ req, acao: ACOES.PAPEL_ALTERADO, alvoId: id, detalhe: { papel } });
     if (status) auditar({ req, acao: ACOES.STATUS_ALTERADO, alvoId: id, detalhe: { status } });
+    if (aprovacao) auditar({
+      req, acao: ACOES.LISTA_PRECO_ALTERADA, alvoId: id, alvoEmpresaId: aprovacao.empresaId,
+      detalhe: { na: 'aprovacao', para: rotuloLista(aprovacao.lista) }
+    });
 
     res.json({ ok: true });
   } catch (e) { next(e); }

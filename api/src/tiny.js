@@ -234,6 +234,34 @@ export async function obterProdutoCompleto(tinyId) {
   };
 }
 
+/* ---------------- listas de preço ---------------- */
+
+// TODAS as listas de preço do Tiny (100 por página), já normalizadas:
+// [{ id, descricao, percentual }]. O % segue o Tiny: negativo = desconto,
+// positivo = acréscimo (-20 = 20% de desconto). Nenhuma lista cadastrada
+// não é erro: o Tiny devolve codigo_erro 20.
+export async function listarListasPreco() {
+  const listas = [];
+  for (let pagina = 1, total = 1; pagina <= total; pagina++) {
+    let ret;
+    try {
+      ret = await tinyPost('listas.precos.pesquisa.php', { pagina });
+    } catch (e) {
+      if (e instanceof TinyError && e.codigo === '20') break;
+      throw e;
+    }
+    total = Number(ret.numero_paginas) || 1;
+    for (const item of ret.registros || []) {
+      const r = item?.registro ?? item;
+      const id = Number(r?.id);
+      const percentual = Number(r?.acrescimo_desconto);
+      if (!Number.isInteger(id) || id <= 0 || !Number.isFinite(percentual)) continue;
+      listas.push({ id, descricao: String(r.descricao || '').trim().slice(0, 60) || 'Lista ' + id, percentual });
+    }
+  }
+  return listas;
+}
+
 /* ---------------- contatos (clientes) no Tiny ---------------- */
 
 // Procura um contato pelo CPF/CNPJ exato. O Tiny devolve codigo_erro 20

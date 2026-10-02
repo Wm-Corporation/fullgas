@@ -154,6 +154,18 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .usr-acao.perigo .usr-acao-btn { color: #b91c1c; border-color: #e8b4b4; }
 .usr-acao.perigo .usr-acao-btn:hover { background: #fee2e2; }
 
+/* Lista de preço (migration 048): seletor dentro dos cartões "Aprovar
+   cadastro" e "Lista de preço", e a célula da tabela de clientes. */
+.lp-escolha { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; }
+.lp-sel { flex: 1 1 260px; max-width: 100%; padding: 6px 8px; font-size: 12.5px; border: 1px solid #bbb; border-radius: 3px; background: #fff; }
+.lp-escolha .link-action { font-size: 12px; }
+.usr-acao-txt .lp-aviso { flex-basis: 100%; font-size: 11.5px; color: #9a3412; background: #fff7ed; border-left: 3px solid #c2410c; padding: 5px 8px; }
+.lp-cel { font-size: 12.5px; line-height: 1.3; }
+.lp-cel small { display: block; color: #666; font-size: 11px; }
+.lp-cel .lp-sumiu { color: #b91c1c; }
+/* Com a coluna de lista a tabela de clientes aperta: o botão não quebra. */
+.usr-ger { white-space: nowrap; }
+
 /* Barra de filtros das abas (Vendas, Pré-venda, Catálogo, Chassis, Clientes). */
 .adm-filtros {
   gap: 14px; margin: 0 0 14px; padding: 10px 12px;

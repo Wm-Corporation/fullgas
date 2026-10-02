@@ -32,6 +32,7 @@ import suporteRoutes from './routes/suporte.routes.js';
 import pulsoRoutes from './routes/pulso.routes.js';
 import finderRoutes from './routes/finder.routes.js';
 import tinyRoutes from './routes/tiny.routes.js';
+import listasPrecoRoutes from './routes/listas-preco.routes.js';
 import arquivosRoutes from './routes/arquivos.routes.js';
 import { PASTA_MINIATURAS } from './miniaturas.js';
 
@@ -288,6 +289,7 @@ app.use('/api', suporteRoutes);
 app.use('/api', pulsoRoutes);
 app.use('/api', finderRoutes);
 app.use('/api', tinyRoutes);
+app.use('/api', listasPrecoRoutes);
 app.use('/api', arquivosRoutes);
 
 // Frontend estático com URLs LIMPAS (esconder o .html).

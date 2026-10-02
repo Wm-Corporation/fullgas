@@ -35,6 +35,7 @@ import 'dotenv/config';
 import { sincronizarLote, podarLogCron } from './tiny.js';
 import { processarExportacoes, sincronizarSituacaoPedidos } from './tiny-pedidos.js';
 import { processarContatosPendentes, sincronizarContatosDoTiny } from './tiny-contatos.js';
+import { sincronizarListasPreco } from './lista-preco.js';
 
 // Trava de sobreposição: true enquanto uma rodada está em andamento.
 let rodando = false;
@@ -78,6 +79,12 @@ async function rodada() {
     // Reflete no cadastro local o que mudou nos contatos vinculados do Tiny
     // (razão social, IE, e-mail, telefone, endereço). Sentido Tiny → Fullgas.
     await sincronizarContatosDoTiny();
+
+    // Listas de preço (nome e %): mudar o % de uma lista no Tiny vale para
+    // todos os clientes dela a partir desta rodada. Uma chamada por página
+    // de 100 listas. Falha aqui não pode impedir o espelho de produtos.
+    try { await sincronizarListasPreco(); }
+    catch (e) { console.warn('⚠ Sync Tiny (cron): listas de preço não atualizadas:', e.message); }
 
     const resultados = await sincronizarLote(null, 'cron');
     // O log do cron só guarda os 3 últimos registros de cada produto — o
