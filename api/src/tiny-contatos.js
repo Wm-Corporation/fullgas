@@ -75,6 +75,20 @@ async function carregarEmpresa(empresaId) {
   ))[0] || null;
 }
 
+// Texto que o portal gravava na observação do contato quando ela estava vazia
+// (até 05/10/2026). O contato é o MESMO para o Magento e o Fullgas, e o Tiny
+// leva a observação do contato para os pedidos — então pedidos do MAGENTO
+// apareciam como "Sincronizado pelo portal Fullgas B2B". Não gravamos mais nada
+// nosso na observação, e o texto antigo é retirado sempre que o contato é
+// enviado (e uma vez, em todos, por scripts/limpar-obs-contatos.mjs).
+const MARCA_ANTIGA = /\s*Sincronizado pelo portal Fullgas B2B\.?\s*/gi;
+export function semMarcaFullgas(obs) {
+  return String(obs || '').replace(MARCA_ANTIGA, '\n').trim();
+}
+export function temMarcaFullgas(obs) {
+  return /Sincronizado pelo portal Fullgas B2B/i.test(String(obs || ''));
+}
+
 // Monta o payload de contato para o Tiny.
 //   - incluir (comId=false): só os dados.
 //   - alterar (comId=true):  mais o `id` do contato no Tiny.
@@ -86,7 +100,7 @@ async function carregarEmpresa(empresaId) {
 // origem dos cadastros duplicados a cada edição. (O "CNPJ já cadastrado",
 // código 30, não vem de mandar o próprio CNPJ: vem de já existir uma duplicata
 // segurando esse número — tratado em atualizarContatoTiny.)
-function montarContato(emp, comId = false) {
+export function montarContato(emp, comId = false) {
   const dig = String(emp.Cnpj || '').replace(/\D/g, '');
   const c = {
     // `sequencia` numera o registro dentro do lote enviado. Mandamos um contato
@@ -98,7 +112,10 @@ function montarContato(emp, comId = false) {
     nome: emp.RazaoSocial,
     tipo_pessoa: dig.length === 11 ? 'F' : 'J',
     situacao: 'A',
-    obs: emp.ObsTiny || 'Sincronizado pelo portal Fullgas B2B.'
+    // Só a observação que já existe no Tiny, sem o texto antigo do portal. Vai
+    // SEMPRE (vazia, se for o caso): o alterar substitui o registro, e mandar
+    // '' é o que apaga a marca antiga de um contato que só tinha ela.
+    obs: semMarcaFullgas(emp.ObsTiny)
   };
   if (dig) c.cpf_cnpj = dig;
   if (comId && emp.TinyContatoId) c.id = String(emp.TinyContatoId);
@@ -232,13 +249,13 @@ export async function atualizarContatoTiny(empresaId) {
     }
 
     // O contato.alterar SUBSTITUI o registro: a observação escrita por quem
-    // usa o Tiny seria trocada pela nossa. Lê a atual e preserva (30/09/2026).
-    // Mesma coisa com a lista de preço do contato (ver montarContato).
-    try {
-      const atual = await obterContato(alvo);
-      if (atual?.obs) emp = { ...emp, ObsTiny: atual.obs };
-      if (Number(atual?.id_lista_preco) > 0) emp = { ...emp, ListaTiny: atual.id_lista_preco };
-    } catch { /* sem a obs atual, segue com a padrão */ }
+    // usa o Tiny seria apagada. Lê a atual e preserva (30/09/2026), tirando só
+    // o texto antigo do portal. Mesma coisa com a lista de preço do contato
+    // (ver montarContato). Sem conseguir ler, NÃO altera — apagaria a
+    // observação de lá; o erro cai no catch de fora e o cron tenta de novo.
+    const atual = await obterContato(alvo);
+    if (atual?.obs) emp = { ...emp, ObsTiny: atual.obs };
+    if (Number(atual?.id_lista_preco) > 0) emp = { ...emp, ListaTiny: atual.id_lista_preco };
 
     try {
       await alterarContato(montarContato({ ...emp, TinyContatoId: alvo }, true));

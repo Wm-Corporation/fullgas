@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-let empresas, updates, chamadas, alterarFalha, painel;
+let empresas, updates, chamadas, alterarFalha, painel, obterFalha;
 
 vi.mock('../src/db.js', () => ({
   query: async (texto, p = {}) => {
@@ -26,7 +26,7 @@ vi.mock('../src/tiny.js', () => ({
     if (alterarFalha) { const e = new Error('Tiny: Registro em duplicidade'); e.codigo = '31'; throw e; }
     return { id: c.id };
   },
-  obterContato: async (id) => { chamadas.push('obter:' + id); return { cpf_cnpj: '08.794.609/0001-91', complemento: 'VELHO' }; },
+  obterContato: async (id) => { chamadas.push('obter:' + id); if (obterFalha) throw new Error('Tiny fora'); return { cpf_cnpj: '08.794.609/0001-91', complemento: 'VELHO' }; },
   registrarLog: async () => {},
   listarProdutos: async () => ({}), obterProdutoCompleto: async () => ({}), sincronizarLote: async () => [],
   aplicarAtualizacao: async () => ({})
@@ -37,7 +37,7 @@ vi.mock('../src/tiny-pedidos.js', () => ({ exportarPedido: async () => 'enviado'
 process.env.TINY_TOKEN = 'x';
 process.env.TINY_SINCRONIZAR_CLIENTES = '1';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'chave-de-teste-com-mais-de-32-caracteres-ok';
-const { sincronizarContatosDoTiny, atualizarContatoTiny } = await import('../src/tiny-contatos.js');
+const { sincronizarContatosDoTiny, atualizarContatoTiny, montarContato, temMarcaFullgas } = await import('../src/tiny-contatos.js');
 const { default: rotasTiny } = await import('../src/routes/tiny.routes.js');
 
 const EMP = {
@@ -47,7 +47,30 @@ const EMP = {
 };
 
 beforeEach(() => {
-  empresas = []; updates = []; chamadas = []; alterarFalha = false; painel = [];
+  empresas = []; updates = []; chamadas = []; alterarFalha = false; painel = []; obterFalha = false;
+});
+
+describe('observação do contato (05/10/2026)', () => {
+  it('nunca grava o texto do portal: contato sem observação vai com obs vazia', () => {
+    expect(montarContato({ ...EMP }).obs).toBe('');
+  });
+
+  it('tira o texto antigo e preserva o que alguém escreveu no Tiny', () => {
+    expect(montarContato({ ...EMP, ObsTiny: 'Sincronizado pelo portal Fullgas B2B.' }).obs).toBe('');
+    expect(montarContato({ ...EMP, ObsTiny: 'Cliente paga no boleto.\nSincronizado pelo portal Fullgas B2B.' }).obs)
+      .toBe('Cliente paga no boleto.');
+    expect(montarContato({ ...EMP, ObsTiny: 'Cliente paga no boleto.' }).obs).toBe('Cliente paga no boleto.');
+    expect(temMarcaFullgas('xx Sincronizado pelo portal Fullgas B2B. yy')).toBe(true);
+    expect(temMarcaFullgas('Cliente paga no boleto.')).toBe(false);
+  });
+
+  it('sem conseguir ler o contato, NÃO altera (apagaria a observação de lá)', async () => {
+    empresas = [{ ...EMP, TinyContatoAlterado: true }];
+    obterFalha = true;
+    await atualizarContatoTiny(3);
+    expect(chamadas.filter(c => c.startsWith('alterar'))).toHaveLength(0);
+    expect(updates).toHaveLength(0);   // segue marcado: o cron tenta de novo
+  });
 });
 
 describe('E2 — edição do portal não é desfeita pelo cron', () => {
