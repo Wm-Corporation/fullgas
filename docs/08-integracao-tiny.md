@@ -387,39 +387,48 @@ inverso:
 2. O pedido local é criado como sempre (baixa atômica, pré-venda etc.), com a
    fatura cheia. **Nada é exportado ainda.**
 
-### O que acontece na APROVAÇÃO (desde 30/09/2026)
+### O que vai ao Tiny: a REMESSA (de volta desde 05/10/2026)
 
-> Migração `044_pedido_status_aprovado.sql`. Decisão do dono: **aprovar no B2B
-> significa que o estoque pode ser descontado no Tiny também.** O status "Em
-> separação" passou a se chamar **"Aprovado"** — o mesmo nome que o estoquista
-> vê no Tiny.
+> Decisão do dono: o estoque do Tiny **não bate com a prateleira** em algumas
+> peças. Por isso o pedido só vai ao Tiny depois que alguém confere o estoque
+> físico, e **só com as peças encontradas**. O que faltar sai depois, numa
+> remessa seguinte (outro pedido no Tiny, outra nota).
 >
-> **Histórico:** até 17/09 o pedido ia ao Tiny na aprovação (escopo `normal`
-> sem snapshot). De 17/09 a 30/09 ia por **remessa**, no "Confirmar envio"
-> (escopo `remessa`, números `-R2`, `-R3`...). As linhas antigas continuam
-> sendo lidas; nenhuma remessa nova é criada.
+> **Histórico:** até 17/09 o pedido ia ao Tiny inteiro na aprovação (escopo
+> `normal` sem snapshot). De 17/09 a 30/09 ia por remessa. De 30/09 a 05/10
+> (migração `044`) voltou a ir inteiro na aprovação. Desde 05/10, remessa de
+> novo. O status "Em separação" continua com o nome **"Aprovado"** (044).
 
-1. O admin muda o status de **Pendente → Aprovado** no painel (com
-   confirmação). As peças em estoque que ainda não foram ao Tiny
-   (`Quantidade − QuantidadeExportada`) viram **uma** linha em
-   `TinyPedidoExport` (escopo `normal`, snapshot em `ItensJson`) e são marcadas
-   como exportadas — na mesma transação.
-2. Após o commit, a exportação roda em segundo plano: `pedido.incluir.php`
-   cria o pedido no Tiny (cliente = a concessionária + endereço de entrega;
-   número do e-commerce = número Fullgas) e `pedido.alterar.situacao.php` o
-   marca **'aprovado'** — é a aprovação que baixa o estoque no Tiny.
+1. O pedido chega **Pendente**. Aprovar (Pendente → Aprovado) é opcional e
+   **não exporta nada** — só sinaliza que o pedido está sendo separado.
+2. O admin confere a prateleira e informa, no detalhe do pedido, a
+   **quantidade encontrada/enviada** de cada peça
+   (`PUT /api/pedidos/:numero/itens/:itemId/enviado`). Isso também **não
+   exporta nada**.
+3. **"Confirmar envio"** (`POST /api/pedidos/:numero/remessa`): o que foi
+   marcado e ainda não foi ao Tiny (`QuantidadeEnviada − QuantidadeExportada`)
+   vira **uma** linha em `TinyPedidoExport` (escopo `remessa`, snapshot em
+   `ItensJson`) e é marcado como exportado — na mesma transação. Faltou peça →
+   pedido `Parcial` (fatura segue em aberto); tudo enviado → `Enviado`.
+4. Após o commit, a exportação roda em segundo plano: `pedido.incluir.php`
+   cria o pedido no Tiny (cliente = a concessionária + endereço de entrega) e
+   `pedido.alterar.situacao.php` o marca **'aprovado'** — é a aprovação que
+   baixa o estoque no Tiny.
    ⚠ **Configure a conta do Tiny para "lançar estoque na aprovação do pedido".**
-3. Depois de ir ao Tiny o pedido **não volta para Pendente** (para desistir,
-   cancela). Marcar "Enviado" num pedido ainda Pendente aprova junto.
+   A 1ª remessa usa o número Fullgas; as seguintes, `NNNN-R2`, `NNNN-R3`...
+   (o número do e-commerce precisa ser único no Tiny). A observação diz quantas
+   peças ainda faltam.
+5. Marcar **"Enviado"** no seletor marca todas as peças em estoque como
+   enviadas e já fecha a remessa delas.
+6. Depois que alguma peça foi ao Tiny, o pedido **não volta para Pendente**
+   (para desistir, cancela). `Parcial` não é escolhível no seletor.
+   **`Entregue` só depois de `Enviado`.**
 
-### O envio (controle interno)
-
-O admin registra a **quantidade enviada** de cada peça
-(`PUT /api/pedidos/:numero/itens/:itemId/enviado`). Isso **não exporta nada**
-— as peças já foram ao Tiny na aprovação. O status acompanha sozinho:
-nada enviado → `Aprovado`; parte → `Parcial` (fatura segue em aberto); tudo →
-`Enviado`. `Parcial` não é escolhível no seletor. **`Entregue` só depois de
-`Enviado`** (antes dava para fechar um pedido que nunca saiu nem foi ao Tiny).
+**Pedidos aprovados entre 30/09 e 05/10** já foram inteiros ao Tiny
+(`QuantidadeExportada = Quantidade`): para eles o "Confirmar envio" não
+aparece (não há nada novo a mandar), e o envio registrado peça a peça já
+move o status (`Parcial`/`Enviado`). Se alguma peça deles não existia na
+prateleira, ajuste o pedido no Tiny à mão.
 
 ### Pré-venda (backorder)
 
@@ -435,7 +444,7 @@ marcar, e o envio o mandava de novo — o estoque do Tiny baixava duas vezes.)
 
 ### Falhas, retry e cancelamento
 
-- Tiny fora do ar na aprovação → a linha fica `erro` e o **cron re-tenta** a
+- Tiny fora do ar no "Confirmar envio" → a linha fica `erro` e o **cron re-tenta** a
   cada rodada (até 5 tentativas). O admin vê o problema no card **"Pedidos que
   precisam de atenção no Tiny"** (aba Tiny ERP) e pode **Reexportar** no
   detalhe do pedido (zera as tentativas).
@@ -444,15 +453,19 @@ marcar, e o envio o mandava de novo — o estoque do Tiny baixava duas vezes.)
 - **Reserva de estoque** (`tiny.js → reservaPendente`): enquanto uma venda não
   chega ao Tiny, o saldo de lá ainda não a desconta. Todo espelhamento de
   estoque (cron, lote e checagem do checkout) subtrai **as duas fases**: o que
-  foi vendido e ainda não exportado (pedido Pendente) e o que foi exportado mas
+  foi vendido e ainda não exportado (pedido Pendente, ou o restante de um
+  `Parcial`) e o que foi exportado mas
   o Tiny ainda não confirmou (linha `pendente`/`erro`, pelo `ItensJson`). Até
   30/09 só a segunda existia e o cron "devolvia" ao site, em até 30 min, a
   venda ainda não aprovada.
 - **Cancelamento local** → só volta ao estoque o que **não saiu**. Se nenhuma
   peça saiu, o(s) pedido(s) no Tiny são marcados 'cancelado' (devolve o estoque
-  lá); se alguma já saiu, o Tiny **não é mexido** e a linha ganha um aviso de
-  ajuste manual. Se a chamada falhar, `UltimoErro` avisa que precisa cancelar
-  manualmente no Tiny.
+  lá). Se alguma já saiu, as **remessas ficam** (só levam peças que saíram — o
+  Tiny já está certo); um pedido que foi **inteiro** ao Tiny (escopo `normal`)
+  não é mexido e ganha um aviso de ajuste manual. Peça marcada como enviada sem
+  "Confirmar envio" **bloqueia** o cancelamento até o admin confirmar ou zerar.
+  Se a chamada falhar, `UltimoErro` avisa que precisa cancelar manualmente no
+  Tiny.
 - **Cancelado ou excluído direto no Tiny** → o cron detecta e grava um aviso
   na linha (aparece no card da aba Tiny ERP). O pedido do Fullgas **não** é
   cancelado sozinho, porque isso anularia a fatura sem ninguém decidir.
@@ -462,14 +475,17 @@ marcar, e o envio o mandava de novo — o estoque do Tiny baixava duas vezes.)
 1. Com `TINY_EXPORTAR_PEDIDOS=1`, fazer uma compra na loja com item em estoque.
    O estoque do site cai e **continua caído depois do cron** (reserva); nada
    vai ao Tiny ainda.
-2. Aprovar o pedido no painel → no Tiny: pedido com o número do e-commerce =
-   número Fullgas, situação 'aprovado', estoque baixado.
-3. Registrar o envio de parte das peças → pedido `Parcial`, nada novo no Tiny.
-4. Derrubar o token (ou a rede), aprovar outro pedido → linha `erro` no card da
-   aba Tiny ERP; restaurar e esperar o cron (ou Reexportar) → vira `enviado`
-   sem duplicar pedido no Tiny.
-5. Cancelar um pedido aprovado sem envio no Fullgas → situação 'cancelado' no
-   Tiny, estoque devolvido. Com peça enviada → aviso de ajuste manual.
+2. Aprovar o pedido no painel → **nada** no Tiny.
+3. Informar só parte das peças e clicar em "Confirmar envio" → no Tiny: pedido
+   com o número Fullgas, só com essas peças, situação 'aprovado'; aqui o
+   pedido fica `Parcial`. Confirmar o restante → pedido `NNNN-R2` no Tiny e
+   `Enviado` aqui.
+4. Derrubar o token (ou a rede), confirmar uma remessa → linha `erro` no card
+   da aba Tiny ERP; restaurar e esperar o cron (ou Reexportar) → vira
+   `enviado` sem duplicar pedido no Tiny.
+5. Cancelar um pedido sem nada enviado → nada a desfazer no Tiny, estoque
+   devolvido. Cancelar um `Parcial` → o restante volta ao estoque, a remessa
+   no Tiny fica.
 6. Vender a última unidade de uma peça no Magento e, antes do cron rodar,
    tentar comprá-la no Fullgas → a checagem em tempo real barra a compra.
 

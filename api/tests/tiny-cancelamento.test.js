@@ -9,7 +9,7 @@ let exportacoes, chamadasTiny, situacao, updates;
 
 vi.mock('../src/db.js', () => ({
   query: async (texto, p = {}) => {
-    if (/SELECT ExportId, TinyPedidoId FROM dbo\.TinyPedidoExport/.test(texto))
+    if (/SELECT ExportId, Escopo, TinyPedidoId FROM dbo\.TinyPedidoExport/.test(texto))
       return exportacoes.filter(e => e.Status !== 'cancelado');
     if (/UPDATE dbo\.TinyPedidoExport SET Status = 'cancelado', UltimoErro = @msg/.test(texto)) {
       const e = exportacoes.find(x => x.ExportId === p.id); e.Status = 'cancelado'; e.UltimoErro = p.msg; return [];
@@ -41,7 +41,7 @@ process.env.TINY_EXPORTAR_PEDIDOS = '1';
 const { cancelarExportacoesDoPedido, sincronizarSituacaoPedidos } = await import('../src/tiny-pedidos.js');
 
 beforeEach(() => {
-  exportacoes = [{ ExportId: 9, TinyPedidoId: '761800492', Status: 'enviado', UltimoErro: null }];
+  exportacoes = [{ ExportId: 9, Escopo: 'normal', TinyPedidoId: '761800492', Status: 'enviado', UltimoErro: null }];
   chamadasTiny = [];
   situacao = 'aprovado';
   updates = [];
@@ -54,11 +54,24 @@ describe('cancelar no Fullgas', () => {
     expect(exportacoes[0]).toMatchObject({ Status: 'cancelado', UltimoErro: null });
   });
 
-  it('com peça enviada: NÃO mexe no Tiny e deixa o aviso de ajuste manual', async () => {
+  it('pedido inteiro com peça enviada: NÃO mexe no Tiny e deixa o aviso de ajuste manual', async () => {
     await cancelarExportacoesDoPedido(11, { pecasEnviadas: 1 });
     expect(chamadasTiny).toHaveLength(0);
     expect(exportacoes[0].Status).toBe('cancelado');
     expect(exportacoes[0].UltimoErro).toMatch(/1 peça\(s\) já enviada\(s\).*ajuste o pedido 761800492/);
+  });
+
+  it('remessa e pré-venda liberada ficam como estão (só levam peças que saíram)', async () => {
+    exportacoes = [
+      { ExportId: 20, Escopo: 'remessa', TinyPedidoId: '761800500', Status: 'enviado', UltimoErro: null },
+      { ExportId: 21, Escopo: 'backorder', TinyPedidoId: '761800501', Status: 'enviado', UltimoErro: null },
+      { ExportId: 22, Escopo: 'remessa', TinyPedidoId: null, Status: 'pendente', UltimoErro: null }
+    ];
+    await cancelarExportacoesDoPedido(11, { pecasEnviadas: 3 });
+    expect(chamadasTiny).toHaveLength(0);
+    expect(exportacoes.map(e => [e.Status, e.UltimoErro])).toEqual([
+      ['enviado', null], ['enviado', null], ['pendente', null]   // a pendente segue para o Tiny pela fila
+    ]);
   });
 });
 

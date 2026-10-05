@@ -1,7 +1,8 @@
-// Ciclo do pedido desde 30/09/2026: APROVAR = ir ao Tiny ('aprovado', baixa o
-// estoque lá). O envio de cada peça é controle interno (Aprovado → Parcial →
-// Enviado) e não exporta nada. Entregue só depois de Enviado; nada volta a
-// Pendente depois de ir ao Tiny; cancelar devolve só o que não saiu.
+// Ciclo do pedido desde 05/10/2026 (volta das remessas de 17/09): aprovar NÃO
+// vai ao Tiny. O admin confere a prateleira, marca o que encontrou e clica em
+// "Confirmar envio" (POST /remessa): só essas peças viram um pedido no Tiny.
+// O que faltou sai numa remessa seguinte. Entregue só depois de Enviado; nada
+// volta a Pendente depois de ir ao Tiny; cancelar devolve só o que não saiu.
 //
 // O db.js é um dublê — inclusive a transação, porque estas rotas gravam dentro
 // de uma. O tiny-pedidos.js também, para espiar o que seria exportado.
@@ -25,25 +26,42 @@ function reset() {
   fatura = 'Emitida';
 }
 
+// Pedido aprovado entre 30/09 e 05/10/2026: já foi INTEIRO ao Tiny.
+function pedidoQueFoiInteiro() {
+  pedido.Status = 'Aprovado';
+  itens.forEach(i => { i.QuantidadeExportada = i.Quantidade; });
+  exportacoes.push({ pedidoId: 10, escopo: 'normal', itens: null });
+}
+
+const confirmada = i => (i.EmBackorder || i.QuantidadeEnviada < i.QuantidadeExportada)
+  ? i.QuantidadeEnviada : i.QuantidadeExportada;
+
 function responder(texto, p) {
   const um = (linhas) => ({ recordset: linhas, rowsAffected: [linhas.length] });
-  if (/SELECT PedidoId, Status, EmpresaId, Total FROM dbo\.Pedido/.test(texto))
+  if (/SELECT PedidoId, Status, EmpresaId, Total FROM dbo\.Pedido/.test(texto) ||
+      /SELECT PedidoId, Status FROM dbo\.Pedido/.test(texto))
     return um(pedido.NumeroPedido === p.num ? [pedido] : []);
-  // aprovarEExportar
-  if (/Quantidade - QuantidadeExportada AS Qtd/.test(texto))
-    return um(itens.filter(i => !i.EmBackorder && i.Quantidade > i.QuantidadeExportada)
-      .map(i => ({ ...i, Qtd: i.Quantidade - i.QuantidadeExportada })));
-  if (/UPDATE dbo\.PedidoItem SET QuantidadeExportada = Quantidade\s+WHERE PedidoId/.test(texto)) {
-    const alvo = itens.filter(i => !i.EmBackorder && i.Quantidade > i.QuantidadeExportada);
-    alvo.forEach(i => { i.QuantidadeExportada = i.Quantidade; });
+  // confirmarRemessa
+  if (/QuantidadeEnviada - QuantidadeExportada AS Qtd/.test(texto))
+    return um(itens.filter(i => !i.EmBackorder && i.QuantidadeEnviada > i.QuantidadeExportada)
+      .map(i => ({ ...i, Qtd: i.QuantidadeEnviada - i.QuantidadeExportada })));
+  if (/UPDATE dbo\.PedidoItem SET QuantidadeExportada = QuantidadeEnviada\s+WHERE PedidoId/.test(texto)) {
+    const alvo = itens.filter(i => !i.EmBackorder && i.QuantidadeEnviada > i.QuantidadeExportada);
+    alvo.forEach(i => { i.QuantidadeExportada = i.QuantidadeEnviada; });
     return um(alvo);
   }
+  // enviadasSemConfirmar
+  if (/SUM\(QuantidadeEnviada - QuantidadeExportada\), 0\) AS n/.test(texto))
+    return um([{ n: itens.filter(i => !i.EmBackorder && i.QuantidadeEnviada > i.QuantidadeExportada)
+      .reduce((s, i) => s + i.QuantidadeEnviada - i.QuantidadeExportada, 0) }]);
   // jaFoiAoTiny
   if (/QuantidadeExportada > 0\) \+/.test(texto))
     return um([{ n: itens.filter(i => i.QuantidadeExportada > 0).length + exportacoes.length }]);
   // cancelamento
   if (/ISNULL\(SUM\(QuantidadeEnviada\), 0\) AS n/.test(texto))
     return um([{ n: itens.reduce((s, i) => s + i.QuantidadeEnviada, 0) }]);
+  if (/Escopo = 'normal' AND Status <> 'cancelado'/.test(texto))
+    return um([{ n: exportacoes.filter(e => e.escopo === 'normal').length }]);
   if (/SET p\.Estoque = p\.Estoque \+ \(pi\.Quantidade - pi\.QuantidadeEnviada\)/.test(texto)) {
     const alvo = itens.filter(i => !i.EmBackorder && i.Quantidade > i.QuantidadeEnviada);
     alvo.forEach(i => { devolvido[i.ProdutoId] = (devolvido[i.ProdutoId] || 0) + i.Quantidade - i.QuantidadeEnviada; });
@@ -52,12 +70,19 @@ function responder(texto, p) {
   if (/UPDATE f SET f\.Status = 'Anulada'/.test(texto)) { fatura = 'Anulada'; return um([]); }
   if (/SET Status = 'Cancelado'/.test(texto)) { pedido.Status = 'Cancelado'; return um([]); }
   if (/SET Status = N'Aprovado'/.test(texto)) { pedido.Status = 'Aprovado'; return um([]); }
-  // statusPorEnvio / composição
+  // statusPorEnvio (conta o que já saiu E está no Tiny)
+  if (/AS Confirmada/.test(texto))
+    return um([{
+      totNormais: itens.filter(i => !i.EmBackorder).length,
+      pendNormais: itens.filter(i => !i.EmBackorder && i.Quantidade > confirmada(i)).length,
+      comEnvio: itens.filter(i => confirmada(i) > 0).length,
+      pendTotal: itens.filter(i => i.Quantidade > confirmada(i)).length
+    }]);
+  // composição do envio em bloco
   if (/SUM\(CASE WHEN EmBackorder = 0 THEN 1 ELSE 0 END\) AS totNormais/.test(texto))
     return um([{
       totNormais: itens.filter(i => !i.EmBackorder).length,
       pendNormais: itens.filter(i => !i.EmBackorder && i.Quantidade > i.QuantidadeEnviada).length,
-      comEnvio: itens.filter(i => i.QuantidadeEnviada > 0).length,
       pendTotal: itens.filter(i => i.Quantidade > i.QuantidadeEnviada).length
     }]);
   if (/UPDATE dbo\.Pedido SET Status = @st/.test(texto)) { pedido.Status = p.st; return um([]); }
@@ -119,74 +144,113 @@ function app() {
 const NUM = '0005041900';
 const mudar = (status) => request(app()).put(`/api/pedidos/${NUM}/status`).send({ status });
 const enviar = (itemId, qtd) => request(app()).put(`/api/pedidos/${NUM}/itens/${itemId}/enviado`).send({ qtd });
+const confirmar = () => request(app()).post(`/api/pedidos/${NUM}/remessa`).send({});
 
 beforeEach(reset);
 
-describe('aprovar = ir ao Tiny', () => {
-  it('aprovar exporta TODAS as peças em estoque, já marcadas como exportadas', async () => {
+describe('aprovar NÃO vai ao Tiny', () => {
+  it('aprovar só muda o status', async () => {
     const r = await mudar('Aprovado');
     expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ ok: true, status: 'Aprovado', exportados: 2 });
-    expect(exportacoes).toEqual([{ pedidoId: 10, escopo: 'normal', itens: [
-      { sku: 'A1', nome: 'PECA A', preco: 10, qtd: 3 },
-      { sku: 'B2', nome: 'PECA B', preco: 20, qtd: 2 }
-    ] }]);
-    expect(itens.map(i => i.QuantidadeExportada)).toEqual([3, 2]);
-    expect(pedido.Status).toBe('Aprovado');
+    expect(r.body).toMatchObject({ ok: true, status: 'Aprovado' });
+    expect(exportacoes).toHaveLength(0);
+    expect(itens.map(i => i.QuantidadeExportada)).toEqual([0, 0]);
   });
 
-  it('não aprova duas vezes (não exporta de novo)', async () => {
+  it('aprovado ainda volta para Pendente enquanto nada foi ao Tiny', async () => {
     await mudar('Aprovado');
-    exportacoes.length = 0;
+    const r = await mudar('Pendente');
+    expect(r.status).toBe(200);
+    expect(pedido.Status).toBe('Pendente');
+  });
+
+  it('não aprova duas vezes', async () => {
+    await mudar('Aprovado');
     const r = await mudar('Aprovado');
+    expect(r.status).toBe(409);
+  });
+});
+
+describe('remessa ("Confirmar envio")', () => {
+  it('pedido Pendente: marca só o encontrado, confirma, e o Tiny recebe só isso', async () => {
+    await enviar(1, 1);                       // achou 1 de 3 peças A1; B2 não achou
+    expect(exportacoes).toHaveLength(0);      // marcar não exporta
+    expect(pedido.Status).toBe('Pendente');   // nem muda o status antes de confirmar
+
+    const r = await confirmar();
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ ok: true, status: 'Parcial', parcial: true });
+    expect(exportacoes).toEqual([{ pedidoId: 10, escopo: 'remessa', itens: [{ sku: 'A1', nome: 'PECA A', preco: 10, qtd: 1 }] }]);
+    expect(pedido.Status).toBe('Parcial');
+  });
+
+  it('a segunda remessa leva só o restante e fecha o pedido como Enviado', async () => {
+    await enviar(1, 1);
+    await confirmar();
+    exportacoes.length = 0;
+
+    await enviar(1, 3);   // completa o A1
+    await enviar(2, 2);   // e manda o B2 inteiro
+    const r = await confirmar();
+    expect(r.body.status).toBe('Enviado');
+    expect(exportacoes[0].itens).toEqual([
+      { sku: 'A1', nome: 'PECA A', preco: 10, qtd: 2 },   // só o que faltava
+      { sku: 'B2', nome: 'PECA B', preco: 20, qtd: 2 }
+    ]);
+  });
+
+  it('recusa confirmar sem nada novo, sem exportar nem mudar o status', async () => {
+    const r = await confirmar();
+    expect(r.status).toBe(409);
+    expect(r.body.erro).toMatch(/Nada novo para enviar/);
+    expect(exportacoes).toHaveLength(0);
+    expect(pedido.Status).toBe('Pendente');
+    expect(transacoes).toContain('rollback');
+  });
+
+  it('recusa remessa em pedido já entregue', async () => {
+    pedido.Status = 'Entregue';
+    const r = await confirmar();
     expect(r.status).toBe(409);
     expect(exportacoes).toHaveLength(0);
   });
 
-  it('depois de ir ao Tiny o pedido não volta para Pendente', async () => {
-    await mudar('Aprovado');
+  it('depois de uma remessa o pedido não volta para Pendente', async () => {
+    await enviar(1, 1);
+    await confirmar();
     const r = await mudar('Pendente');
     expect(r.status).toBe(409);
     expect(r.body.erro).toMatch(/não volta para Pendente/);
-    expect(pedido.Status).toBe('Aprovado');
   });
 
-  it('marcar Enviado num pedido Pendente aprova junto (vai ao Tiny) e envia tudo', async () => {
+  it('"Enviado" no seletor marca o restante e já fecha a remessa dele', async () => {
+    await enviar(1, 1);
+    await confirmar();
+    exportacoes.length = 0;
+
     const r = await mudar('Enviado');
     expect(r.status).toBe(200);
-    expect(r.body.status).toBe('Enviado');
-    expect(exportacoes).toHaveLength(1);
-    expect(exportacoes[0].escopo).toBe('normal');
-  });
-
-  it('a rota antiga de remessa não existe mais', async () => {
-    const r = await request(app()).post(`/api/pedidos/${NUM}/remessa`).send({});
-    expect(r.status).toBe(404);
+    expect(r.body).toMatchObject({ status: 'Enviado', remessa: 2 });
+    expect(exportacoes).toEqual([{ pedidoId: 10, escopo: 'remessa', itens: [
+      { sku: 'A1', nome: 'PECA A', preco: 10, qtd: 2 },
+      { sku: 'B2', nome: 'PECA B', preco: 20, qtd: 2 }
+    ] }]);
   });
 });
 
-describe('envio de cada peça é controle interno', () => {
-  it('não registra envio antes da aprovação', async () => {
-    const r = await enviar(1, 1);
-    expect(r.status).toBe(409);
-    expect(r.body.erro).toMatch(/Aprove o pedido/);
-  });
-
-  it('Aprovado → Parcial → Enviado sem exportar nada novo', async () => {
-    await mudar('Aprovado');
-    exportacoes.length = 0;
-
+describe('pedido que já foi inteiro ao Tiny (aprovado entre 30/09 e 05/10)', () => {
+  it('o envio peça a peça move o status e não exporta de novo', async () => {
+    pedidoQueFoiInteiro();
     let r = await enviar(1, 1);
     expect(r.body.status).toBe('Parcial');
     await enviar(1, 3);
     r = await enviar(2, 2);
     expect(r.body.status).toBe('Enviado');
-    expect(pedido.Status).toBe('Enviado');
-    expect(exportacoes).toHaveLength(0);
+    expect(exportacoes.filter(e => e.escopo === 'remessa')).toHaveLength(0);
   });
 
-  it('desfazer o envio volta o pedido para Aprovado (e não fica "Parcial" com 0 enviadas)', async () => {
-    await mudar('Aprovado');
+  it('desfazer o envio volta para Aprovado (e não fica "Parcial" com 0 enviadas)', async () => {
+    pedidoQueFoiInteiro();
     await enviar(1, 1);
     const r = await enviar(1, 0);
     expect(r.body.status).toBe('Aprovado');
@@ -194,11 +258,10 @@ describe('envio de cada peça é controle interno', () => {
 });
 
 describe('Entregue só depois de Enviado', () => {
-  it('recusa Pendente → Entregue (o pedido fecharia sem ir ao Tiny)', async () => {
+  it('recusa Pendente → Entregue', async () => {
     const r = await mudar('Entregue');
     expect(r.status).toBe(409);
     expect(pedido.Status).toBe('Pendente');
-    expect(exportacoes).toHaveLength(0);
   });
 
   it('recusa Aprovado → Entregue', async () => {
@@ -226,12 +289,31 @@ describe('cancelar devolve só o que não saiu', () => {
     expect(r.body.aviso).toBeNull();
   });
 
-  it('parte enviada: só o restante volta, e o Tiny recebe o aviso de ajuste manual', async () => {
-    await mudar('Aprovado');
-    await enviar(1, 2);                     // 2 das 3 peças A1 já saíram
+  it('Parcial por remessa: só o restante volta e não há ajuste manual (a remessa já está certa)', async () => {
+    await enviar(1, 2);                     // 2 das 3 peças A1 saíram
+    await confirmar();
     const r = await mudar('Cancelado');
+    expect(r.status).toBe(200);
     expect(devolvido).toEqual({ 100: 1, 200: 2 });
     expect(cancelados).toEqual([{ pedidoId: 10, pecasEnviadas: 2 }]);
-    expect(r.body.aviso).toMatch(/2 peça\(s\) já tinham saído/);
+    expect(r.body.aviso).toBeNull();
+  });
+
+  it('pedido que foi inteiro ao Tiny com peça enviada: aviso de ajuste manual', async () => {
+    pedidoQueFoiInteiro();
+    await enviar(1, 2);
+    const r = await mudar('Cancelado');
+    expect(devolvido).toEqual({ 100: 1, 200: 2 });
+    expect(r.body.aviso).toMatch(/2 peça\(s\) já tinham saído.*ajuste manual/);
+  });
+
+  it('peça marcada como enviada sem "Confirmar envio" bloqueia o cancelamento', async () => {
+    await enviar(1, 2);
+    const r = await mudar('Cancelado');
+    expect(r.status).toBe(409);
+    expect(r.body.erro).toMatch(/2 peça\(s\) marcadas como enviadas ainda não foram confirmadas/);
+    expect(pedido.Status).toBe('Pendente');
+    expect(devolvido).toEqual({});
+    expect(cancelados).toHaveLength(0);
   });
 });

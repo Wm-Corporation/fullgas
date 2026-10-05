@@ -4,8 +4,9 @@
 // O Tiny é a única fonte de verdade dos produtos importados dele:
 // estoque, preço, nome, descrição e foto são sempre espelho do
 // Tiny (Tiny → Fullgas, sem override manual). No sentido inverso
-// vão só os PEDIDOS (tiny-pedidos.js): quando o admin APROVA o pedido
-// no B2B, ele vira um pedido 'aprovado' no Tiny, baixando o estoque lá.
+// vão só os PEDIDOS (tiny-pedidos.js): quando o admin confirma o envio
+// das peças encontradas (remessa), elas viram um pedido 'aprovado' no
+// Tiny, baixando o estoque lá.
 //
 // A atualização automática NÃO usa webhook (método descartado —
 // as notificações do Tiny se mostraram pouco confiáveis): é o
@@ -376,7 +377,8 @@ export async function obterSituacaoPedido(tinyPedidoId) {
    São DUAS fases, e as duas contam:
      1. Ainda não saiu para o Tiny: itens em estoque (EmBackorder = 0) de
         pedidos não cancelados, na parte Quantidade − QuantidadeExportada.
-        É o pedido Pendente, esperando a aprovação.
+        É o pedido esperando o "Confirmar envio" — inclusive o restante de
+        um pedido Parcial, que sai numa remessa seguinte.
      2. Já saiu, mas o Tiny ainda não confirmou: linhas de TinyPedidoExport
         'pendente' ou 'erro' (Tiny fora do ar, retry do cron). O item já foi
         marcado como exportado — a quantidade está no ItensJson da linha.
