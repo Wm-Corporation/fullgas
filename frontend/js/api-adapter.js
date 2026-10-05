@@ -845,12 +845,20 @@
   };
 
   // PUT de pedido que mexe em estoque/envio: recarrega pedidos + produtos no ok.
-  function putPedido(path, body) {
-    return req('PUT', path, body).then(function (r) {
+  // `metodo` existe para o POST da remessa: o efeito no cache é o mesmo (o
+  // pedido e o estoque mudam), só o verbo é outro.
+  function putPedido(path, body, metodo) {
+    return req(metodo || 'PUT', path, body).then(function (r) {
       if (!r.ok) return r;
       return Promise.all([recarregarPedidos(), recarregarProdutos()]).then(function () { return r; });
     });
   }
+
+  // Fecha a remessa do pedido (admin): as peças marcadas como enviadas e ainda
+  // não exportadas viram UM pedido no Tiny. Promise<{ ok, status, itens, parcial }>.
+  FG.confirmarRemessa = function (numero) {
+    return putPedido('/pedidos/' + encodeURIComponent(numero) + '/remessa', {}, 'POST');
+  };
 
   // Muda o status do pedido (admin). Promise<{ ok, ... }>.
   FG.setOrderStatus = function (id, status) {

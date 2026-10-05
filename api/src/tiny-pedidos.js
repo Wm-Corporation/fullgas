@@ -2,24 +2,26 @@
 // Exportação de PEDIDOS para o Tiny ERP (sentido Fullgas → Tiny)
 // ------------------------------------------------------------
 // O estoque do Tiny é compartilhado com outro e-commerce (Magento).
-// Regra desde 30/09/2026: APROVAR o pedido no B2B significa que o
-// estoque pode ser descontado no Tiny. Na aprovação (sair de
-// 'Pendente') as peças em estoque viram UM pedido no Tiny, já
-// 'aprovado' (a aprovação baixa o estoque lá — a conta precisa estar
-// com "lançar estoque na aprovação do pedido" ligado).
+// Cada peça vendida vira um pedido 'aprovado' no Tiny (a aprovação
+// baixa o estoque lá — a conta precisa estar com "lançar estoque na
+// aprovação do pedido" ligado) — mas só DEPOIS que alguém conferiu a
+// prateleira: o estoque do Tiny não bate com o físico em algumas peças.
 //
 // Fluxo:
-//   APROVAÇÃO (escopo 'normal', com o snapshot em ItensJson): feita
-//   pelo admin no painel. Se o Tiny estiver fora, a linha fica 'erro' e
-//   o cron (tiny-cron.js) tenta de novo; enquanto isso o espelho de
-//   estoque desconta a reserva (tiny.js → reservaPendente).
+//   REMESSA (escopo 'remessa'): o admin decide o que vai nesta saída
+//   (quantidade encontrada/enviada de cada peça) e clica em "Confirmar
+//   envio" — só então as peças daquela remessa viram um pedido no Tiny.
+//   Um pedido enviado em partes gera uma remessa por saída; o Tiny
+//   recebe exatamente o que saiu. Se o Tiny estiver fora, a linha fica
+//   'erro' e o cron (tiny-cron.js) tenta de novo; enquanto isso o
+//   espelho de estoque desconta a reserva (tiny.js → reservaPendente).
+//   Aprovar o pedido (sair de 'Pendente') NÃO exporta nada.
 //
-//   Envio (quantidade enviada de cada peça, Parcial/Enviado) é só
-//   controle interno: não exporta nada.
-//
-//   HISTÓRICO: de 17/09 a 30/09/2026 o pedido ia ao Tiny por remessa, no
-//   "Confirmar envio" (escopo 'remessa', números -R2, -R3...). As linhas
-//   antigas continuam sendo lidas; nenhuma nova é criada.
+//   HISTÓRICO: o escopo 'normal' (pedido inteiro exportado na
+//   APROVAÇÃO) valeu até 17/09/2026 e de novo de 30/09 a 05/10/2026.
+//   As linhas antigas continuam sendo lidas; só a garantia ainda cria
+//   'normal' (vai ao Tiny inteira, uma vez, quando a reivindicação é
+//   aprovada).
 //
 //   Pré-venda: quando o admin libera o envio do backorder, cada
 //   liberação gera um pedido próprio no Tiny (escopo 'backorder')
@@ -27,8 +29,9 @@
 //
 //   Cancelamento local → se nenhuma peça saiu, os pedidos já criados no
 //   Tiny são cancelados lá (devolve o estoque). Se alguma peça já saiu,
-//   o Tiny NÃO é mexido sozinho: a linha ganha um aviso para ajuste
-//   manual (só o que não saiu deve voltar ao estoque).
+//   as remessas ficam (são peças que saíram); um pedido que foi inteiro
+//   ao Tiny ganha um aviso para ajuste manual (só o que não saiu deve
+//   voltar ao estoque).
 //
 //   Tiny → Fullgas: pedido cancelado ou excluído no Tiny vira aviso na
 //   linha de exportação (aparece na aba Tiny ERP do painel); o pedido do
@@ -219,7 +222,7 @@ export async function montarPayload(exp) {
           ? `Remessa ${ordem} do pedido Fullgas ${ped.NumeroPedido} — contém somente as peças ` +
             `enviadas nesta remessa` +
             (faltam ? `; faltam ${faltam} peça(s), que virão em remessa seguinte` : ' (envio concluído)')
-          : `Pedido Fullgas ${ped.NumeroPedido} aprovado no B2B`) + ` — usuário ${ped.UsuarioEmail}.`
+          : `Pedido Fullgas ${ped.NumeroPedido}`) + ` — usuário ${ped.UsuarioEmail}.`
   };
   // Lista de preço com que o pedido foi precificado (migration 048). Só
   // IDENTIFICA a lista no Tiny: o valor_unitario de cada item (obrigatório
@@ -266,7 +269,8 @@ export async function exportarPedido(exportId) {
     const nTiny = (await query('SELECT TinyNumero FROM dbo.TinyPedidoExport WHERE ExportId = @id', { id: exportId }))[0]?.TinyNumero;
     await registrarEventoPedido({
       pedidoId: exp.PedidoId, tipo: 'tiny', referencia: nTiny || String(tinyId),
-      titulo: (exp.Escopo === 'backorder' ? 'Pré-venda criada e aprovada no Tiny' : 'Pedido criado e aprovado no Tiny') +
+      titulo: ({ backorder: 'Pré-venda criada e aprovada no Tiny', remessa: 'Remessa criada e aprovada no Tiny' }[exp.Escopo] ||
+        'Pedido criado e aprovado no Tiny') +
         (nTiny ? ` (nº ${nTiny})` : ''),
       detalhe: 'O estoque do Tiny foi descontado.'
     });
@@ -408,11 +412,18 @@ export async function sincronizarSituacaoPedidos() {
 // devolveria ao estoque de lá também as peças que já foram embora — então o
 // Tiny NÃO é mexido: a linha fica com um aviso para ajuste manual (só o que
 // não saiu deve voltar). Decisão de 30/09/2026.
+//
+// Remessa e liberação de pré-venda levam SÓ peças que saíram de verdade: o
+// Tiny já está certo, então essas linhas ficam como estão (e, se ainda não
+// chegaram lá, a fila segue exportando). O aviso manual sobra só para pedido
+// que foi INTEIRO ao Tiny (escopo 'normal').
+const SO_O_QUE_SAIU = ['remessa', 'backorder'];
 export async function cancelarExportacoesDoPedido(pedidoId, { pecasEnviadas = 0 } = {}) {
   const rows = await query(
-    `SELECT ExportId, TinyPedidoId FROM dbo.TinyPedidoExport
+    `SELECT ExportId, Escopo, TinyPedidoId FROM dbo.TinyPedidoExport
       WHERE PedidoId = @pid AND Status <> 'cancelado'`, { pid: pedidoId });
   for (const r of rows) {
+    if (pecasEnviadas > 0 && SO_O_QUE_SAIU.includes(r.Escopo)) continue;
     const manual = pecasEnviadas > 0 && r.TinyPedidoId
       ? `Pedido cancelado no Fullgas com ${pecasEnviadas} peça(s) já enviada(s): ajuste o pedido ` +
         `${r.TinyPedidoId} no Tiny à mão — só as peças que não saíram devem voltar ao estoque.`

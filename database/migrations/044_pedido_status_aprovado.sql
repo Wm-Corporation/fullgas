@@ -46,11 +46,11 @@ GO
 /* ---- Conferencia (o deploy nao para em erro de SQL) --------------------- */
 SELECT CONVERT(VARCHAR(20), COUNT(*)) + ' pedidos em Aprovado'
   FROM dbo.Pedido WHERE Status = N'Aprovado';
--- Pedidos ativos com pecas que ainda nao foram ao Tiny (regra das remessas).
--- Esperado em 30/09/2026: 0 (todos os pedidos de producao estao cancelados).
--- Se aparecer algum, ele precisa ir ao Tiny pelo painel (ver 044 no PR).
+-- Pedidos ativos com pecas que ainda nao foram ao Tiny. Desde 05/10/2026 as
+-- remessas voltaram (aprovar nao exporta; o "Confirmar envio" exporta), entao
+-- um numero acima de 0 e normal: pecas aguardando conferencia/remessa.
 SELECT CONVERT(VARCHAR(20), COUNT(DISTINCT p.PedidoId)) +
-       ' pedidos aprovados/parciais/enviados com pecas fora do Tiny (esperado: 0)'
+       ' pedidos aprovados/parciais com pecas aguardando remessa ao Tiny'
   FROM dbo.Pedido p
   JOIN dbo.PedidoItem pi ON pi.PedidoId = p.PedidoId
  WHERE p.Status NOT IN (N'Pendente', N'Cancelado')
