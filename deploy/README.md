@@ -7,6 +7,7 @@ depois só se confere.
 | Arquivo | O que é |
 |---|---|
 | `nginx/fullgas.conf` | Configuração do Nginx de produção, versionada |
+| `manutencao/index.html` | Página "Estamos em manutenção" (instalada FORA do repo, ver abaixo) |
 
 ---
 
@@ -124,6 +125,44 @@ Dois pontos da configuração que se apagam sem dar erro:
 - **As regras de URL limpa** (`if ($request_uri ~ ...)` + `try_files $uri
   $uri.html`) são obrigatórias. Sem elas `/portal` responde 404. O bloco HTTPS
   de `docs/09-deploy-vps-linux.md` estava sem elas.
+
+---
+
+## Modo manutenção
+
+Criado direto no servidor em 10/09/2026 e versionado aqui em 05/10/2026 —
+até então o `deploy.sh` acusava "fullgas.conf difere do que está instalado",
+e instalar o arquivo do repo por cima teria **apagado** o modo manutenção.
+
+Dois gatilhos, a mesma página:
+
+- **Automático:** se a API cair (502/504), o visitante vê a página da marca em
+  vez do erro cru do Nginx. As chamadas a `/api/` e `/uploads/` recebem JSON
+  (`{"erro": ...}`), que é o que o front sabe mostrar.
+- **Programado:**
+
+  ```bash
+  sudo touch /var/www/manutencao/ATIVO   # site inteiro em 503 (manutenção)
+  sudo rm /var/www/manutencao/ATIVO      # site de volta ao ar
+  ```
+
+  Não precisa de reload: o Nginx testa o arquivo a cada pedido.
+
+A página mora em `/var/www/manutencao/`, **fora** de `/var/www/fullgas-app`,
+de propósito: o `deploy.sh` faz `git reset --hard` no repositório, e a página
+precisa existir justamente quando um deploy está no meio do caminho. Por isso
+o deploy NÃO a atualiza — depois de mudar `manutencao/index.html`, instale à mão:
+
+```bash
+sudo mkdir -p /var/www/manutencao
+sudo cp /var/www/fullgas-app/deploy/manutencao/index.html /var/www/manutencao/index.html
+```
+
+Responde 503 (e não 200) para o Google manter o site no índice, com
+`Cache-Control: no-store` para a Cloudflare não guardar a página de
+manutenção depois que o site voltar. Ao criar um `location` novo no
+`fullgas.conf`, copie as linhas `if (-f /var/www/manutencao/ATIVO) ...` e
+`error_page` — sem elas aquele caminho fica no ar durante a manutenção.
 
 ---
 
