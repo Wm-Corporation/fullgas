@@ -19,6 +19,7 @@ import {
 } from '../tiny-pedidos.js';
 import { registrarEvento } from '../historico-veiculo.js';
 import { registrarEventoPedido, resumoPecas } from '../historico-pedido.js';
+import { GARANTIA_DIAS, fimDaGarantia } from '../utils/garantia.js';
 
 const router = Router();
 
@@ -29,10 +30,8 @@ const STATUS_TERMINAIS = ['Aprovada', 'Recusada'];
 // Mínimo de fotos/vídeos para APROVAR qualquer garantia (30/09/2026).
 export const FOTOS_MINIMAS = 3;
 const TIPOS_VALIDOS = ['Manufacturer', 'Implícito'];
-// Prazo da garantia do VEÍCULO: 90 dias a partir de Veiculo.GarantiaAtivaEm
-// (ativada na venda). Vencido — ou nunca ativada — o chassi não aceita novas
-// reivindicações. O varejo (garantia por pedido) NÃO tem prazo.
-const GARANTIA_DIAS = 90;
+// Prazo da garantia do VEÍCULO (90 dias a partir da venda): GARANTIA_DIAS e
+// fimDaGarantia em utils/garantia.js, compartilhados com a ficha do veículo.
 
 // ---- Upload de fotos (multer → disco) -----------------------------------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -216,8 +215,7 @@ async function resolverVeicPecas(tx, niv, pecas, user) {
   const { VeiculoId, GarantiaAtivaEm } = v0;
   if (!GarantiaAtivaEm)
     return { erro: 'Garantia não ativada para este veículo — registre a venda primeiro.' };
-  const limite = new Date(GarantiaAtivaEm).getTime() + GARANTIA_DIAS * 24 * 60 * 60 * 1000;
-  if (Date.now() > limite)
+  if (Date.now() > fimDaGarantia(GarantiaAtivaEm).getTime())
     return { erro: `Garantia expirada (${GARANTIA_DIAS} dias). Este chassi não aceita novas reivindicações de garantia.` };
   const { pecasResolvidas, erro } = await resolverPecas(tx, pecas);
   if (erro) return { erro };

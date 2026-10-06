@@ -9,6 +9,8 @@ import {
 } from '../historico-veiculo.js';
 import { FABRICA, sqlEhFabrica, sqlNaFabrica } from '../fabrica.js';
 import { cpfValido } from '../validacao.js';
+import { miniaturaDe } from '../miniaturas.js';
+import { GARANTIA_DIAS, fimDaGarantia } from '../utils/garantia.js';
 
 const router = Router();
 
@@ -29,6 +31,9 @@ function validarAno(ano) {
 
 // Mapeia uma linha do banco para o formato que o front (store.js) já espera:
 // { niv, modeloId (código do modelo), ano, status, entrada, fabrica, venda?, garantia? }.
+// Desde 06/10/2026 vêm também a foto do modelo (foto/miniatura), os dados da
+// concessionária (concessionaria) e o período da garantia (garantiaFim) — é o
+// que a ficha do veículo mostra no portal, nas ações e nas reivindicações.
 //
 // `entrada` (EntradaEstoque) é o dia em que o chassi entrou NO ESTOQUE ATUAL —
 // a concessionária de hoje, ou a Fábrica. Toda atribuição/transferência a
@@ -46,11 +51,36 @@ function podeVerComprador(r, user) {
   return !user || user.papel === 'admin' || (r.VendaEmpresaId != null && r.VendaEmpresaId === user.empresaId);
 }
 
-function toVeiculo(r, user) {
+// URL relativa → absoluta (o front pode rodar em outra origem que a API).
+function urlAbs(req, rel) {
+  if (!rel) return rel || null;
+  if (/^https?:\/\//i.test(rel)) return rel;
+  return req.protocol + '://' + req.get('host') + rel;
+}
+
+// Endereço principal da concessionária em partes curtas, como numa etiqueta:
+// "Rua X, 270 - Sala 2 — Centro", "Taubaté/SP" e o CEP à parte (a ficha
+// completa mostra o CEP; o resumo dos pop-ups, só a cidade).
+function enderecoConcessionaria(r) {
+  const rua = [r.EndLogradouro, r.EndNumero].filter(Boolean).join(', ') +
+    (r.EndComplemento ? ' - ' + r.EndComplemento : '');
+  return {
+    endereco: [rua, r.EndBairro].filter(Boolean).join(' — '),
+    cidade: [r.EndCidade, r.EndUf].filter(Boolean).join('/'),
+    cep: r.EndCep || ''
+  };
+}
+
+function toVeiculo(r, req) {
+  const user = req.user;
   const naFabrica = !!r.NaFabrica;
   const v = {
     niv: r.Niv,
     modeloId: r.ModeloCodigo,
+    // Nome do modelo junto do chassi: a lista /veiculos/modelos só traz os
+    // modelos ATIVOS, e um chassi de modelo desativado no Localizador ficava
+    // na tela só com o código.
+    modelo: r.ModeloEtiqueta || [r.ModeloNome, r.ModeloAno].filter(Boolean).join(' ') || r.ModeloCodigo,
     ano: r.Ano,
     status: r.Status,
     entrada: r.EntradaEstoque,
@@ -58,7 +88,22 @@ function toVeiculo(r, user) {
     // chassi aponte para a empresa de um administrador (ver fabrica.js).
     fabrica: naFabrica,
     empresaId: naFabrica ? null : r.EmpresaId,
-    empresa: naFabrica ? null : r.EmpresaNome
+    empresa: naFabrica ? null : r.EmpresaNome,
+    // A foto é do MODELO (ModeloMoto.ImagemUrl, a mesma do Localizador de
+    // Peças): todo chassi daquele modelo mostra a mesma moto. A miniatura
+    // (≤320 px, WebP) é a que as listas usam; null enquanto não foi gerada.
+    foto: urlAbs(req, r.ModeloImagem),
+    miniatura: urlAbs(req, miniaturaDe(r.ModeloImagem)),
+    // Quem responde pelo chassi hoje, como aparece na ficha. Só chega aqui
+    // quem já pode ver o chassi — a própria concessionária ou o admin.
+    concessionaria: naFabrica || !r.EmpresaId ? null : {
+      nome: r.EmpresaNome,
+      fantasia: r.EmpresaFantasia || '',
+      telefone: r.EmpresaTelefone || '',
+      email: r.EmpresaEmail || '',
+      ...enderecoConcessionaria(r)
+    },
+    garantiaDias: GARANTIA_DIAS
   };
   if (r.VendaData) v.venda = podeVerComprador(r, user) ? {
     data: r.VendaData,
@@ -73,7 +118,10 @@ function toVeiculo(r, user) {
     cpf: '', email: '', telefone: '', endereco: '',
     outraConcessionaria: true
   };
-  if (r.GarantiaAtivaEm) v.garantia = r.GarantiaAtivaEm;
+  if (r.GarantiaAtivaEm) {
+    v.garantia = r.GarantiaAtivaEm;
+    v.garantiaFim = fimDaGarantia(r.GarantiaAtivaEm);
+  }
   return v;
 }
 
@@ -81,11 +129,24 @@ const SELECT_VEIC =
   `SELECT v.VeiculoId, v.Niv, v.Ano, v.Status, v.EntradaEstoque, v.VendaData,
           v.VendaCliente, v.ClienteCpf, v.ClienteEmail, v.ClienteTelefone,
           v.ClienteEndereco, v.GarantiaAtivaEm, v.EmpresaId, v.VendaEmpresaId,
-          m.Codigo AS ModeloCodigo, e.RazaoSocial AS EmpresaNome,
+          m.Codigo AS ModeloCodigo, m.Nome AS ModeloNome, m.Ano AS ModeloAno,
+          m.Etiqueta AS ModeloEtiqueta, m.ImagemUrl AS ModeloImagem,
+          e.RazaoSocial AS EmpresaNome, e.NomeFantasia AS EmpresaFantasia,
+          e.Telefone AS EmpresaTelefone, e.Email AS EmpresaEmail,
+          en.Logradouro AS EndLogradouro, en.Numero AS EndNumero,
+          en.Complemento AS EndComplemento, en.Bairro AS EndBairro,
+          en.Cidade AS EndCidade, en.Uf AS EndUf, en.Cep AS EndCep,
           ${sqlNaFabrica('v.EmpresaId')} AS NaFabrica
      FROM dbo.Veiculo v
      JOIN dbo.ModeloMoto m ON m.ModeloId = v.ModeloId
-     LEFT JOIN dbo.Empresa e ON e.EmpresaId = v.EmpresaId`;
+     LEFT JOIN dbo.Empresa e ON e.EmpresaId = v.EmpresaId
+     OUTER APPLY (
+       -- endereço principal da concessionária (o mesmo critério da tela de usuários)
+       SELECT TOP 1 d.Logradouro, d.Numero, d.Complemento, d.Bairro, d.Cidade, d.Uf, d.Cep
+         FROM dbo.Endereco d
+        WHERE d.EmpresaId = v.EmpresaId
+        ORDER BY d.Principal DESC, d.EnderecoId ASC
+     ) en`;
 
 // Resposta para quem tenta pôr um chassi "na concessionária" do administrador.
 const ERRO_DESTINO_FABRICA =
@@ -103,13 +164,17 @@ function escopoEmpresa(user) {
 
 // GET /api/veiculos/modelos — lista de modelos (alimenta FG.model no front).
 // Declarado ANTES de /:niv para não ser capturado como se "modelos" fosse um NIV.
-router.get('/veiculos/modelos', requireAuth, async (_req, res, next) => {
+router.get('/veiculos/modelos', requireAuth, async (req, res, next) => {
   try {
     const rows = await query(
-      `SELECT Codigo AS id, Nome AS nome, Ano AS ano, Etiqueta AS label
+      `SELECT Codigo AS id, Nome AS nome, Ano AS ano, Etiqueta AS label, ImagemUrl
          FROM dbo.ModeloMoto WHERE Ativo = 1 ORDER BY Nome, Ano`
     );
-    res.json(rows.map(r => ({ id: r.id, nome: r.nome, ano: r.ano, label: r.label || (r.nome + ' ' + r.ano) })));
+    res.json(rows.map(r => ({
+      id: r.id, nome: r.nome, ano: r.ano, label: r.label || (r.nome + ' ' + r.ano),
+      imagem: urlAbs(req, r.ImagemUrl),
+      miniatura: urlAbs(req, miniaturaDe(r.ImagemUrl))
+    })));
   } catch (e) { next(e); }
 });
 
@@ -190,7 +255,7 @@ router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
       });
     }
 
-    res.status(201).json(toVeiculo(veic, req.user));
+    res.status(201).json(toVeiculo(veic, req));
   } catch (e) { next(e); }
 });
 
@@ -206,7 +271,7 @@ router.get('/veiculos', requireAuth, requireAreaAny(['estoque', 'acoes']), async
       SELECT_VEIC + (esc.where ? ' WHERE' + esc.where : '') + ' ORDER BY v.EntradaEstoque DESC',
       esc.params
     );
-    res.json(rows.map(r => toVeiculo(r, req.user)));
+    res.json(rows.map(r => toVeiculo(r, req)));
   } catch (e) { next(e); }
 });
 
@@ -219,7 +284,7 @@ router.get('/veiculos/:niv', requireAuth, requireAreaAny(['estoque', 'acoes']), 
       { niv: req.params.niv, ...esc.params }
     );
     if (!rows.length) return res.status(404).json({ erro: 'Veículo não encontrado.' });
-    res.json(toVeiculo(rows[0], req.user));
+    res.json(toVeiculo(rows[0], req));
   } catch (e) { next(e); }
 });
 
@@ -298,7 +363,7 @@ router.post('/veiculos/:niv/venda', requireAuth, requireArea('acoes'), async (re
       });
     }
 
-    res.json(toVeiculo(atualizado, req.user));
+    res.json(toVeiculo(atualizado, req));
   } catch (e) { next(e); }
 });
 
@@ -335,7 +400,7 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
         user: req.user, empresaId: null
       });
       const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
-      return res.json(toVeiculo(rows[0], req.user));
+      return res.json(toVeiculo(rows[0], req));
     }
 
     // A empresa da Fábrica entra na busca só para o erro sair claro ("isso é a
@@ -390,7 +455,7 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
     });
 
     const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
-    res.json({ ...toVeiculo(rows[0], req.user), empresa: emp[0].RazaoSocial });
+    res.json({ ...toVeiculo(rows[0], req), empresa: emp[0].RazaoSocial });
   } catch (e) { next(e); }
 });
 
@@ -425,7 +490,7 @@ router.put('/veiculos/:niv/ano', requireAuth, requireAdmin, async (req, res, nex
     });
 
     const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
-    res.json(toVeiculo(rows[0], req.user));
+    res.json(toVeiculo(rows[0], req));
   } catch (e) { next(e); }
 });
 

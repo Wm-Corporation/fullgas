@@ -23,6 +23,7 @@ import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin, requireArea } from '../auth.js';
 import { slugModelo, arvoreModelo, MARCA_PADRAO, MODALIDADE_PADRAO } from '../utils/modelo-moto.js';
 import { percentualDoUsuario, aplicarPercentual } from '../lista-preco.js';
+import { prepararMiniaturas } from '../miniaturas.js';
 
 const router = Router();
 
@@ -484,6 +485,8 @@ router.delete('/finder/modelos/:codigo', requireAuth, requireAdmin, async (req, 
 });
 
 // POST /api/finder/modelos/:codigo/imagem  (admin) — sobe/troca a foto do modelo.
+// É a mesma foto da ficha de cada chassi do modelo (portal, ações,
+// reivindicações) — a aba Chassis do admin sobe por esta mesma rota.
 router.post('/finder/modelos/:codigo/imagem', requireAuth, requireAdmin, uploadImagem, async (req, res, next) => {
   try {
     const m = await acharModelo(req.params.codigo);
@@ -491,6 +494,7 @@ router.post('/finder/modelos/:codigo/imagem', requireAuth, requireAdmin, uploadI
     const rel = URL_BASE + req.file.filename;
     await query('UPDATE dbo.ModeloMoto SET ImagemUrl = @img WHERE ModeloId = @id', { img: rel, id: m.ModeloId });
     apagarUpload(m.ImagemUrl); // remove a anterior do disco
+    prepararMiniaturas();      // miniatura da lista de chassis (segundo plano)
     res.status(201).json({ ok: true, imagem: urlAbs(req, rel) });
   } catch (e) { next(e); }
 });
@@ -502,6 +506,7 @@ router.delete('/finder/modelos/:codigo/imagem', requireAuth, requireAdmin, async
     if (!m) return res.status(404).json({ erro: 'Modelo não encontrado.' });
     await query('UPDATE dbo.ModeloMoto SET ImagemUrl = NULL WHERE ModeloId = @id', { id: m.ModeloId });
     apagarUpload(m.ImagemUrl);
+    prepararMiniaturas();      // apaga a miniatura que ficou órfã
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

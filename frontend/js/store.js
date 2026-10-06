@@ -21,9 +21,17 @@
   function fmtMoney(v) {
     return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   }
+  // Data SEM hora ("2026-10-02", como a API manda a data do defeito) é um dia
+  // do calendário, não um instante: new Date() a lê como meia-noite UTC, e no
+  // fuso do Brasil ela virava 21h do dia ANTERIOR — a tela mostrava 01/10 para
+  // um defeito de 02/10. Aqui ela vira meia-noite local.
+  function dataLocal(iso) {
+    var m = typeof iso === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(iso);
+  }
   function fmtDate(iso) {
     if (!iso) return '-';
-    var d = new Date(iso);
+    var d = dataLocal(iso);
     return pad(d.getDate(), 2) + '/' + pad(d.getMonth() + 1, 2) + '/' + d.getFullYear();
   }
   function fmtDateTime(iso) {
@@ -667,6 +675,170 @@
       setTimeout(function () { el.classList.add('out'); setTimeout(function () { el.remove(); }, 400); }, 2600);
     },
 
+    /* ---- FICHA DO VEÍCULO (06/10/2026) ----
+       A moto com tudo o que se sabe dela: foto do modelo, dados do chassi,
+       concessionária, cliente (se vendida) e o período da garantia. Uma
+       função só para o portal (ações do veículo, venda, reivindicações) e o
+       admin (Chassis, reivindicações), para as telas não desenharem cada uma
+       a sua versão. `v` é o veículo como a API devolve (veiculos.routes.js).
+       Estilos .vf-* / .vficha / .vresumo no styles.css. */
+
+    // Nome do modelo: o da lista de modelos (ativos) ou o que veio junto do
+    // chassi (cobre modelo desativado no Localizador de Peças).
+    rotuloModelo: function (v) {
+      var m = FG.model(v.modeloId);
+      return (m && m.label) || v.modelo || v.modeloId || '—';
+    },
+
+    // Foto do modelo. `tam`: 'grande' (ficha), 'media' (resumo) ou 'mini'
+    // (linha de lista). Só a grande baixa a foto original; as outras usam a
+    // miniatura WebP quando ela já existe. Sem foto, a moto desenhada.
+    fotoVeiculo: function (v, tam) {
+      tam = tam || 'mini';
+      var alt = 'Foto do modelo ' + FG.rotuloModelo(v);
+      if (!v.foto) {
+        return '<span class="vf-foto vf-' + tam + ' vazio" title="Modelo sem foto cadastrada">' +
+          FG.bikeSVG(null, tam === 'grande' ? 120 : (tam === 'media' ? 64 : 40)) +
+          (tam === 'mini' ? '' : '<small>Sem foto</small>') + '</span>';
+      }
+      var src = tam === 'grande' ? v.foto : (v.miniatura || v.foto);
+      return '<img class="vf-foto vf-' + tam + '" src="' + esc(src) + '" data-foto-grande="' + esc(v.foto) +
+        '" alt="' + esc(alt) + '" title="Clique para ampliar" loading="lazy">';
+    },
+
+    // Situação da garantia: { inicio, fim, dias, classe, texto }. O prazo e o
+    // fim vêm da API (utils/garantia.js); a conta aqui é só para o texto.
+    garantiaVeiculo: function (v) {
+      var dias = v.garantiaDias || 90;
+      if (!v.garantia) {
+        return { inicio: null, fim: null, dias: dias, classe: 'nao',
+          texto: v.venda ? 'Não ativada' : 'Começa na venda' };
+      }
+      var fim = v.garantiaFim ? new Date(v.garantiaFim)
+        : new Date(new Date(v.garantia).getTime() + dias * 864e5);
+      var ms = fim.getTime() - Date.now();
+      if (ms < 0) return { inicio: v.garantia, fim: fim, dias: dias, classe: 'vencida', texto: 'Vencida' };
+      var resta = Math.ceil(ms / 864e5);
+      return { inicio: v.garantia, fim: fim, dias: dias, classe: 'vigente',
+        texto: 'Vigente — ' + (resta === 1 ? '1 dia restante' : resta + ' dias restantes') };
+    },
+
+    // Selo da situação do chassi, no canto da foto (o "ESTOQUE" da referência).
+    seloVeiculo: function (v) {
+      var vendida = v.status === 'Vendido';
+      return '<span class="vf-selo ' + (vendida ? 'vendida' : 'estoque') + '">' +
+        (vendida ? 'Vendida' : (v.status === 'Disponível' ? 'Em estoque' : esc(v.status))) + '</span>';
+    },
+
+    // Ficha completa (tela "Ações do veículo" e o detalhe do chassi no admin).
+    // opts.acoes: HTML dos botões, desenhado entre os dados e as duas colunas;
+    // opts.rodape: HTML que fecha a ficha (o histórico do chassi, no portal).
+    fichaVeiculo: function (v, opts) {
+      opts = opts || {};
+      var g = FG.garantiaVeiculo(v);
+      function dado(rot, val) { return '<div><b>' + rot + '</b>' + val + '</div>'; }
+      return '<div class="vficha">' +
+        '<div class="vf-topo">' +
+        '<div class="vf-midia">' + FG.seloVeiculo(v) + FG.fotoVeiculo(v, 'grande') + '</div>' +
+        '<div class="vf-info">' +
+        '<h3 class="vf-titulo">' + esc(FG.rotuloModelo(v)) + '</h3>' +
+        '<div class="vf-dados">' +
+        dado('NIV', esc(v.niv)) +
+        dado('Ano', esc(v.ano || '—')) +
+        dado('Status', esc(v.status)) +
+        // A entrada é a do estoque ONDE o chassi está hoje, não a do cadastro.
+        dado(v.fabrica ? 'Entrada na Fábrica' : 'Entrada na concessionária', FG.fmtDate(v.entrada)) +
+        dado('Venda', v.venda ? FG.fmtDate(v.venda.data) : '—') +
+        dado('Duração da garantia', g.dias + ' dias') +
+        dado('Início da garantia', g.inicio ? FG.fmtDate(g.inicio) : '—') +
+        dado('Fim da garantia', g.fim ? FG.fmtDate(g.fim) : '—') +
+        dado('Situação da garantia', '<span class="vf-gar ' + g.classe + '">' + esc(g.texto) + '</span>') +
+        '</div></div></div>' +
+        (opts.acoes ? '<div class="vf-acoes">' + opts.acoes + '</div>' : '') +
+        '<div class="vf-partes">' +
+        '<section><h4>Concessionária</h4>' + FG.blocoConcessionaria(v) + '</section>' +
+        '<section><h4>Cliente</h4>' + FG.blocoCliente(v) + '</section>' +
+        '</div>' + (opts.rodape || '') + '</div>';
+    },
+
+    blocoConcessionaria: function (v) {
+      var c = v.concessionaria;
+      if (v.fabrica || !c) {
+        return '<p>' + FG.seloFabrica() + '</p><p class="muted">Ainda não foi atribuída a uma concessionária.</p>';
+      }
+      var contato = [c.telefone, c.email].filter(Boolean).map(esc).join(' · ');
+      return '<p class="vf-nome">' + esc(c.nome) + '</p>' +
+        (c.fantasia && c.fantasia !== c.nome ? '<p class="muted">' + esc(c.fantasia) + '</p>' : '') +
+        (c.endereco ? '<p>' + esc(c.endereco) + '</p>' : '') +
+        (c.cidade || c.cep ? '<p>' + [esc(c.cidade), c.cep ? 'CEP ' + esc(c.cep) : ''].filter(Boolean).join(' · ') + '</p>' : '') +
+        (contato ? '<p class="muted">' + contato + '</p>' : '') +
+        (!c.endereco && !c.cidade && !contato ? '<p class="muted">Sem endereço cadastrado.</p>' : '');
+    },
+
+    blocoCliente: function (v) {
+      var vd = v.venda;
+      if (!vd) return '<p class="muted">Não vendida.</p>';
+      if (vd.outraConcessionaria) {
+        return '<p class="muted">' + esc(vd.cliente) + '</p><p>Venda em ' + FG.fmtDate(vd.data) + '</p>';
+      }
+      function linha(rot, val) { return val ? '<p><span class="muted">' + rot + ':</span> ' + esc(val) + '</p>' : ''; }
+      return '<p class="vf-nome">' + esc(vd.cliente || '—') + '</p>' +
+        linha('CPF', vd.cpf) + linha('Telefone', vd.telefone) + linha('E-mail', vd.email) +
+        linha('Endereço', vd.endereco) +
+        '<p><span class="muted">Venda em:</span> ' + FG.fmtDate(vd.data) + '</p>';
+    },
+
+    // Resumo da moto para os pop-ups (registrar venda, transferir, nova
+    // reivindicação e o detalhe de uma reivindicação). opts.ocorrido (data do
+    // defeito) mostra se ela cai dentro do período da garantia.
+    fichaVeiculoResumo: function (v, opts) {
+      opts = opts || {};
+      var g = FG.garantiaVeiculo(v);
+      var conc = v.fabrica || !v.concessionaria ? FG.seloFabrica()
+        : esc(v.concessionaria.nome) + (v.concessionaria.cidade ? ' <span class="muted">— ' + esc(v.concessionaria.cidade) + '</span>' : '');
+      var cliente = !v.venda ? '<span class="muted">Não vendida</span>'
+        : esc(v.venda.cliente) + ' <span class="muted">· venda em ' + FG.fmtDate(v.venda.data) + '</span>';
+      var periodo = g.inicio
+        ? FG.fmtDate(g.inicio) + ' a ' + FG.fmtDate(g.fim) + ' (' + g.dias + ' dias)'
+        : g.dias + ' dias, a partir da venda';
+      // Rótulo e valor em duas colunas; o valor vai num <span> só para não
+      // virar várias células da grade (.vr-linha é display:grid).
+      function linha(rot, val) { return '<div class="vr-linha"><b>' + rot + '</b><span>' + val + '</span></div>'; }
+      var ocorrido = '';
+      if (opts.ocorrido && g.inicio) {
+        // Compara por DIA, no mesmo fuso em que as datas aparecem na tela.
+        var dia = function (x) { var d = dataLocal(x); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); };
+        var dentro = dia(opts.ocorrido) >= dia(g.inicio) && dia(opts.ocorrido) <= dia(g.fim);
+        ocorrido = linha(esc(opts.rotuloOcorrido || 'Data do ocorrido'),
+          FG.fmtDate(opts.ocorrido) + ' <span class="vf-gar ' + (dentro ? 'vigente' : 'vencida') + '">' +
+          (dentro ? 'dentro do período da garantia' : 'fora do período da garantia') + '</span>');
+      }
+      return '<div class="vresumo">' +
+        '<div class="vf-midia">' + FG.fotoVeiculo(v, 'media') + '</div>' +
+        '<div class="vr-info">' +
+        '<div class="vr-titulo">' + esc(FG.rotuloModelo(v)) + ' ' + FG.seloVeiculo(v) + '</div>' +
+        linha('NIV', esc(v.niv) + (v.ano ? ' <span class="muted">· ano ' + esc(v.ano) + '</span>' : '')) +
+        linha('Concessionária', conc) +
+        linha('Cliente', cliente) +
+        linha('Garantia', periodo + ' <span class="vf-gar ' + g.classe + '">' + esc(g.texto) + '</span>') +
+        ocorrido +
+        '</div></div>';
+    },
+
+    // Foto em tela cheia (o mesmo visualizador escuro das reivindicações).
+    verFoto: function (url, nome) {
+      var tela = document.createElement('div');
+      tela.className = 'midia-viewer';
+      tela.setAttribute('role', 'dialog');
+      tela.setAttribute('aria-label', nome || 'Foto');
+      tela.innerHTML = '<div class="midia-viewer-box"><img src="' + esc(url) + '" alt="' + esc(nome || '') + '">' +
+        '<button type="button" class="midia-viewer-x" aria-label="Fechar">×</button></div>';
+      document.body.appendChild(tela);
+      var x = tela.querySelector('.midia-viewer-x');
+      x.addEventListener('click', function () { tela.remove(); });
+      x.focus();
+    },
+
     /* ---- SVG: moto esquemática (miniaturas do finder, home, diagramas) ---- */
     bikeSVG: function (highlight, w, opts) {
       opts = opts || {};
@@ -694,4 +866,13 @@
 
   FG.init();
   global.FG = FG;
+
+  // Clique em qualquer foto de modelo (.vf-foto) amplia em tela cheia. Um
+  // ouvinte só, delegado: cobre telas re-renderizadas e pop-ups criados na hora.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', function (e) {
+      var img = e.target.closest && e.target.closest('img.vf-foto[data-foto-grande]');
+      if (img) FG.verFoto(img.getAttribute('data-foto-grande'), img.alt);
+    });
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

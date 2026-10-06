@@ -378,6 +378,15 @@
   }
   FG.recarregarVeiculos = recarregarVeiculos;
 
+  // A foto de um modelo mudou: ela aparece na lista de modelos E em cada
+  // chassi daquele modelo (ficha do veículo), então as duas listas recarregam.
+  FG.recarregarModelosEVeiculos = function () {
+    return Promise.all([
+      apiGet('/veiculos/modelos').then(function (l) { if (l) CACHE.models = l; return l; }),
+      recarregarVeiculos()
+    ]);
+  };
+
   function recarregarClaims() {
     return apiGet('/reivindicacoes').then(function (l) { if (l) CACHE.claims = l; return l; });
   }
