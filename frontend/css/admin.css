@@ -361,6 +361,24 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
    .selo-fabrica do styles.css) */
 .ch-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 14px; align-items: end; }
 .ch-form .field { margin: 0; }
+/* foto do modelo na 1ª coluna da tabela de chassis (FG.fotoVeiculo 'mini') */
+.tbl td.ch-td-foto { width: 88px; padding-top: 4px; padding-bottom: 4px; }
+
+/* ---- aba Chassis: "Fotos dos modelos" — uma ficha por modelo, com a foto
+   que aparece em todo chassi dele (06/10/2026) */
+.mf-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.mf-item {
+  border: 1px solid var(--adm-line); background: #fff; padding: 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0;
+}
+.mf-item.sem-foto { border-color: #f0c674; background: #fffbeb; }
+.mf-item .vf-foto { width: 100%; max-width: 150px; height: 100px; border: none; }
+.mf-nome { font-size: 12px; font-weight: 600; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mf-sub { font-size: 11px; color: #777; }
+.mf-botoes { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.mf-enviar { cursor: pointer; }
+.mf-enviar.enviando { opacity: .6; cursor: progress; }
+.mf-alerta { color: #b45309; }
 
 /* Textos amarelos do admin: só NEGRITO (contorno removido a pedido do
    dono — ver o bloco "TEXTOS AMARELOS" no styles.css). */

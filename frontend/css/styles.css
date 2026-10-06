@@ -503,6 +503,71 @@ main.portal { padding: 0 22px 60px; }
 .veh-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px 22px; margin: 12px 0 18px; }
 .veh-grid b { display: block; font-size: 12px; color: var(--gray); font-weight: 600; }
 
+/* FICHA DO VEÍCULO (06/10/2026) — foto do modelo + chassi + concessionária +
+   cliente + garantia. Desenhada por FG.fichaVeiculo / FG.fichaVeiculoResumo
+   (store.js); vale para o portal e para o admin. */
+.vficha { border: 1px solid var(--line); background: #fff; box-shadow: var(--shadow); padding: 20px 22px; max-width: 1040px; }
+.vf-topo { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 26px; align-items: start; }
+.vf-midia { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; flex: none; }
+.vf-selo {
+  display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase;
+  padding: 3px 8px; border: 2px solid; background: #fff; line-height: 1.2; white-space: nowrap;
+}
+.vf-selo.estoque { color: var(--red-dark); border-color: var(--red); }
+.vf-selo.vendida { color: var(--green); border-color: var(--green); }
+.vf-foto { display: block; object-fit: contain; background: #fff; }
+img.vf-foto { cursor: zoom-in; }
+.vf-foto.vf-grande { width: 260px; height: 190px; }
+.vf-foto.vf-media { width: 128px; height: 92px; border: 1px solid #eee; }
+.vf-foto.vf-mini { width: 76px; height: 54px; }
+.vf-foto.vazio {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: #f6f6f6; border: 1px dashed #cfcfcf; color: #999; font-size: 11px;
+}
+.vf-titulo { margin: 0 0 12px; font-size: 22px; font-weight: 800; color: var(--ink); line-height: 1.2; word-break: break-word; }
+.vf-dados {
+  border: 1px solid var(--line); padding: 14px 18px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px 22px;
+}
+.vf-dados > div { min-width: 0; overflow-wrap: anywhere; }
+.vf-dados b { display: block; font-size: 12px; color: var(--gray); font-weight: 600; margin-bottom: 2px; }
+.vf-gar { font-size: 12px; font-weight: 700; }
+.vf-gar.vigente { color: var(--green); }
+.vf-gar.vencida { color: #b91c1c; } /* vencida: vermelho semântico */
+.vf-gar.nao { color: var(--gray); font-weight: 600; }
+.vf-acoes { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0 4px; }
+.vf-partes { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 20px; }
+.vf-partes section { min-width: 0; overflow-wrap: anywhere; }
+.vf-partes h4 { margin: 0 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 15px; }
+.vf-partes p { margin: 4px 0; font-size: 13px; }
+.vf-nome { font-weight: 700; }
+@media (max-width: 760px) {
+  .vficha { padding: 14px; }
+  .vf-topo, .vf-partes { grid-template-columns: 1fr; gap: 16px; }
+  .vf-foto.vf-grande { width: 100%; max-width: 320px; }
+}
+
+/* resumo da moto nos pop-ups (venda, transferência, reivindicações) */
+.vresumo {
+  display: flex; gap: 14px; align-items: flex-start; border: 1px solid var(--line);
+  background: #fafafa; padding: 10px 12px; margin: 0 0 14px;
+}
+.vr-info { flex: 1; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.vr-titulo { font-weight: 800; font-size: 14px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vr-titulo .vf-selo { font-size: 9px; padding: 1px 6px; border-width: 1px; }
+.vr-linha { margin: 3px 0; display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.vr-linha b { font-size: 12px; color: var(--gray); font-weight: 600; }
+@media (max-width: 560px) { .vresumo { flex-direction: column; } .vr-linha { grid-template-columns: 1fr; gap: 0; } }
+
+/* ficha completa dentro de um pop-up (admin → Chassis → clique no NIV) */
+.modal.modal-ficha { width: 1000px; }
+.modal-ficha .vficha { border: none; box-shadow: none; padding: 0; max-width: none; }
+
+/* lista de estoque com a foto do modelo na primeira coluna: texto centrado
+   na altura da foto */
+.table.tbl-veic td { vertical-align: middle; }
+.table td.td-foto { width: 92px; padding: 4px 8px; }
+
 /* histórico do veículo — linha do tempo do chassi (dentro de .veh-card) */
 .hist-bloco { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 14px; }
 .hist-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }

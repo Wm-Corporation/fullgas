@@ -11,8 +11,10 @@ import express from 'express';
 import request from 'supertest';
 
 let linhasProduto = [];
+const sqlsVistos = [];
 vi.mock('../src/db.js', () => ({
   query: async (sqlTexto) => {
+    sqlsVistos.push(sqlTexto);
     if (/SELECT DISTINCT ImagemUrl/.test(sqlTexto)) return linhasProduto.map(r => ({ ImagemUrl: r.ImagemUrl }));
     if (/FROM dbo\.Produto p/.test(sqlTexto)) return linhasProduto;
     return [];
@@ -26,6 +28,8 @@ const mini = await import('../src/miniaturas.js');
 const UPLOADS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'uploads');
 const PRODUTOS = path.join(UPLOADS, 'produtos');
 fs.mkdirSync(PRODUTOS, { recursive: true });
+const FINDER = path.join(UPLOADS, 'finder');
+fs.mkdirSync(FINDER, { recursive: true });
 
 // Foto de teste 800×600 gravada como upload local do admin.
 const criados = [];
@@ -85,6 +89,8 @@ describe('gerarMiniatura', () => {
     'https://s3.amazonaws.com/outro-bucket/x.png',   // bucket que não é o do Tiny
     'https://anexos.tiny.com.br.evil.com/x.png',
     '/uploads/produtos/../../../etc/passwd',         // caminho local fora da pasta
+    '/uploads/finder/../../../etc/passwd',
+    '/uploads/reivindicacoes/foto.png',              // pasta privada de cliente
     'file:///etc/passwd'
   ])('recusa origem não permitida sem buscar nada: %s', async (origem) => {
     await expect(mini.gerarMiniatura(origem)).rejects.toThrow();
@@ -96,6 +102,29 @@ describe('gerarMiniatura', () => {
     await expect(mini.gerarMiniatura('https://anexos.tiny.com.br/erp/abc/x.jpg')).rejects.toThrow();
     expect(fetchEspiao).toHaveBeenCalledTimes(1);
     expect(fetchEspiao.mock.calls[0][1]).toMatchObject({ redirect: 'error' });
+  });
+});
+
+// Foto do modelo de moto (06/10/2026): aparece em toda linha da lista de
+// chassis, então ganha miniatura como as fotos de produto.
+describe('foto do modelo (/uploads/finder)', () => {
+  it('gera a miniatura a partir do upload do Localizador de Peças', async () => {
+    const nome = 'teste-mini-modelo.png';
+    const buf = await sharp({ create: { width: 1200, height: 800, channels: 3, background: '#c00' } }).png().toBuffer();
+    fs.writeFileSync(path.join(FINDER, nome), buf);
+    criados.push(path.join(FINDER, nome));
+    const url = await mini.gerarMiniatura('/uploads/finder/' + nome);
+    const meta = await sharp(arquivoDaMini(url)).metadata();
+    expect(Math.max(meta.width, meta.height)).toBe(320);
+    expect(fetchEspiao).not.toHaveBeenCalled();
+  });
+
+  it('a rodada inclui as fotos dos modelos (ModeloMoto) junto das de produto', async () => {
+    sqlsVistos.length = 0;
+    await mini.prepararMiniaturas();
+    const sqlRodada = sqlsVistos.find(q => /SELECT DISTINCT ImagemUrl/.test(q));
+    expect(sqlRodada).toMatch(/FROM dbo\.Produto/);
+    expect(sqlRodada).toMatch(/FROM dbo\.ModeloMoto/);
   });
 });
 

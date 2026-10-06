@@ -1,5 +1,6 @@
 // ============================================================
-// Miniaturas das fotos de produto.
+// Miniaturas das fotos de produto (e, desde 06/10/2026, da foto de cada
+// modelo de moto, que aparece em toda linha da lista de chassis).
 // ------------------------------------------------------------
 // As fotos vêm do Tiny (≈665×500 px, ≈73 KB cada) e as telas as exibiam
 // inteiras em caixinhas de 48 px (Catálogo do admin) ou 170 px (loja). Pior:
@@ -69,11 +70,12 @@ export function miniaturaDe(origem) {
   return prontas.has(nome) ? URL_BASE + nome : null;
 }
 
-// Lê os bytes da foto de origem: upload local (/uploads/produtos/...) ou uma
-// das origens permitidas. Qualquer outra coisa é recusada.
+// Lê os bytes da foto de origem: upload local (/uploads/produtos/... ou a
+// foto do modelo em /uploads/finder/...) ou uma das origens permitidas.
+// Qualquer outra coisa é recusada.
 async function lerOrigem(origem) {
-  const local = /^\/uploads\/produtos\/([A-Za-z0-9._-]+)$/.exec(origem);
-  if (local) return fs.promises.readFile(path.join(UPLOADS, 'produtos', local[1]));
+  const local = /^\/uploads\/(produtos|finder)\/([A-Za-z0-9._-]+)$/.exec(origem);
+  if (local) return fs.promises.readFile(path.join(UPLOADS, local[1], local[2]));
 
   let u;
   try { u = new URL(origem); } catch { throw new Error('URL inválida'); }
@@ -123,8 +125,14 @@ export function prepararMiniaturas() {
   rodando = (async () => {
     do {
       repetir = false;
+      // Fotos de produto + foto de cada modelo de moto. Os diagramas do
+      // Localizador (SecaoModelo) ficam de fora: são vistos em tamanho cheio.
       const rows = await query(
-        "SELECT DISTINCT ImagemUrl FROM dbo.Produto WHERE ImagemUrl IS NOT NULL AND ImagemUrl <> ''"
+        `SELECT DISTINCT ImagemUrl FROM (
+           SELECT ImagemUrl FROM dbo.Produto
+           UNION ALL
+           SELECT ImagemUrl FROM dbo.ModeloMoto
+         ) f WHERE ImagemUrl IS NOT NULL AND ImagemUrl <> ''`
       );
       const faltam = rows.map(r => r.ImagemUrl).filter(u => !prontas.has(nomeDe(u)));
       let ok = 0, erros = 0;

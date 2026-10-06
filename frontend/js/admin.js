@@ -979,6 +979,117 @@
     });
   }
 
+  // Ficha completa de um chassi num pop-up — a mesma que a concessionária vê
+  // em "Ações do veículo" (FG.fichaVeiculo, store.js).
+  function modalFichaChassi(v) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal modal-ficha"><header><h3>Chassi ' + esc(v.niv) + '</h3>' +
+      '<button class="x">×</button></header>' +
+      '<div class="modal-body">' + FG.fichaVeiculo(v) + '</div>' +
+      '<div class="modal-foot"><button class="btn-line" id="fc-fechar">Fechar</button></div></div>';
+    document.body.appendChild(back);
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    document.getElementById('fc-fechar').addEventListener('click', fechar);
+  }
+
+  /* FOTOS DOS MODELOS (06/10/2026)
+     Cada modelo tem UMA foto, mostrada em todo chassi dele: na ficha do
+     veículo, no estoque, na venda e nas reivindicações. É a mesma foto do
+     Localizador de Peças (ModeloMoto.ImagemUrl) — trocar aqui troca lá, e
+     vice-versa (a rota de upload é a do Localizador).
+     A lista sai do que a tela já tem: os modelos ativos (FG.all('models')) e,
+     dos chassis, os modelos desativados no Localizador que ainda têm moto na
+     rua — esses também precisam de foto na ficha. Nada é buscado a mais, então
+     o filtro da tabela pode redesenhar a tela a cada tecla. */
+  function modelosParaFoto() {
+    var lista = FG.all('models').map(function (m) {
+      return { id: m.id, label: m.label, foto: m.imagem, miniatura: m.miniatura, ativo: true };
+    });
+    FG.all('vehicles').forEach(function (v) {
+      if (lista.some(function (m) { return m.id === v.modeloId; })) return;
+      lista.push({ id: v.modeloId, label: v.modelo || v.modeloId, foto: v.foto, miniatura: v.miniatura, ativo: false });
+    });
+    return lista;
+  }
+
+  function htmlFotosModelos() {
+    var modelos = modelosParaFoto();
+    if (!modelos.length) {
+      return '<p class="muted" style="margin:0;">Nenhum modelo cadastrado. ' +
+        'Crie os modelos em <a href="#finder">Localizador de Peças</a>.</p>';
+    }
+    var vehs = FG.all('vehicles');
+    var semFoto = modelos.filter(function (m) { return !m.foto; }).length;
+    return '<p class="muted" style="margin:0 0 12px;font-size:12px;">A foto aparece para a concessionária em ' +
+      'todo chassi do modelo (ficha do veículo, estoque, venda e reivindicações). É a mesma foto do ' +
+      'Localizador de Peças. Use JPG, PNG ou WebP, até 15 MB — de preferência a moto de lado, com fundo claro.' +
+      (semFoto ? ' <b class="mf-alerta">' + semFoto + (semFoto === 1 ? ' modelo sem foto.' : ' modelos sem foto.') + '</b>' : '') +
+      '</p>' +
+      '<div class="mf-grade">' + modelos.map(function (m) {
+        var qtd = vehs.filter(function (v) { return v.modeloId === m.id; }).length;
+        // "Veículo" de mentira só para reaproveitar o desenho da foto.
+        var foto = FG.fotoVeiculo({ foto: m.foto, miniatura: m.miniatura, modelo: m.label, modeloId: m.id }, 'media');
+        return '<div class="mf-item' + (m.foto ? '' : ' sem-foto') + '">' + foto +
+          '<div class="mf-nome" title="' + esc(m.label) + '">' + esc(m.label) + '</div>' +
+          '<div class="mf-sub">' + (qtd === 1 ? '1 chassi' : qtd + ' chassis') +
+          (m.ativo ? '' : ' · <span title="Oculto no Localizador de Peças">inativo</span>') + '</div>' +
+          '<div class="mf-botoes">' +
+          '<label class="btn-line btn-mini mf-enviar"><span>' + (m.foto ? 'Trocar foto' : 'Enviar foto') + '</span>' +
+          '<input type="file" accept="image/jpeg,image/png,image/webp" data-mf-up="' + esc(m.id) + '" hidden></label>' +
+          (m.foto ? ' <button class="btn-line btn-mini" data-mf-del="' + esc(m.id) + '">Remover</button>' : '') +
+          '</div></div>';
+      }).join('') + '</div>';
+  }
+
+  function bindFotosModelos() {
+    var box = document.getElementById('ch-fotos');
+    if (!box) return;
+    var vigente = telaVigente();
+    function pronto(msg) {
+      FG.toast(msg);
+      FG.recarregarModelosEVeiculos().then(function () { if (vigente()) renderChassis(); });
+    }
+    Array.prototype.forEach.call(box.querySelectorAll('[data-mf-up]'), function (inp) {
+      inp.addEventListener('change', function () {
+        var arq = inp.files && inp.files[0];
+        if (!arq) return;
+        var rotulo = inp.closest('label');
+        var texto = rotulo.querySelector('span');
+        var antes = texto.textContent;
+        rotulo.classList.add('enviando');
+        texto.textContent = 'Enviando…';
+        inp.disabled = true;
+        FG.finderUploadImagemModelo(inp.getAttribute('data-mf-up'), arq).then(function (r) {
+          if (r.ok === false) {
+            FG.toast(r.msg || 'Não foi possível enviar a foto.', 'erro');
+            rotulo.classList.remove('enviando');
+            texto.textContent = antes;
+            inp.disabled = false;
+            inp.value = '';
+            return;
+          }
+          pronto('Foto do modelo salva.');
+        });
+      });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-mf-del]'), function (b) {
+      b.addEventListener('click', function () {
+        var cod = b.getAttribute('data-mf-del');
+        var m = modelosParaFoto().find(function (x) { return x.id === cod; });
+        if (!m || !confirm('Remover a foto do modelo ' + m.label + '?\n' +
+          'Ela sai da ficha de todos os chassis deste modelo e do Localizador de Peças.')) return;
+        b.disabled = true;
+        FG.finderRemoverImagemModelo(cod).then(function (r) {
+          if (r.ok === false) { b.disabled = false; FG.toast(r.msg || 'Não foi possível remover a foto.', 'erro'); return; }
+          pronto('Foto removida.');
+        });
+      });
+    });
+  }
+
   function renderChassis() {
     h1.textContent = 'Chassis (VINs)'; setOn('chassis');
     var todos = FG.all('vehicles');
@@ -989,8 +1100,7 @@
       if (f.modelo && String(v.modeloId) !== f.modelo) return false;
       if (f.atrib === 'sim' && v.fabrica) return false;
       if (f.atrib === 'nao' && !v.fabrica) return false;
-      var m = FG.model(v.modeloId);
-      return casaBusca('chassis', [v.niv, v.fabrica ? 'Fábrica' : v.empresa, m ? m.label : v.modeloId, v.ano]);
+      return casaBusca('chassis', [v.niv, v.fabrica ? 'Fábrica' : v.empresa, FG.rotuloModelo(v), v.ano]);
     });
 
     view.innerHTML =
@@ -1015,6 +1125,10 @@
       ' — nenhuma concessionária o vê até você atribuir. A atribuição pode ser feita (ou trocada) a qualquer momento na tabela abaixo.</p>' +
       '</div></div>' +
 
+      /* ---- foto de cada modelo (htmlFotosModelos / bindFotosModelos) ---- */
+      '<div class="adm-card"><div class="c-head">Fotos dos modelos</div><div class="c-body" id="ch-fotos">' +
+      htmlFotosModelos() + '</div></div>' +
+
       /* ---- lista ---- */
       '<div class="adm-card"><div class="c-head">Chassis cadastrados (' + contagem('chassis', vehs.length, todos.length) + ')</div><div class="c-body">' +
       barraFiltro('chassis', [
@@ -1022,25 +1136,35 @@
         { k: 'modelo', rotulo: 'Modelo', opcoes: modelos.map(function (m) { return [m.id, m.label]; }) },
         { k: 'atrib', rotulo: 'Localização', opcoes: [['nao', 'Na Fábrica'], ['sim', 'Em concessionária']] }
       ], 'Buscar por NIV, modelo, ano ou concessionária') +
-      '<table class="tbl"><thead><tr><th>NIV</th><th>Modelo</th><th>Ano</th>' +
+      '<table class="tbl"><thead><tr><th>Foto</th><th>NIV</th><th>Modelo</th><th>Ano</th>' +
       '<th>Status</th><th>Localização</th><th>Entrada no local</th><th>Ações</th></tr></thead><tbody>' +
       (vehs.length ? vehs.map(function (v) {
-        var m = FG.model(v.modeloId);
-        return '<tr><td>' + esc(v.niv) + '</td><td>' + esc(m ? m.label : v.modeloId) + '</td>' +
-          '<td>' + esc(v.ano || '—') +
+        return '<tr><td class="ch-td-foto">' + FG.fotoVeiculo(v, 'mini') + '</td>' +
+          '<td><button class="link-action" data-ficha="' + esc(v.niv) + '" title="Ver a ficha completa deste chassi">' +
+          esc(v.niv) + '</button></td><td>' + esc(FG.rotuloModelo(v)) + '</td>' +
+          '<td class="nowrap">' + esc(v.ano || '—') +
           ' <button class="link-action" data-ed-ano="' + esc(v.niv) + '" title="Corrigir o ano deste chassi">✎</button></td>' +
           '<td>' + pill(v.status) + '</td>' +
           '<td>' + localChassi(v) + '</td>' +
           '<td>' + FG.fmtDate(v.entrada) + '</td>' +
           '<td><button class="btn-line btn-mini" data-atr="' + esc(v.niv) + '">' +
           (v.fabrica ? 'Atribuir' : 'Transferir') + '</button></td></tr>';
-      }).join('') : vazioFiltro(7, todos.length
+      }).join('') : vazioFiltro(8, todos.length
         ? 'Nenhum chassi com esse filtro.'
         : 'Nenhum chassi cadastrado ainda.')) +
       '</tbody></table></div></div>';
 
     bindFiltro(renderChassis);
     bindAcEmpresas('ch-nova-emp');
+    bindFotosModelos();
+
+    /* ficha completa do chassi (foto, concessionária, cliente, garantia) */
+    Array.prototype.forEach.call(view.querySelectorAll('[data-ficha]'), function (b) {
+      b.addEventListener('click', function () {
+        var v = FG.all('vehicles').find(function (x) { return x.niv === b.getAttribute('data-ficha'); });
+        if (v) modalFichaChassi(v);
+      });
+    });
 
     /* cadastrar */
     document.getElementById('ch-criar').addEventListener('click', function () {
@@ -1821,6 +1945,8 @@
       ? '<div class="media-gallery">' + c.anexos.map(anexoThumb).join('') + '</div>'
       : '<span class="muted">Sem fotos ou vídeos</span>';
     function linha(rot, val) { return '<div><span class="cell-label">' + rot + '</span><span class="cell-value">' + val + '</span></div>'; }
+    var veic = c.origem !== 'varejo' && c.niv
+      ? FG.all('vehicles').find(function (x) { return x.niv === c.niv; }) : null;
 
     var acoes = term
       ? '<div class="muted">Status final (' + esc(c.status) + ') — não pode mais mudar.</div>'
@@ -1846,6 +1972,9 @@
           'para aprovar são necessárias no mínimo 3. Devolva ao revendedor pedindo as que faltam.</div>' : '') +
       (c.status === 'Aprovada' ? '<div class="det-credito">✔ Aprovada — pedido de garantia criado para repor a(s) peça(s) sem cobrança' +
         (c.valorGarantia ? ' (valor de referência: ' + FG.fmtMoney(c.valorGarantia) + ')' : '') + '. Acompanhe na área de pedidos.</div>' : '') +
+      // A moto da reivindicação: foto, concessionária, cliente e se o ocorrido
+      // cai dentro do período da garantia — o que o admin confere para decidir.
+      (veic ? FG.fichaVeiculoResumo(veic, { ocorrido: c.origem === 'preentrega' ? null : c.dataDefeito }) : '') +
       '<div class="det-grid">' +
       linha('N° da reivindicação', '<b class="cl-num">' + esc(c.id) + '</b>') +
       linha('Status', esc(c.status)) +
@@ -2247,6 +2376,7 @@
     if (btnDel) btnDel.addEventListener('click', function () {
       FG.finderRemoverImagemModelo(m.id).then(function (r) {
         if (fndErro(r, 'Falha ao remover a foto.')) return;
+        FG.recarregarModelosEVeiculos();   // a foto também sai da ficha dos chassis
         FG.toast('Foto removida.'); fechar(); renderFinderModelos();
       });
     });
@@ -2277,6 +2407,8 @@
           ? FG.finderUploadImagemModelo(codigo, arquivo)
           : Promise.resolve({ ok: true });
         fotoOk.then(function (rf) {
+          // Nome e foto do modelo aparecem na ficha de cada chassi (aba Chassis).
+          FG.recarregarModelosEVeiculos();
           if (rf.ok === false) FG.toast('Modelo salvo, mas a foto falhou: ' + (rf.msg || ''), 'erro');
           else FG.toast(novo ? 'Modelo criado.' : 'Modelo salvo.' +
             (codigo !== m.id ? ' Novo código: ' + codigo + '.' : ''));

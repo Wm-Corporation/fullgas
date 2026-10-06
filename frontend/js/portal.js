@@ -146,9 +146,11 @@
     var cls = { 'Em processo': 'proc', 'Aprovada': 'ok', 'Recusada': 'bad', 'Esboço': 'draft' }[st] || 'proc';
     return '<span class="badge ' + cls + '">' + esc(st) + '</span>';
   }
-  function modelName(modeloId) {
+  // `reserva`: o nome que veio junto do chassi (v.modelo), para modelo que
+  // não está na lista de ativos — sem ela a tela mostrava só o código.
+  function modelName(modeloId, reserva) {
     var m = FG.model(modeloId);
-    return m ? (m.nome + ' ' + m.ano) : modeloId;
+    return m ? (m.nome + ' ' + m.ano) : (reserva || modeloId);
   }
 
   /* =========================================================
@@ -638,10 +640,13 @@
       }).join('') + '</select></div>' +
       '<div class="field"><label>NIV do veículo *</label><select id="nc-niv">' +
       vehs.map(function (v) {
-        return '<option value="' + v.niv + '">' + v.niv + ' — ' + esc(modelName(v.modeloId)) +
+        return '<option value="' + v.niv + '">' + v.niv + ' — ' + esc(modelName(v.modeloId, v.modelo)) +
           (v.venda ? '' : ' (em estoque)') + '</option>';
       }).join('') +
       '</select></div>' +
+      // A moto escolhida, com foto, concessionária, cliente e o período da
+      // garantia — para conferir o chassi antes de descrever o defeito.
+      '<div id="nc-veic"></div>' +
       // Aviso do modo pré-entrega. Nasce escondido e só aparece quando o chassi
       // escolhido ainda não tem venda registrada — o cliente não escolhe este
       // modo, ele decorre do estado da moto.
@@ -701,6 +706,8 @@
       return !!v && !v.venda;
     }
     function aplicarModo() {
+      var vSel = vehs.find(function (x) { return x.niv === selNiv.value; });
+      document.getElementById('nc-veic').innerHTML = vSel ? FG.fichaVeiculoResumo(vSel) : '';
       var pe = ehPreEntrega();
       avisoPE.classList.toggle('hidden', !pe);
       campoTipo.classList.toggle('hidden', pe);
@@ -1185,12 +1192,18 @@
       ? '<div class="media-gallery">' + c.anexos.map(anexoThumb).join('') + '</div>'
       : '<span class="muted">Sem fotos ou vídeos</span>';
     function linha(rot, val) { return '<div><span class="cell-label">' + rot + '</span><span class="cell-value">' + val + '</span></div>'; }
+    // Garantia de veículo: a moto (foto, concessionária, cliente) e se o
+    // ocorrido cai dentro do período da garantia. Chassi que já saiu do
+    // estoque da concessionária não está no cache — aí fica só o NIV abaixo.
+    var veic = c.origem !== 'varejo' && c.niv
+      ? FG.all('vehicles').find(function (x) { return x.niv === c.niv; }) : null;
     back.innerHTML =
       '<div class="modal"><header><h3>Reivindicação ' + esc(c.id) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
       (c.sentBack ? '<div class="devolvida-aviso">↩ Devolvida — falta: ' + esc(c.faltaInformacao || 'informações') + '</div>' : '') +
       (c.status === 'Aprovada' ? '<div class="det-credito">✔ Garantia aprovada — as peças serão repostas sem cobrança ' +
         'por um pedido de garantia. Acompanhe na área de pedidos.</div>' : '') +
+      (veic ? FG.fichaVeiculoResumo(veic, { ocorrido: c.origem === 'preentrega' ? null : c.dataDefeito }) : '') +
       '<div class="det-grid">' +
       linha('N° da reivindicação', '<b class="cl-num">' + esc(c.id) + '</b>') +
       linha('Status', esc(c.status)) +
@@ -1409,6 +1422,7 @@
     back.innerHTML =
       '<div class="modal"><header><h3>Registrar venda — ' + esc(v.niv) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
+      FG.fichaVeiculoResumo(v) +
       '<p class="muted" style="margin-top:0;">Dados do comprador final. A garantia é ativada automaticamente na venda. Campos marcados com * são obrigatórios.</p>' +
       '<div class="form-grid">' +
       '<div class="field full"><label>Nome do cliente *</label><input id="vd-nome" type="text" placeholder="Nome completo" autocomplete="off"></div>' +
@@ -1463,6 +1477,7 @@
     back.innerHTML =
       '<div class="modal"><header><h3>Transferir revendedor — ' + esc(v.niv) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
+      FG.fichaVeiculoResumo(v) +
       '<p class="muted" style="margin-top:0;">Hoje está ' + (v.fabrica ? 'na ' + FG.seloFabrica() : 'em <b>' + esc(v.empresa) + '</b>') +
       '. O chassi passa a pertencer à concessionária informada. Comece a digitar e escolha na lista.</p>' +
       '<div class="field"><label>Concessionária de destino *</label>' +
@@ -1662,45 +1677,29 @@
       var v = FG.all('vehicles').find(function (x) { return x.niv.toUpperCase() === q; });
       FG.logSearch(q, v ? 1 : 0);
       if (!v) { box.innerHTML = '<p class="muted">Nenhum veículo encontrado com este NIV.</p>'; return; }
-      var m = FG.model(v.modeloId);
-      box.innerHTML =
-        '<div class="veh-card"><h3 style="color:var(--red);">' + esc(m ? m.label : v.modeloId) + '</h3>' +
-        '<div class="veh-grid">' +
-        '<div><b>NIV</b>' + v.niv + '</div>' +
-        '<div><b>Modelo</b>' + esc(modelName(v.modeloId)) + '</div>' +
-        '<div><b>Ano</b>' + esc(v.ano || '—') + '</div>' +
-        '<div><b>Status</b>' + esc(v.status) + '</div>' +
-        '<div><b>Localização</b>' + (v.fabrica ? FG.seloFabrica() : esc(v.empresa || '—')) + '</div>' +
-        // A entrada é sempre a do estoque ONDE o chassi está hoje (o rótulo diz
-        // qual), não a do dia em que ele foi cadastrado no sistema. Quem quiser
-        // a vida inteira do chassi tem o histórico logo abaixo.
-        '<div><b>' + (v.fabrica ? 'Entrada na Fábrica' : 'Entrada nesta concessionária') + '</b>' +
-        FG.fmtDate(v.entrada) + '</div>' +
-        (v.venda ? '<div><b>Venda</b>' + FG.fmtDate(v.venda.data) + ' — ' + esc(v.venda.cliente) + '</div>' +
-          (v.venda.cpf ? '<div><b>CPF</b>' + esc(v.venda.cpf) + '</div>' : '') +
-          (v.venda.telefone ? '<div><b>Telefone</b>' + esc(v.venda.telefone) + '</div>' : '') +
-          (v.venda.email ? '<div><b>E-mail</b>' + esc(v.venda.email) + '</div>' : '') +
-          (v.venda.endereco ? '<div><b>Endereço</b>' + esc(v.venda.endereco) + '</div>' : '') : '') +
-        (v.garantia ? '<div><b>Garantia ativada em</b>' + FG.fmtDate(v.garantia) + '</div>' : '') +
-        '</div>' +
-        '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
-        (v.status === 'Disponível' ? '<button class="btn red" id="av-venda">Registrar venda</button>' : '') +
-        // Sem "Ativar garantia" avulso (30/09/2026): a garantia começa no
-        // registro da venda — ligá-la antes encurtava a do comprador.
-        (!v.garantia && v.status === 'Disponível'
-          ? '<span class="muted" style="font-size:12px;align-self:center;">A garantia começa ao registrar a venda.</span>' : '') +
-        (sess.papel === 'admin' ? '<button class="btn" id="av-transf">Transferir revendedor</button>' : '') +
-        '<a class="btn" href="#reivindicacoes">Criar reivindicação</a>' +
-        '<a class="btn" href="/finder">Abrir no Localizador de Peças</a>' +
-        '</div>' +
-        /* ---- histórico do chassi ---- */
-        '<div class="hist-bloco">' +
-        '<div class="hist-head"><h4>Histórico do veículo</h4>' +
-        (sess.papel === 'admin'
-          ? '<button class="btn small" id="av-hist-novo">+ Registrar no histórico</button>' : '') +
-        '</div>' +
-        '<div id="av-hist" class="hist-lista"><p class="muted">Carregando…</p></div>' +
-        '</div></div>';
+      // Ficha do veículo (store.js): foto do modelo, dados do chassi,
+      // concessionária, cliente e o período da garantia — tudo numa tela,
+      // com as ações no meio e o histórico do chassi fechando a ficha.
+      box.innerHTML = FG.fichaVeiculo(v, {
+        acoes:
+          (v.status === 'Disponível' ? '<button class="btn red" id="av-venda">Registrar venda</button>' : '') +
+          // Sem "Ativar garantia" avulso (30/09/2026): a garantia começa no
+          // registro da venda — ligá-la antes encurtava a do comprador.
+          (!v.garantia && v.status === 'Disponível'
+            ? '<span class="muted" style="font-size:12px;align-self:center;">A garantia começa ao registrar a venda.</span>' : '') +
+          (sess.papel === 'admin' ? '<button class="btn" id="av-transf">Transferir revendedor</button>' : '') +
+          '<a class="btn" href="#reivindicacoes">Criar reivindicação</a>' +
+          '<a class="btn" href="/finder">Abrir no Localizador de Peças</a>',
+        rodape:
+          /* ---- histórico do chassi ---- */
+          '<div class="hist-bloco">' +
+          '<div class="hist-head"><h4>Histórico do veículo</h4>' +
+          (sess.papel === 'admin'
+            ? '<button class="btn small" id="av-hist-novo">+ Registrar no histórico</button>' : '') +
+          '</div>' +
+          '<div id="av-hist" class="hist-lista"><p class="muted">Carregando…</p></div>' +
+          '</div>'
+      });
 
       var bv = document.getElementById('av-venda');
       if (bv) bv.addEventListener('click', function () { modalVenda(v, buscar); });
@@ -1737,13 +1736,15 @@
     view.innerHTML =
       '<h2>Estoque do revendedor</h2>' +
       '<div class="toolbar"><button class="tool" id="es-csv">📄 Export. p/ Excel</button></div>' +
-      '<table class="table"><thead><tr><th class="filt">NIV</th><th class="filt">Modelo</th>' +
+      '<table class="table tbl-veic"><thead><tr><th>Foto</th><th class="filt">NIV</th><th class="filt">Modelo</th>' +
       (admin ? '<th>Localização</th>' : '') +
       '<th class="filt">Status</th><th>Entrada</th><th></th></tr></thead><tbody>' +
-      (vehs.length ? '' : '<tr><td colspan="' + (admin ? 6 : 5) + '" class="muted">Nenhuma moto no seu estoque ainda. ' +
+      (vehs.length ? '' : '<tr><td colspan="' + (admin ? 7 : 6) + '" class="muted">Nenhuma moto no seu estoque ainda. ' +
         'Quando a Fullgas atribuir chassis à sua concessionária, eles aparecem aqui.</td></tr>') +
       vehs.map(function (v) {
-        return '<tr><td>' + esc(v.niv) + '</td><td>' + esc(modelName(v.modeloId)) + '</td>' +
+        // Foto do modelo (miniatura) — clicar amplia; o NIV abre a ficha.
+        return '<tr><td class="td-foto">' + FG.fotoVeiculo(v, 'mini') + '</td>' +
+          '<td><a href="#acoes/' + esc(v.niv) + '">' + esc(v.niv) + '</a></td><td>' + esc(modelName(v.modeloId, v.modelo)) + '</td>' +
           (admin ? '<td>' + (v.fabrica ? FG.seloFabrica() : esc(v.empresa || '—')) + '</td>' : '') +
           '<td>' + (v.status === 'Disponível' ? '<span class="stock-ok">Disponível</span>' : esc(v.status)) + '</td>' +
           '<td>' + FG.fmtDate(v.entrada) + '</td>' +
@@ -1753,7 +1754,7 @@
     document.getElementById('es-csv').addEventListener('click', function () {
       var linhas = [['NIV', 'Modelo'].concat(admin ? ['Localização'] : [], ['Status', 'Entrada'])];
       vehs.forEach(function (v) {
-        linhas.push([v.niv, modelName(v.modeloId)].concat(admin ? [local(v)] : [], [v.status, FG.fmtDate(v.entrada)]));
+        linhas.push([v.niv, modelName(v.modeloId, v.modelo)].concat(admin ? [local(v)] : [], [v.status, FG.fmtDate(v.entrada)]));
       });
       FG.exportCSV('estoque', linhas);
     });
