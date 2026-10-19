@@ -1,11 +1,5 @@
-// Ciclo do pedido desde 05/10/2026 (volta das remessas de 17/09): aprovar NÃO
-// vai ao Tiny. O admin confere a prateleira, marca o que encontrou e clica em
-// "Confirmar envio" (POST /remessa): só essas peças viram um pedido no Tiny.
-// O que faltou sai numa remessa seguinte. Entregue só depois de Enviado; nada
-// volta a Pendente depois de ir ao Tiny; cancelar devolve só o que não saiu.
-//
-// O db.js é um dublê — inclusive a transação, porque estas rotas gravam dentro
-// de uma. O tiny-pedidos.js também, para espiar o que seria exportado.
+// Ciclo do pedido: aprovar não vai ao Tiny; "Confirmar envio" exporta o que saiu; o resto vai em nova remessa.
+// Entregue só depois de Enviado; cancelar devolve só o que não saiu. db.js (com transação) e tiny-pedidos.js são dublês.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';

@@ -1,21 +1,7 @@
 /* =========================================================
-   FULLGAS B2B — Adaptador de API
-   ---------------------------------------------------------
-   Inclua este arquivo DEPOIS de js/store.js em cada página:
-     <script src="js/store.js"></script>
-     <script src="js/api-adapter.js"></script>
-
-   Ele substitui o "miolo" das funções FG que mexiam no
-   localStorage por chamadas à API real. As telas (portal,
-   loja, finder, admin) continuam LENDO os dados de forma
-   síncrona: FG.all() lê de um cache em memória.
-
-   O cache é carregado de forma ASSÍNCRONA (fetch) — sem
-   XMLHttpRequest síncrono, que os navegadores bloqueiam em
-   requisições cross-origin (impede acesso de outro dispositivo
-   ou hospedagem externa). Cada tela espera FG.pronto (uma
-   Promise que resolve quando o cache está cheio) antes de
-   renderizar.
+   FULLGAS B2B — Adaptador de API (inclua DEPOIS de js/store.js)
+   Troca o localStorage do store.js pela API. As telas leem do cache em memória
+   (FG.all) e esperam FG.pronto antes de renderizar.
    ========================================================= */
 (function () {
   'use strict';
@@ -23,56 +9,23 @@
   // Ajuste para a URL onde a API está publicada.
   var API_BASE = window.FULLGAS_API_BASE || 'http://localhost:3000/api';
 
-  /* =======================================================================
-     A SESSÃO SAIU DO ALCANCE DESTE ARQUIVO
-     -----------------------------------------------------------------------
-     Antes o token JWT ficava no localStorage e era colado à mão no header
-     Authorization. O problema é que localStorage é lido por QUALQUER script
-     que rode na página — um XSS levava a sessão inteira embora.
-
-     Agora o token vive no cookie fg_sess, marcado httpOnly: o navegador o
-     envia sozinho em toda requisição e o JavaScript não consegue lê-lo. Nem
-     este arquivo. É o objetivo, não uma limitação.
-
-     Mas o front ainda precisa saber DUAS coisas que lia dentro do token, e
-     por isso a API manda dois cookies legíveis junto:
-       fg_exp  — quando a sessão expira (segundos UNIX). Substitui o `exp`
-                 que líamos decodificando o JWT com atob.
-       fg_csrf — o segredo que devolvemos no header X-CSRF-Token.
-
-     Por que cookie companheiro e não um endpoint: o guardião abaixo roda a
-     cada 30 s e a cada carregamento de página, de forma SÍNCRONA. Perguntar
-     ao servidor exigiria await em todo lugar que hoje só lê uma variável.
-     ======================================================================= */
+  /* ---- Sessão ----
+     O token fica no cookie httpOnly fg_sess (o JS não lê). Cookies legíveis:
+     fg_exp = validade (segundos UNIX) · fg_csrf = valor do header X-CSRF-Token. */
   function cookie(nome) {
     var m = document.cookie.match(new RegExp('(?:^|; )' + nome + '=([^;]*)'));
     return m ? decodeURIComponent(m[1]) : '';
   }
 
-  // Apaga um cookie legível pelo JS. O `path` precisa ser o MESMO usado na
-  // gravação, senão o navegador entende que é outro cookie e ignora o pedido —
-  // é o mesmo detalhe que o fecharSessao do servidor comenta.
+  // O `path` precisa ser o mesmo da gravação.
   function apagarCookie(nome) {
     document.cookie = nome + '=; path=/; max-age=0';
   }
 
-  // Há sessão? É um palpite do lado do cliente, e é o suficiente: serve para
-  // decidir o que RENDERIZAR. Quem decide de verdade é a API, que valida a
-  // assinatura do fg_sess — este cookie aqui é só o aviso legível.
+  // Palpite para renderizar; quem decide é a API.
   function temSessao() { return !!cookie('fg_exp'); }
 
-  /* Cabeçalhos comuns a TODA chamada à API.
-     -----------------------------------------------------------------------
-     O X-CSRF-Token é o que separa uma requisição nossa de uma forjada por
-     outro site. O raciocínio: o navegador anexa o cookie sozinho, mas
-     NENHUM site consegue fazer o navegador anexar um header customizado a
-     uma requisição para outra origem — para isso ele precisaria passar pelo
-     preflight de CORS, que a nossa API só concede a origens conhecidas.
-     Então "sabe o valor e conseguiu mandá-lo num header" prova que o código
-     rodou dentro do fullgas.app.br.
-
-     Repare que não montamos Authorization em lugar nenhum. É o coração da
-     Fase 3: a credencial deixou de passar por aqui. */
+  // Cabeçalhos de toda chamada (X-CSRF-Token; nunca Authorization).
   function cabecalhos(extra) {
     var h = extra || {};
     h['ngrok-skip-browser-warning'] = '1';
@@ -81,33 +34,15 @@
     return h;
   }
 
-  /* =======================================================================
-     GUARDIÃO DE SESSÃO — expiração por tempo e por inatividade
-     -----------------------------------------------------------------------
-     Problema que isto resolve: o token JWT expira no servidor (8h), mas o
-     front guardava a sessão no localStorage SEM nenhuma validade. Se o
-     usuário deixava o PC ligado e logado, ao voltar (F5) a tela continuava
-     "logada" — mas toda chamada à API respondia 401 e o portal quebrava,
-     sem devolver o usuário ao login.
-
-     Três camadas, todas convergindo para encerrarSessao():
-       1. Validade do token: lemos o claim `exp` do próprio JWT.
-       2. Inatividade: INATIVIDADE_MS sem mouse/teclado/toque encerram a
-          sessão. O carimbo fica no localStorage porque o site tem várias
-          páginas (portal → loja → finder) e um timer em memória zeraria a
-          cada navegação.
-       3. Resposta 401 da API: qualquer chamada autenticada que volte 401
-          encerra a sessão na hora (ver função api(), logo abaixo).
-     ======================================================================= */
+  /* ---- Guardião de sessão ----
+     Encerra por: token vencido (fg_exp), inatividade (carimbo no localStorage,
+     vale entre páginas) ou resposta 401 da API. */
   var INATIVIDADE_MS = 4 * 60 * 60 * 1000;      // 4 h sem interação
   var ATIVIDADE_KEY  = 'fullgas_ultima_atividade';
   var CHECAGEM_MS    = 30 * 1000;               // varredura periódica
   var encerrando     = false;                   // trava anti-loop de redirect
 
-  // Quando a sessão expira, em ms. Vem do cookie fg_exp — antes era preciso
-  // fatiar o JWT e decodificar o payload com atob. Some um pedaço de código
-  // que só existia porque o front tinha o token na mão.
-  // 0 = sem sessão ou cookie ilegível (a inatividade ainda cobre o caso).
+  // Validade da sessão em ms (cookie fg_exp); 0 = sem sessão.
   function tokenExpiraEm() {
     var exp = parseInt(cookie('fg_exp'), 10);
     return exp ? exp * 1000 : 0;
@@ -117,8 +52,7 @@
     try { localStorage.setItem(ATIVIDADE_KEY, String(Date.now())); } catch (e) {}
   }
 
-  // Devolve o motivo pelo qual a sessão deve ser encerrada, ou null se está OK.
-  // 'expirada' = token venceu; 'inatividade' = tempo ocioso estourado.
+  // 'expirada' | 'inatividade' | null
   function motivoEncerramento() {
     if (!temSessao()) return null;              // não há sessão a encerrar
     var exp = tokenExpiraEm();
@@ -128,10 +62,7 @@
     return null;
   }
 
-  // Apaga o que é do lado do cliente. As três primeiras chaves são LIXO DA
-  // ERA DO localStorage: ninguém mais grava nelas. Continuam sendo removidas
-  // por um release para limpar a máquina de quem volta com elas guardadas —
-  // podem sair na Fase 5.
+  // Limpa o lado do cliente (as três primeiras chaves são legado do localStorage).
   function limparLocal() {
     try {
       localStorage.removeItem('fullgas_token_v1');
@@ -140,27 +71,16 @@
       localStorage.removeItem('fullgas_session_v1');
       localStorage.removeItem(IMP_KEY);
       localStorage.removeItem(ATIVIDADE_KEY);
-      // Cesta e cópia de dados também saem com a sessão: no computador de
-      // balcão, quem entra depois não herda a cesta nem os dados do anterior.
+      // Cesta e cópia de dados saem junto (computador compartilhado).
       localStorage.removeItem(CESTA_KEY);
       localStorage.removeItem(CESTA_DONO_KEY);
       localStorage.removeItem(DADOS_LEGADO_KEY);
     } catch (e) {}
   }
 
-  /* =======================================================================
-     O QUE NÃO PODE FICAR NO NAVEGADOR (achados de 30/09/2026)
-     -----------------------------------------------------------------------
-     1. `fullgas_db_v1`: o store.js é da era sem API. Ele grava ali um banco
-        de demonstração a cada visita e, em qualquer FG.save (a busca chama),
-        a cópia INTEIRA do cache — pedidos, faturas, reivindicações, usuários
-        da empresa. Isso ficava no navegador depois de sair. Com a API, nada
-        disso precisa ser gravado: FG.save vira no-op e a chave é apagada.
-     2. A cesta (`fullgas_cart_v1`) era do NAVEGADOR, não da pessoa: sair,
-        entrar com outra conta ou voltar de uma identidade assumida mantinha a
-        cesta de quem estava antes. Agora ela tem dono (o id da sessão) e é
-        descartada quando quem está logado muda.
-     ======================================================================= */
+  /* ---- O que não fica no navegador ----
+     fullgas_db_v1: FG.save vira no-op e a chave é apagada.
+     Cesta: tem dono (id da sessão) e é descartada quando muda quem está logado. */
   var CESTA_KEY = 'fullgas_cart_v1';
   var CESTA_DONO_KEY = 'fullgas_cart_dono';
   var DADOS_LEGADO_KEY = 'fullgas_db_v1';
@@ -181,26 +101,13 @@
   }
   garantirDonoDaCesta();
 
-  // Encerra de verdade e vai para `destino`.
-  //
-  // O ponto importante: o fg_sess é httpOnly, então ESTE ARQUIVO NÃO CONSEGUE
-  // APAGÁ-LO. Só o servidor apaga, respondendo com Set-Cookie vazio. Sem esta
-  // chamada, "sair" apenas limparia o localStorage e o navegador continuaria
-  // portando uma sessão válida — o usuário voltaria logado no próximo acesso.
-  // Por isso o logout deixou de ser uma operação local e virou uma requisição.
-  //
-  // O redirecionamento acontece de qualquer jeito, dando ou não certo: um
-  // usuário que quer sair não pode ficar preso na tela porque a rede caiu.
+  // Encerra a sessão e vai para `destino`. Só o servidor apaga o fg_sess (httpOnly).
+  // Redireciona mesmo se a chamada falhar.
   function encerrarSessao(motivo, destino) {
     if (encerrando) return;                     // trava anti-loop de redirect
     encerrando = true;
     limparLocal();
-    // Os dois cookies legíveis saem JÁ, sem esperar a resposta do servidor.
-    // Quem apaga de verdade é o /auth/logout abaixo — e só ele alcança o
-    // fg_sess, que é httpOnly. Mas o redirecionamento acontece dando ou não
-    // certo, e o fg_exp agora sobrevive ao token: se a chamada falhasse por
-    // rede, ele ficaria no navegador com data vencida, a tela de login o leria
-    // como "sessão expirada" e mandaria de volta para cá, em círculo.
+    // Apaga os cookies legíveis já, para não voltar em círculo se a rede falhar.
     apagarCookie('fg_exp');
     apagarCookie('fg_csrf');
     var url = destino || ('/?sessao=' + (motivo || 'expirada'));
@@ -242,17 +149,13 @@
     return fetch(API_BASE + path, {
       method: opts.method || 'GET',
       headers: headers,
-      // 'include' manda o cookie MESMO em origem cruzada. Em produção front e
-      // API são a mesma origem e o padrão já bastaria, mas no desenvolvimento
-      // (Live Server na :5500 falando com a API na :3000) sem isto o cookie
-      // simplesmente não viaja — e tudo responde 401 só na sua máquina.
+      // Manda o cookie também em origem cruzada (dev).
       credentials: 'include',
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
         if (!r.ok) {
-          // Sessão invalidada no servidor: se o front ainda se julga logado,
-          // ela morreu — encerra na hora e volta ao login.
+          // 401 com sessão no front: encerra e volta ao login.
           if (r.status === 401 && temSessao()) encerrarSessao('expirada');
           throw new Error(data.erro || ('HTTP ' + r.status));
         }
@@ -269,20 +172,8 @@
     return api(path).then(function (d) { return d; }, function () { return null; });
   }
 
-  /* =======================================================================
-     ARQUIVOS PROTEGIDOS — fotos de reivindicação, anexos de notificação e
-     anexos dos chamados de suporte
-     -----------------------------------------------------------------------
-     Esse material é de cliente: a foto da peça quebrada de uma concessionária
-     não pode ser vista por outra. Ele deixou de ser servido abertamente em
-     /uploads e passou a sair por /api/arquivos/..., que confere no banco de
-     quem é o arquivo.
-
-     O problema: <img src> e <a href> não mandam o cabeçalho de autenticação.
-     Então buscamos o arquivo por fetch (aí o token vai junto) e trocamos a URL
-     por um blob local. O HTML marca esses elementos com data-arquivo em vez de
-     src/href, e quem renderiza chama FG.carregarArquivos() depois.
-     ======================================================================= */
+  /* ---- Arquivos protegidos (garantia, notificação, suporte) ----
+     <img>/<a> não autenticam: busca por fetch e troca por blob. O HTML usa data-arquivo. */
   var PROTEGIDO_RE = /\/uploads\/(reivindicacoes|notificacoes|suporte)\/([A-Za-z0-9._-]+)/;
   var cacheBlob = {};        // URL original -> Promise<URL de blob>
 
@@ -303,8 +194,7 @@
     return cacheBlob[url];
   }
 
-  // Resolve todo elemento com data-arquivo dentro de `raiz` (padrão: a página).
-  // Em <a> preenche href; nos demais (img, video) preenche src.
+  // Resolve os data-arquivo de `raiz`: href em <a>, src nos demais.
   FG.carregarArquivos = function (raiz) {
     var els = (raiz || document).querySelectorAll('[data-arquivo]');
     Array.prototype.forEach.call(els, function (el) {
@@ -333,24 +223,18 @@
     ['invoices', '/faturas'],
     ['prevenda', '/prevenda'],
     ['claims', '/reivindicacoes'],
-    ['users', '/usuarios'],   // só admin recebe; cliente resolve null (apiGet nunca rejeita)
+    ['users', '/usuarios'],   // só admin recebe; cliente resolve null
     ['notifications', '/notificacoes']
   ];
 
-  /* Cada página diz no <body data-cache="products categories ..."> quais
-     listas usa, e só essas são buscadas. Antes toda página pedia as 10 — a
-     loja baixava faturas, usuários e reivindicações que nunca mostra — e cada
-     pedido a mais custa uma ida e volta à API, o que pesa em internet lenta
-     e em computador fraco. `data-cache=""` = nenhuma lista. Sem o atributo,
-     busca todas (página nova que ainda não declarou continua funcionando). */
+  // Listas que a página usa (<body data-cache="...">). "" = nenhuma; sem o atributo, todas.
   function listasDaPagina() {
     var attr = document.body ? document.body.getAttribute('data-cache') : null;
     return attr == null ? null : attr.split(/\s+/).filter(Boolean);
   }
   var LISTAS_DA_PAGINA = listasDaPagina();
 
-  // Carrega o cache da página (em paralelo). Assíncrono — devolve uma Promise
-  // que resolve quando o cache está cheio. Sem token, resolve vazio.
+  // Carrega o cache da página em paralelo. Sem sessão, resolve vazio.
   function carregarCache() {
     if (!temSessao()) return Promise.resolve(CACHE);
     var fontes = FONTES.filter(function (f) {
@@ -378,8 +262,7 @@
   }
   FG.recarregarVeiculos = recarregarVeiculos;
 
-  // A foto de um modelo mudou: ela aparece na lista de modelos E em cada
-  // chassi daquele modelo (ficha do veículo), então as duas listas recarregam.
+  // Foto de modelo mudou: recarrega modelos e veículos.
   FG.recarregarModelosEVeiculos = function () {
     return Promise.all([
       apiGet('/veiculos/modelos').then(function (l) { if (l) CACHE.models = l; return l; }),
@@ -415,9 +298,7 @@
     return req('PATCH', '/notificacoes/' + encodeURIComponent(id) + '/lida', { lida: !!lida });
   };
 
-  // Admin envia notificação. `dados` = { titulo, texto, tipo, empresaId?,
-  // anexo? (File) }. Multipart montado aqui (fetch próprio — o api() força
-  // Content-Type JSON). Devolve Promise<{ ok, msg? }>.
+  // Admin envia notificação: { titulo, texto, tipo, empresaId?, anexo? }. Promise<{ ok, msg? }>.
   FG.notifEnviar = function (dados) {
     var fd = new FormData();
     fd.append('titulo', dados.titulo || '');
@@ -425,10 +306,7 @@
     fd.append('tipo', dados.tipo || 'info');
     if (dados.empresaId) fd.append('empresaId', dados.empresaId);
     if (dados.anexo) fd.append('anexo', dados.anexo);
-    // Sem Content-Type de propósito: quem monta o boundary do multipart é o
-    // browser. Note que cabecalhos() ainda entrega o X-CSRF-Token — upload é
-    // escrita, e escrita por cookie precisa provar a origem como qualquer
-    // outra. Foi o detalhe que mais quebrou upload em migrações assim.
+    // Sem Content-Type (o navegador monta o multipart); o X-CSRF-Token vai junto.
     return fetch(API_BASE + '/notificacoes', {
       method: 'POST',
       headers: cabecalhos(),
@@ -452,8 +330,7 @@
   };
 
   /* ---------- Minha conta (concessionário) ---------- */
-  // Visão da própria empresa: cadastro, endereço e contas internas.
-  // Devolve Promise<{empresa, endereco, areas, usuarios} | null>.
+  // Promise<{ empresa, endereco, areas, usuarios } | null>
   FG.conta = function () { return apiGet('/conta'); };
 
   // Gestor atualiza o cadastro da empresa (CNPJ, telefone, e-mail, endereço).
@@ -472,16 +349,14 @@
     return req('DELETE', '/conta/subdealers/' + encodeURIComponent(id));
   };
 
-  // Sub-dealer tem acesso à área? (null/ausente = acesso total; admin e
-  // gestor nunca são restringidos). Usada p/ esconder abas e travar páginas.
+  // Acesso à área? Admin, gestor e sem lista = acesso total.
   FG.temArea = function (sess, area) {
     if (!sess) return false;
     if (sess.papel === 'admin' || sess.gestor || !Array.isArray(sess.permissoes)) return true;
     return sess.permissoes.indexOf(area) !== -1;
   };
 
-  // Gestão de usuários (admin): aprova / bloqueia / muda papel. Devolve
-  // Promise<{ ok, msg? }>. Atualiza o cache no sucesso para o re-render refletir.
+  // Admin: aprova / bloqueia / muda papel. Promise<{ ok, msg? }>.
   FG.setUser = function (id, patch) {
     return req('PATCH', '/usuarios/' + encodeURIComponent(id), patch).then(function (r) {
       if (!r.ok) return r;
@@ -491,9 +366,7 @@
     });
   };
 
-  // Cria um administrador pelo painel (admin). `dados` = { nome, email, senha }.
-  // A API devolve o usuário pronto; guardamos no cache para a lista já mostrar
-  // a conta nova sem recarregar tudo. Devolve Promise<{ ok, msg? }>.
+  // Admin cria administrador: { nome, email, senha }. Promise<{ ok, msg? }>.
   FG.criarAdmin = function (dados) {
     return req('POST', '/usuarios', {
       nome: dados.nome, email: dados.email, senha: dados.senha
@@ -508,8 +381,7 @@
     });
   };
 
-  // Exclui um cliente indesejado/bloqueado (admin). Master e usuários com
-  // histórico são recusados pela API. Devolve Promise<{ ok, msg? }>.
+  // Admin exclui usuário. Promise<{ ok, msg? }>.
   FG.delUser = function (id) {
     return req('DELETE', '/usuarios/' + encodeURIComponent(id)).then(function (r) {
       if (!r.ok) return r;
@@ -518,22 +390,18 @@
     });
   };
 
-  /* Listas de preço do Tiny (admin) — ver api/src/lista-preco.js.
-     A lista é da EMPRESA e define o preço que a concessionária paga. */
+  // ---- Listas de preço (admin) ----
   // Promise<[{ id, descricao, percentual, ativa, empresas }]> ([] se falhar).
   FG.listasPreco = function () {
     return apiGet('/listas-preco').then(function (l) { return l || []; });
   };
   // Traz as listas do Tiny agora. Promise<{ ok, listas?, resumo?, msg? }>.
   FG.sincronizarListasPreco = function () { return req('POST', '/listas-preco/sincronizar'); };
-  // Escolhe à mão a lista de uma empresa cujo contato não tem lista no Tiny.
-  // Promise<{ ok, msg? }>.
+  // Escolha manual da lista. Promise<{ ok, msg? }>.
   FG.definirListaPreco = function (empresaId, listaPrecoId) {
     return req('PUT', '/empresas/' + encodeURIComponent(empresaId) + '/lista-preco', { listaPrecoId: listaPrecoId });
   };
-  // Relê o contato da empresa no Tiny e aplica a lista que ele tiver lá.
-  // Promise<{ ok, resultado?, lista?, msg? }> — resultado: 'aplicada' |
-  // 'igual' | 'sem-lista' | 'desconhecida'.
+  // Relê a lista no Tiny. Promise<{ ok, resultado?, lista?, msg? }>.
   FG.buscarListaNoTiny = function (empresaId) {
     return req('POST', '/empresas/' + encodeURIComponent(empresaId) + '/lista-preco/tiny');
   };
@@ -552,9 +420,7 @@
   /* ---------- sobrescreve a camada de dados do FG ---------- */
   // Leituras continuam SÍNCRONAS, lendo do cache em memória.
   FG.db = function () { return CACHE; };
-  // Aviso para quem mexer no código: pedir uma lista que a página não
-  // declarou devolve vazio (ela nunca foi buscada). Some com a correção do
-  // data-cache no HTML da página.
+  // Avisa no console quando a página pede uma lista que não declarou.
   var avisadas = {};
   FG.all = function (col) {
     if (LISTAS_DA_PAGINA && LISTAS_DA_PAGINA.indexOf(col) < 0 && !avisadas[col] &&
@@ -565,8 +431,7 @@
     return CACHE[col] || [];
   };
 
-  // Requisição genérica que NÃO rejeita: resolve { ok:true, ... } no sucesso
-  // ou { ok:false, msg } no erro. Usada pelos wrappers de mutação.
+  // Requisição que nunca rejeita: { ok: true, ... } ou { ok: false, msg }.
   function req(method, path, body) {
     var opts = { method: method };
     if (body !== undefined) opts.body = body;
@@ -579,14 +444,7 @@
     });
   }
 
-  /* Guarda o PERFIL de exibição (nome, empresa, papel, permissões).
-     -----------------------------------------------------------------------
-     Isto continua no localStorage de propósito, e não é uma inconsistência
-     com o resto da fase: perfil não é credencial. Ele existe para as telas
-     desenharem o cabeçalho e esconderem menus sem esperar a rede. Se alguém
-     adulterar esse objeto, ganha um menu a mais na tela e nada além disso —
-     toda rota da API decide pelo que está no fg_sess assinado, nunca por
-     isto aqui. O que NÃO pode voltar para o localStorage é o token. */
+  // Perfil de exibição no localStorage (não é credencial; o token nunca vai para lá).
   function guardarPerfil(u) {
     try {
       localStorage.setItem('fullgas_session_v1', JSON.stringify({
@@ -596,24 +454,17 @@
         permissoes: u.permissoes || null      // null = acesso total
       }));
     } catch (e) {}
-    // Mudou quem está logado (login, identidade assumida, volta)? A cesta
-    // de quem estava antes não vale para quem entrou.
+    // Mudou quem está logado: descarta a cesta anterior.
     garantirDonoDaCesta();
   }
 
-  // Chave pública do widget anti-robô, ou '' quando não há configuração no
-  // servidor. Nunca rejeita: sem captcha, a tela de login continua inteira.
+  // Site key do anti-robô, ou ''.
   FG.captchaConfig = function () {
     return api('/auth/captcha/config').then(function (d) { return (d && d.siteKey) || ''; },
                                             function () { return ''; });
   };
 
-  // Login. Devolve Promise<{ ok, msg? }>. Não guarda token nenhum: a resposta
-  // do /auth/login já veio com os cookies de sessão em Set-Cookie, e o
-  // navegador os aplicou antes desta linha rodar.
-  // `captcha` é o token do widget — vazio quando não há captcha configurado,
-  // e nesse caso o servidor simplesmente não o exige.
-  // O cache é (re)carregado na próxima página (redirect recarrega o app).
+  // Login. Promise<{ ok, msg? }>. A sessão chega por Set-Cookie. `captcha` pode ser vazio.
   FG.login = function (email, senha, captcha) {
     return api('/auth/login', { method: 'POST', body: { email: email, senha: senha, captcha: captcha || '' } })
       .then(function (data) {
@@ -624,24 +475,19 @@
       });
   };
 
-  // Cadastro. Devolve Promise<{ ok, msg? }>.
-  // `dados.captcha` é o token do widget anti-robô do formulário de cadastro
-  // (vazio quando não há chave configurada — aí o servidor não o exige).
+  // Cadastro. Promise<{ ok, msg? }>.
   FG.register = function (dados) {
     return api('/auth/register', { method: 'POST', body: dados })
       .then(function () { return { ok: true }; },
             function (e) { return { ok: false, msg: (e && e.message) || 'Falha no cadastro.' }; });
   };
 
-  // Troca a própria senha (logado). A API reemite a sessão desta aba e derruba
-  // as demais. Promise<{ ok, msg }>.
+  // Troca a própria senha. Promise<{ ok, msg }>.
   FG.trocarSenha = function (atual, nova) {
     return req('POST', '/auth/senha/trocar', { atual: atual, nova: nova });
   };
 
-  /* ---------- esqueci minha senha ----------
-     Nenhuma das três revela se o e-mail existe: a mensagem de sucesso é
-     sempre a mesma, venha o cadastro de onde vier. */
+  /* ---------- esqueci minha senha ---------- */
 
   // Dispara o e-mail com o link de redefinição. Promise<{ ok, msg }>.
   FG.esqueciSenha = function (email) {
@@ -664,24 +510,9 @@
             function (e) { return { ok: false, msg: (e && e.message) || 'Não foi possível alterar a senha.' }; });
   };
 
-  /* ---------- alteração de identidade (admin entra na conta do cliente) ----------
-     O desenho antigo: o front copiava o token do admin para outra chave do
-     localStorage e o restaurava na volta. Isso deixava DOIS tokens válidos
-     largados num lugar que o JavaScript lê — o dobro do estrago num XSS — e
-     confiava num backup do cliente para decidir quem o admin é.
-
-     O desenho novo: o servidor carimba no token da identidade assumida o
-     claim `imp` (o id do admin) e reemite a partir dele na volta, revalidando
-     no banco. O front não guarda credencial nenhuma; guarda só um SINALIZADOR
-     para saber que precisa desenhar a tarja.
-
-     Por que o sinalizador ainda mora no localStorage, se a verdade está no
-     `imp` do token: a tarja é obrigatória e precisa aparecer no primeiro
-     quadro da página. A verdade vem do servidor (GET /auth/sessao), mas
-     assíncrona; se dependêssemos só dela, cada navegação teria uma janela
-     sem tarja em que o admin acha que está na própria conta. O localStorage
-     dá a resposta instantânea e a API corrige logo em seguida — inclusive
-     apagando a tarja se o sinalizador estiver velho. */
+  /* ---------- identidade assumida (admin na conta do cliente) ----------
+     O servidor guarda o admin no claim `imp`. Aqui só um sinalizador no localStorage,
+     para a tarja aparecer já no primeiro quadro (a API corrige depois). */
   var IMP_KEY = 'fullgas_imp_v1';
 
   // Chaves da era do localStorage. Não são mais escritas; só limpas.
@@ -701,10 +532,7 @@
     } catch (e) {}
   }
 
-  // Admin assume a identidade de um usuário. Promise<{ ok, msg? }>.
-  // A resposta já troca os cookies de sessão; aqui só acertamos o que a tela
-  // mostra. `imp` vem da própria resposta para a tarja subir já na primeira
-  // renderização, sem esperar o GET /auth/sessao.
+  // Admin assume a identidade. Promise<{ ok, msg? }>.
   FG.assumirIdentidade = function (id) {
     return api('/usuarios/' + encodeURIComponent(id) + '/identidade', { method: 'POST' })
       .then(function (d) {
@@ -717,11 +545,7 @@
       });
   };
 
-  // Devolve o admin à própria conta. Agora é uma requisição, não uma
-  // restauração local: o servidor reemite a sessão a partir do claim `imp` e
-  // revalida o admin no banco. Um admin rebaixado ou bloqueado no meio-tempo
-  // recebe 403 e cai no login — o desenho antigo restauraria alegremente o
-  // token guardado e o devolveria a um painel que ele já não podia usar.
+  // Volta à conta do admin (o servidor revalida). Falhou: sai.
   FG.voltarIdentidade = function (destino) {
     return api('/auth/identidade/voltar', { method: 'POST' })
       .then(function (d) {
@@ -729,17 +553,14 @@
         guardarPerfil(d.usuario);
         location.href = destino || '/admin';
       }, function (e) {
-        // Não dá para voltar (sessão vencida, admin desativado): sair é o
-        // único caminho honesto — ficar na conta do cliente seria pior.
+        // Não dá para voltar: sair.
         marcarImpersonacao(null);
         FG.toast((e && e.message) || 'Não foi possível voltar para sua conta.', 'erro');
         setTimeout(function () { encerrarSessao('expirada'); }, 1500);
       });
   };
 
-  // Tarja fixa de aviso, injetada em qualquer página enquanto houver identidade
-  // assumida. Fica no adaptador (carregado em todas as telas) para não precisar
-  // repetir o mesmo bloco em portal/loja/finder.
+  // Tarja de aviso em qualquer página.
   function montarTarjaIdentidade() {
     var adm = FG.identidadeAssumida();
     if (!adm) { removerTarjaIdentidade(); return; }
@@ -756,17 +577,14 @@
     bar.querySelector('b').textContent = atual.nome || '—';
     bar.querySelector('.imp-emp').textContent = atual.empresa ? ' (' + atual.empresa + ')' : '';
     bar.querySelector('.imp-sair').addEventListener('click', function () {
-      // Trava e avisa: navegar logo depois do clique cancelava a volta, e o
-      // admin seguia como cliente sem perceber (30/09/2026).
+      // Trava o botão até a volta terminar.
       this.disabled = true; this.textContent = 'Voltando…';
       FG.voltarIdentidade();
     });
     document.body.insertBefore(bar, document.body.firstChild);
     document.body.classList.add('com-imp-bar');
   }
-  // Tira a tarja quando o servidor diz que não há mais identidade assumida —
-  // o caso do sinalizador velho: o admin voltou para a própria conta em outra
-  // aba, e esta aqui ainda desenharia a tarja para sempre.
+  // Tira a tarja quando o servidor diz que não há identidade assumida.
   function removerTarjaIdentidade() {
     var bar = document.getElementById('fg-imp-bar');
     if (bar) bar.remove();
@@ -777,19 +595,13 @@
     document.addEventListener('DOMContentLoaded', montarTarjaIdentidade);
   else montarTarjaIdentidade();
 
-  // Sair. Passa pelo mesmo encerrarSessao do guardião — o servidor precisa
-  // apagar o fg_sess httpOnly, que este arquivo não alcança. Sem `motivo`,
-  // vai para a home limpa: sair por vontade própria não é um erro a explicar.
-  // Em identidade assumida, "Sair" volta à conta do admin (antes derrubava o
-  // admin também e ele precisava entrar de novo).
+  // Sair. Em identidade assumida, volta à conta do admin.
   FG.logout = function () {
     if (FG.identidadeAssumida()) { FG.voltarIdentidade(); return; }
     encerrarSessao(null, '/');
   };
 
-  // Produtos (admin) — gravações que atualizam o cache no fim. Após gravar,
-  // recarrega também o rastreador de pré-venda (repor estoque muda o status
-  // das peças de "Aguardando" para "Disponível").
+  // Depois de gravar produto: recarrega o cache e a pré-venda.
   function aposGravarProduto(lista) {
     return recarregarPreVenda().then(function () { return lista; });
   }
@@ -838,8 +650,7 @@
   };
 
   /* ---------- pedidos ---------- */
-  // Cria o pedido a partir da cesta atual. Devolve Promise<data|null>; em erro
-  // avisa via toast e resolve null. Recarrega pedidos + produtos no sucesso.
+  // Cria o pedido da cesta. Promise<data|null> (erro vira toast).
   FG.createOrder = function () {
     var s = FG.session(); var cart = FG.cart();
     if (!s || !cart.length) return Promise.resolve(null);
@@ -853,9 +664,7 @@
     });
   };
 
-  // PUT de pedido que mexe em estoque/envio: recarrega pedidos + produtos no ok.
-  // `metodo` existe para o POST da remessa: o efeito no cache é o mesmo (o
-  // pedido e o estoque mudam), só o verbo é outro.
+  // Gravação de pedido que mexe em estoque: recarrega pedidos e produtos.
   function putPedido(path, body, metodo) {
     return req(metodo || 'PUT', path, body).then(function (r) {
       if (!r.ok) return r;
@@ -863,8 +672,7 @@
     });
   }
 
-  // Fecha a remessa do pedido (admin): as peças marcadas como enviadas e ainda
-  // não exportadas viram UM pedido no Tiny. Promise<{ ok, status, itens, parcial }>.
+  // "Confirmar envio" (admin). Promise<{ ok, status, itens, parcial }>.
   FG.confirmarRemessa = function (numero) {
     return putPedido('/pedidos/' + encodeURIComponent(numero) + '/remessa', {}, 'POST');
   };
@@ -874,9 +682,7 @@
     return putPedido('/pedidos/' + encodeURIComponent(id) + '/status', { status: status });
   };
 
-  // SKUs que o Finder liga a um modelo (filtro "Buscar por moto" da loja).
-  // O modelo da loja só traz id/nome/ano — as peças moram nas seções do Finder,
-  // então buscamos uma vez por modelo e guardamos. Resolve com [] em erro.
+  // SKUs de um modelo no Finder (filtro da loja), com cache. [] em erro.
   var skusDoModelo = {};
   FG.artigosDoModelo = function (codigo) {
     if (skusDoModelo[codigo]) return skusDoModelo[codigo];
@@ -895,8 +701,7 @@
     return skusDoModelo[codigo];
   };
 
-  // Linha do tempo do pedido (vem no detalhe, campo `historico`). HTML pronto,
-  // no mesmo visual do histórico do chassi — portal e admin usam a mesma.
+  // Linha do tempo do pedido (HTML), igual à do chassi.
   var HIST_PEDIDO_ICONE = { criado: '🛒', aprovado: '✔', tiny: '⇄', envio: '📦', entregue: '🏁',
     cancelado: '✖', garantia: '🛡', aviso: '⚠' };
   FG.historicoPedidoHTML = function (lista) {
@@ -913,8 +718,7 @@
     }).join('') + '</div>';
   };
 
-  // Detalhe rico do pedido (itens com qtdEnviada/backorder/estoque, faturas,
-  // progresso e histórico). Promise<detalhe|null>.
+  // Detalhe do pedido (itens, faturas, progresso e histórico). Promise<detalhe|null>.
   FG.pedidoDetalhe = function (numero) {
     return apiGet('/pedidos/' + encodeURIComponent(numero));
   };
@@ -924,8 +728,7 @@
     return putPedido('/pedidos/' + encodeURIComponent(numero) + '/status', { escopo: escopo });
   };
 
-  // Ação "Enviado" de um item / do rastreador de pré-venda (admin). Recarrega
-  // pedidos, produtos e o rastreador no fim.
+  // "Enviado" de um item (admin). Recarrega pedidos, produtos e pré-venda.
   FG.setItemEnviado = function (numero, itemId, qtd) {
     return putPedido('/pedidos/' + encodeURIComponent(numero) + '/itens/' + itemId + '/enviado', { qtd: qtd })
       .then(function (r) {
@@ -935,8 +738,7 @@
   };
 
   /* ---------- veículos: substitui as ações inline do portal.js ---------- */
-  // Registra venda do veículo (Status=Vendido + garantia). Recarrega o cache.
-  // `dados` = { cliente, cpf, email, telefone, endereco }.
+  // Registra a venda: { cliente, cpf, email, telefone, endereco }.
   FG.registrarVenda = function (niv, dados) {
     return req('POST', '/veiculos/' + encodeURIComponent(niv) + '/venda', dados || {}).then(function (r) {
       if (!r.ok) return r;
@@ -944,16 +746,14 @@
     });
   };
 
-  // Lista de concessionárias ativas (SÓ ADMIN) — alimenta o autocomplete de
-  // atribuição/transferência de chassi. Cacheada após a primeira chamada.
+  // Concessionárias ativas (admin), com cache.
   var _empresas = null;
   FG.empresas = function () {
     if (_empresas) return Promise.resolve(_empresas);
     return apiGet('/empresas').then(function (l) { _empresas = l || []; return _empresas; });
   };
 
-  // Cadastra um chassi novo (SÓ ADMIN): { niv, modeloId, ano, empresaId? } — sem
-  // empresaId ele nasce na Fábrica. Recarrega o cache de veículos no sucesso.
+  // Cadastra chassi (admin): { niv, modeloId, ano, empresaId? }.
   FG.criarVeiculo = function (dados) {
     return req('POST', '/veiculos', dados).then(function (r) {
       if (!r.ok) return r;
@@ -961,10 +761,7 @@
     });
   };
 
-  // Transfere o chassi para outra concessionária (SÓ ADMIN). `destino` pode
-  // ser o NOME (string), { empresaId } vindo do autocomplete ou
-  // { fabrica: true } para devolvê-lo à Fábrica. Recarrega o cache de
-  // veículos no sucesso.
+  // Transfere o chassi (admin). destino: nome | { empresaId } | { fabrica: true }.
   FG.transferirVeiculo = function (niv, destino) {
     var body = typeof destino === 'object' ? destino : { empresa: destino };
     return req('PUT', '/veiculos/' + encodeURIComponent(niv) + '/transferir', body).then(function (r) {
@@ -982,40 +779,32 @@
   };
 
   /* ---------- histórico do veículo (linha do tempo do chassi) ---------- */
-  // Busca sob demanda, sem entrar no cache geral: é uma lista por chassi, que
-  // só interessa quando alguém abre aquele veículo. Resolve [] em erro para a
-  // tela não quebrar por causa do histórico.
+  // Histórico do chassi, sob demanda. [] em erro.
   FG.veiculoHistorico = function (niv) {
     return apiGet('/veiculos/' + encodeURIComponent(niv) + '/historico')
       .then(function (l) { return l || []; });
   };
 
-  // As duas escritas devolvem o histórico JÁ ATUALIZADO (um array). Como o
-  // req() carimba `ok` no que recebe, normalizamos para { ok, lista } — assim
-  // a tela não precisa lidar com um array que também tem propriedade `ok`.
+  // Normaliza a resposta (array) para { ok, lista }.
   function comLista(r) {
     if (!r.ok) return r;
     return { ok: true, lista: Array.prototype.slice.call(r) };
   }
 
-  // Lança um registro manual no histórico (SÓ ADMIN). `dados` = { tipo:
-  // 'recall'|'revisao'|'nota', titulo, detalhe?, referencia?, data? }.
+  // Lançamento manual (admin): { tipo: 'recall'|'revisao'|'nota', titulo, detalhe?, referencia?, data? }.
   FG.registrarHistorico = function (niv, dados) {
     return req('POST', '/veiculos/' + encodeURIComponent(niv) + '/historico', dados).then(comLista);
   };
 
-  // Apaga um registro MANUAL do histórico (SÓ ADMIN). Evento automático é
-  // recusado pela API.
+  // Apaga lançamento manual (admin).
   FG.excluirHistorico = function (niv, id) {
     return req('DELETE', '/veiculos/' + encodeURIComponent(niv) + '/historico/' + encodeURIComponent(id))
       .then(comLista);
   };
 
   /* ---------- reivindicações ---------- */
-  // Cria reivindicação. `dados` = { tipo, niv, descricao, status, pecas?,
-  // dataDefeito?, horimetro?, quilometragem? }, onde pecas = [{ sku, quantidade }].
-  // EmpresaId/UsuarioId vêm do token. As fotos sobem depois via
-  // FG.uploadClaimFotos. Promise<claim|null>.
+  // Cria reivindicação: { tipo, niv, descricao, status, pecas?: [{ sku, quantidade }], dataDefeito?, horimetro?, quilometragem? }.
+  // Fotos sobem depois (FG.uploadClaimFotos). Promise<claim|null>.
   FG.createClaim = function (dados) {
     return req('POST', '/reivindicacoes', {
       origem: dados.origem, numeroPedido: dados.numeroPedido,
@@ -1028,9 +817,7 @@
     });
   };
 
-  // Sobe fotos para uma reivindicação (multipart). `files` = FileList/array de
-  // File. Promise<{ ok, anexos?, msg? }>. NÃO define Content-Type (o browser
-  // monta o boundary do multipart). Recarrega o cache de claims no sucesso.
+  // Sobe fotos da reivindicação (multipart, sem Content-Type). Promise<{ ok, anexos?, msg? }>.
   FG.uploadClaimFotos = function (numero, files) {
     if (!files || !files.length) return Promise.resolve({ ok: true, anexos: [] });
     var fd = new FormData();
@@ -1046,9 +833,7 @@
     }, function () { return { ok: false, msg: 'Falha no envio das fotos.' }; });
   };
 
-  // Muda o status da reivindicação (admin). Promise<{ ok, ... }>.
-  // Aprovar cria um pedido de garantia (e baixa estoque) — recarrega também
-  // pedidos, produtos e o rastreador de pré-venda.
+  // Muda o status (admin). Aprovar cria pedido de garantia: recarrega pedidos, produtos e pré-venda.
   FG.setClaimStatus = function (id, status) {
     return req('PUT', '/reivindicacoes/' + encodeURIComponent(id) + '/status', { status: status }).then(function (r) {
       if (!r.ok) { FG.toast(r.msg || 'Não foi possível atualizar o status.', 'erro'); return r; }
@@ -1059,8 +844,7 @@
     });
   };
 
-  // Edita/reenvia uma reivindicação (cliente da própria empresa, ex.: após ser
-  // devolvida). `dados` no mesmo formato de createClaim. Promise<claim|null>.
+  // Edita/reenvia reivindicação devolvida. Promise<claim|null>.
   FG.updateClaim = function (numero, dados) {
     return req('PUT', '/reivindicacoes/' + encodeURIComponent(numero), {
       origem: dados.origem, numeroPedido: dados.numeroPedido,
@@ -1083,8 +867,7 @@
   };
 
   /* ---------- Parts Finder ---------- */
-  // Upload multipart genérico (campo "imagem"). NÃO define Content-Type (o
-  // browser monta o boundary). Devolve Promise<{ ok, imagem?, msg? }>.
+  // Upload multipart (campo "imagem"). Promise<{ ok, imagem?, msg? }>.
   function uploadImagem(path, file, method) {
     var fd = new FormData();
     fd.append('imagem', file);
@@ -1100,8 +883,8 @@
       }, function () { return { ok: false, msg: 'Falha no envio da imagem.' }; });
   }
 
-  // ---- leituras (REJEITAM em erro — as telas tratam com .catch) ----
-  // Lista de modelos do finder (com árvore). admin + todos=true inclui inativos.
+  // ---- Leituras do Finder (rejeitam em erro) ----
+  // Modelos com árvore. todos=true (admin) inclui inativos.
   FG.finderModelos = function (todos) {
     return api('/finder/modelos' + (todos ? '?todos=1' : ''));
   };
@@ -1168,8 +951,7 @@
   };
 
   /* ---------- integração Tiny ERP (admin) ---------- */
-  // Lista paginada de produtos do Tiny com a situação local de cada um
-  // (novo / sku-existe / importado). REJEITA em erro — a tela trata.
+  // Produtos do Tiny com a situação local. Rejeita em erro.
   FG.tinyProdutos = function (pagina, pesquisa) {
     return api('/tiny/produtos?pagina=' + (pagina || 1) +
       (pesquisa ? '&pesquisa=' + encodeURIComponent(pesquisa) : ''));
@@ -1181,8 +963,7 @@
       return recarregarProdutos().then(function () { return r; });
     });
   };
-  // Sincroniza um bloco de SKUs contra o Tiny (a tela envia em lotes e soma
-  // os resumos). Recarrega o catálogo no fim.
+  // Sincroniza um bloco de SKUs. Recarrega o catálogo.
   FG.tinySyncLote = function (skus) {
     return req('POST', '/tiny/sync-lote', { skus: skus }).then(function (r) {
       if (!r.ok) return r;
@@ -1198,8 +979,7 @@
   FG.tinyPedidos = function (pedido) {
     return api('/tiny/pedidos' + (pedido ? '?pedido=' + encodeURIComponent(pedido) : ''));
   };
-  // Situação do cadastro de cada concessionária no Tiny (vínculo, edição do
-  // portal ainda não entregue, último registro). REJEITA em erro.
+  // Cadastro das concessionárias no Tiny. Rejeita em erro.
   FG.tinyContatos = function () {
     return api('/tiny/contatos');
   };
@@ -1208,24 +988,10 @@
     return req('POST', '/tiny/pedidos/' + exportId + '/reexportar');
   };
 
-  /* =======================================================================
-     SUPORTE TÉCNICO (helpdesk por chamados)
-     -----------------------------------------------------------------------
-     Serve as duas janelas para os mesmos dados: o pop-up flutuante do canto
-     da tela (js/suporte.js) e a aba "Suporte Técnico" do portal.
+  /* ---- Suporte Técnico ----
+     Chamados não entram no cache (mudam com a página aberta); sempre buscados na hora. */
 
-     Os chamados NÃO entram no CACHE que carrega junto com a página. O cache
-     existe para o que a tela lê de forma síncrona ao montar (catálogo,
-     pedidos, veículos); chamado é conversa, muda enquanto a página está
-     aberta e é sempre buscado na hora — um cache aqui só mostraria resposta
-     velha. O único número que circula fora do detalhe é o do badge, e ele tem
-     rota própria e barata (/suporte/resumo).
-     ======================================================================= */
-
-  // POST multipart genérico do suporte (o anexo é opcional em toda mensagem).
-  // Sem Content-Type de propósito: quem monta o boundary é o navegador.
-  // cabecalhos() continua entregando o X-CSRF-Token — escrita por cookie
-  // precisa provar a origem, upload inclusive.
+  // POST multipart do suporte (anexo opcional, sem Content-Type).
   function postSuporte(path, campos, arquivo) {
     var fd = new FormData();
     Object.keys(campos || {}).forEach(function (k) {
@@ -1247,8 +1013,7 @@
     }, function () { return { ok: false, msg: 'Sem conexão com a API.' }; });
   }
 
-  // Categorias de ajuda. Só mudam com o deploy, então uma cópia por página
-  // basta — o pop-up abre e fecha muitas vezes e não precisa perguntar toda vez.
+  // Categorias: uma cópia por página.
   var categoriasSuporte = null;
   FG.suporteCategorias = function () {
     if (categoriasSuporte) return Promise.resolve(categoriasSuporte);
@@ -1258,8 +1023,7 @@
     });
   };
 
-  // Contadores do badge: { abertos, naoLidas }. Nunca rejeita — o pop-up não
-  // pode quebrar a página por causa de um número.
+  // { abertos, naoLidas }. Nunca rejeita.
   FG.suporteResumo = function () {
     return apiGet('/suporte/resumo').then(function (d) {
       return d || { abertos: 0, naoLidas: 0 };
@@ -1272,14 +1036,12 @@
       .then(function (l) { return l || []; });
   };
 
-  // Detalhe com a conversa. Abrir MARCA COMO LIDAS as mensagens do outro lado
-  // (é a API que faz isso), então quem chama deve atualizar o badge depois.
+  // Detalhe com a conversa. A API marca como lidas: atualize o badge depois.
   FG.suporteChamado = function (id) {
     return apiGet('/suporte/chamados/' + encodeURIComponent(id));
   };
 
-  // Abre um chamado. `dados` = { categoria, assunto, descricao, prioridade,
-  // anexo? (File) }. Devolve Promise<{ ok, ...chamado } | { ok:false, msg }>.
+  // Abre chamado: { categoria, assunto, descricao, prioridade, anexo? }.
   FG.suporteAbrir = function (dados) {
     return postSuporte('/suporte/chamados', {
       categoria: dados.categoria,
@@ -1295,21 +1057,13 @@
       { texto: dados.texto || '' }, dados.anexo);
   };
 
-  // Muda o status. Cliente só encerra ('Fechado') ou reabre ('Aberto') —
-  // a API recusa o resto com 403.
+  // Muda o status. Cliente só fecha ou reabre.
   FG.suporteStatus = function (id, status) {
     return req('PATCH', '/suporte/chamados/' + encodeURIComponent(id), { status: status });
   };
 
   /* ---------- o pulso (ver js/ao-vivo.js) ---------- */
-  // Quatro números que dizem se algo mudou: { notificacoes, suporteAbertos,
-  // suporteNaoLidas, ultimaMensagem }. É a requisição mais frequente do
-  // portal (uma a cada 10s por aba), por isso não traz lista nenhuma — quem
-  // percebe uma mudança é que vai buscar o conteúdo.
-  //
-  // NUNCA rejeita: uma falha de rede no meio de uma tarefa não pode virar erro
-  // na tela por causa de um contador. Devolve null e o laço tenta de novo no
-  // batimento seguinte.
+  // { notificacoes, suporteAbertos, suporteNaoLidas, ultimaMensagem }. Nunca rejeita (null em falha).
   FG.pulso = function () {
     return apiGet('/pulso');
   };
@@ -1318,22 +1072,7 @@
   FG._api = api;
   FG._cache = CACHE;
 
-  /* =======================================================================
-     SINCRONIZAÇÃO DA SESSÃO COM O SERVIDOR
-     -----------------------------------------------------------------------
-     Pergunta ao servidor quem somos, em vez de acreditar no perfil guardado.
-     Ganha-se uma coisa que o desenho antigo não tinha: mudança de papel,
-     status ou permissão feita pelo admin passa a valer na próxima página, e
-     não só no próximo login. Antes, um usuário rebaixado continuava vendo a
-     tela de admin até deslogar — as rotas o barravam, mas a interface mentia.
-
-     É também aqui que o `imp` (identidade assumida) chega da fonte da
-     verdade: o claim dentro do token assinado, e não um sinalizador do
-     cliente que pode estar velho.
-
-     Roda em PARALELO com o cache: são duas chamadas independentes, e
-     enfileirá-las só somaria latência à abertura de cada página.
-     ======================================================================= */
+  // Perfil atual do servidor (papel, permissões, `imp`). Roda em paralelo com o cache.
   function sincronizarSessao() {
     if (!temSessao()) return Promise.resolve(null);
     return api('/auth/sessao').then(function (d) {
@@ -1342,17 +1081,13 @@
       montarTarjaIdentidade();     // sobe ou cai, conforme o servidor disser
       return d;
     }, function () {
-      // Falha de rede não derruba a sessão: seguimos com o perfil guardado.
-      // Se tiver sido 401, o api() já encerrou a sessão por conta própria.
+      // Falha de rede: segue com o perfil guardado (401 já encerrou no api()).
       return null;
     });
   }
   FG.sincronizarSessao = sincronizarSessao;
 
-  // Dispara sessão e cache assim que a página abre (se houver sessão).
-  // FG.pronto resolve quando ambos terminaram — cada tela espera por ele
-  // antes de montar o HTML, para nunca renderizar com dados vazios nem com
-  // um perfil desatualizado.
+  // Sessão e cache ao abrir a página; as telas esperam FG.pronto.
   FG.pronto = Promise.all([sincronizarSessao(), carregarCache()])
     .then(function () { return CACHE; });
 })();

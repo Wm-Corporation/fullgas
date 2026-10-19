@@ -1,12 +1,5 @@
-// Testes da trilha de auditoria (migration 038).
-//
-// Dois comportamentos importam aqui, e os dois são fáceis de quebrar sem
-// perceber:
-//   1. O AUTOR registrado durante uma impersonação tem de ser o admin, não o
-//      cliente cuja identidade ele assumiu. É o motivo de a tabela existir.
-//   2. Falha ao gravar a trilha NÃO pode derrubar a operação auditada.
-//
-// O db.js é substituído por um dublê: estes testes não tocam SQL Server.
+// Trilha de auditoria: o autor em identidade assumida é o admin, e falha na trilha não derruba a operação.
+// db.js é um dublê.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const inserts = [];
@@ -39,9 +32,7 @@ describe('auditar', () => {
   });
 
   it('DURANTE impersonacao o autor e o ADMIN, nao o cliente', async () => {
-    // req.user é o CLIENTE (a sessão foi trocada); req.user.imp guarda o admin.
-    // Se isto regredir, a trilha passa a acusar o cliente das ações do admin —
-    // que é exatamente o problema que ela existe para resolver.
+    // req.user é o cliente; req.user.imp é o admin.
     const reqImp = { user: { id: 99, email: 'cliente@x.com', imp: 10 }, ip: '203.0.113.9' };
     await auditar({ req: reqImp, acao: ACOES.IMPERSONAR_FIM, alvoId: 99 });
     expect(inserts[0].params.adminId).toBe(10);      // o admin

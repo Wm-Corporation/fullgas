@@ -1,7 +1,4 @@
-// ============================================================
-// Repositório de Categoria — ÚNICO lugar com SQL de categoria.
-// Não conhece req/res nem regra de negócio: só entra e sai dado.
-// ============================================================
+// Repositório de Categoria: único lugar com SQL de categoria.
 import { query } from '../db.js';
 
 // Lista plana com o Codigo do pai (pai=null → categoria de topo).
@@ -24,8 +21,7 @@ export async function buscarPorCodigo(codigo) {
   return r[0] || null;
 }
 
-// Só o CategoriaId por Codigo (sem filtro de Ativo) — usado na resolução de
-// categoria ao gravar produto e na exclusão. null se não existir.
+// CategoriaId por Codigo (inclui inativas). null se não existir.
 export async function idPorCodigo(codigo) {
   const r = await query('SELECT CategoriaId FROM dbo.Categoria WHERE Codigo = @cod', { cod: codigo });
   return r.length ? r[0].CategoriaId : null;
@@ -72,8 +68,7 @@ export function apagar(categoriaId) {
   return query('DELETE FROM dbo.Categoria WHERE CategoriaId = @id', { id: categoriaId });
 }
 
-// Grava (ou troca) a URL da foto por Codigo. Devolve a foto anterior (para
-// apagar o arquivo trocado) ou { ok:false } se a categoria não existe.
+// Grava a URL da foto. Devolve a foto anterior, ou { ok:false } se a categoria não existe.
 export async function definirImagem(codigo, rel) {
   const r = await query(
     `UPDATE dbo.Categoria SET Imagem = @img

@@ -1,7 +1,4 @@
-// Verificação anti-robô. O que importa aqui é o comportamento nas BORDAS —
-// sem configuração, sem token, e com o provedor fora do ar —, porque é onde a
-// escolha entre "falhar aberto" e "falhar fechado" decide se um problema
-// externo vira portal fora do ar.
+// Anti-robô nas bordas: sem configuração, sem token e com o provedor fora do ar.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
 async function carregar(site, secret) {
@@ -49,8 +46,7 @@ describe('configurado', () => {
   });
 
   it('recusa token ja usado ou expirado', async () => {
-    // 'timeout-or-duplicate' e' o erro mais comum em uso real: o token vale uma
-    // vez so. A mensagem tem de mandar marcar a caixa de novo.
+    // Token já usado: pede para marcar a caixa de novo.
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       json: async () => ({ success: false, 'error-codes': ['timeout-or-duplicate'] })
     });
@@ -61,9 +57,7 @@ describe('configurado', () => {
   });
 
   it('LIBERA quando o provedor esta fora do ar', async () => {
-    // Decisao consciente: o captcha e' barreira contra robo, nao a
-    // autenticacao — a senha ainda sera exigida. Falhar fechado transformaria
-    // uma queda da Cloudflare em portal inteiro fora do ar.
+    // Provedor fora do ar libera (a senha ainda é exigida).
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('rede fora'));
     const c = await carregar(SITE, SECRET);
     expect(await c.verificarCaptcha('token-qualquer')).toEqual({ ok: true });

@@ -1,8 +1,4 @@
-// ============================================================
-// Middleware de upload da foto do produto (miniatura no finder/admin).
-// Isola a configuração do multer e a validação do arquivo; a rota só o
-// encadeia antes do controller.
-// ============================================================
+// Upload da foto do produto.
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -13,8 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const PROD_DIR = path.join(__dirname, '..', '..', 'uploads', 'produtos');
 fs.mkdirSync(PROD_DIR, { recursive: true });
 
-// URL pública (relativa) onde as fotos ficam acessíveis. Usada também pelo
-// service para montar o caminho gravado no banco.
+// URL pública (relativa) das fotos.
 export const PROD_URL_BASE = '/uploads/produtos/';
 
 const uploadProd = multer({

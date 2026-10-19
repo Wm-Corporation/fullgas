@@ -7,8 +7,7 @@
   var sess = FG.guard();
   if (!sess) return;
 
-  // Espera o cache (carregado de forma assíncrona via fetch) antes de montar a
-  // tela — nada de renderizar com dados vazios.
+  // Espera o cache carregar antes de montar a tela.
   FG.pronto.then(function () {
 
   var view = document.getElementById('view');
@@ -16,8 +15,7 @@
   var esc = FG.esc;
 
   /* ---------- cabeçalho ---------- */
-  // Administrador aparece como Fábrica, não com o nome da empresa em que a
-  // conta está pendurada (ver api/src/fabrica.js).
+  // Admin aparece como Fábrica.
   function desenharQuem() {
     var who = document.getElementById('user-who');
     if (!who) return;
@@ -31,16 +29,11 @@
 
   if (sess.papel === 'admin') document.getElementById('tab-admin').classList.remove('hidden');
 
-  // Aba "Subdealers": só a conta GESTORA (ou admin) gerencia as contas
-  // internas. Uma conta interna (sub-dealer) não vê a aba nem cria outras
-  // contas — o roteador (abaixo) também barra o acesso direto por hash.
+  // Aba "Subdealers": só gestor ou admin.
   var ehGestor = !!(sess.gestor || sess.papel === 'admin');
   if (ehGestor) document.getElementById('tab-subdealers').classList.remove('hidden');
 
-  /* ---------- permissões por área (contas internas / sub-dealers) ----------
-     O gestor restringe as áreas de cada conta interna no painel "Minha
-     conta". Aqui as abas bloqueadas somem; o roteador (abaixo) também barra
-     acesso direto pelo hash. Admin/gestor têm sempre acesso total. */
+  /* ---------- permissões por área: abas bloqueadas somem (o roteador também barra) ---------- */
   var GATE_TABS = [
     ['loja', '.tabs a[href="/loja"]'],
     ['finder', '.tabs a[href="/finder"]'],
@@ -67,17 +60,12 @@
     pill.style.display = n ? '' : 'none';
   }
 
-  /* O destaque da carta ✉️ quando algo chega COM A PÁGINA ABERTA.
-     Um número que troca de 2 para 3 num canto da tela passa despercebido por
-     quem está olhando outra coisa. A classe .novo (ver css/styles.css) faz o
-     badge pulsar por alguns segundos e depois some — anuncia a novidade sem
-     virar um alerta permanente piscando na cara do revendedor. */
+  // Faz o badge da carta pulsar por alguns segundos quando chega algo.
   function piscarPill() {
     var pill = document.getElementById('notif-pill');
     if (!pill) return;
     pill.classList.remove('novo');
-    // Reinicia a animação mesmo se ela já estava rodando (duas mensagens
-    // seguidas): sem ler offsetWidth o navegador não repara na troca.
+    // Força o navegador a reiniciar a animação.
     void pill.offsetWidth;
     pill.classList.add('novo');
     setTimeout(function () { pill.classList.remove('novo'); }, 6500);
@@ -104,17 +92,10 @@
     if (q) location.hash = '#busca/' + encodeURIComponent(q);
   });
 
-  /* ---------- telas que carregam dados na hora ----------
-     Suporte, Minha conta, detalhe do pedido... desenham quando a resposta
-     chega. Se nesse meio-tempo o usuário já trocou de aba, a resposta
-     atrasada NÃO pode desenhar por cima da tela nova: a aba acesa deixaria de
-     bater com o conteúdo, e clicar de novo na aba não faria nada (o endereço
-     já é aquele) — a página parecia travada até recarregar. Cada troca de
-     tela ganha um número; quem busca guarda o seu e confere na volta. */
-  // Mínimo de fotos/vídeos em toda reivindicação (30/09/2026). A API trava a
-  // APROVAÇÃO sem elas; a tela avisa antes, no envio.
+  // Mínimo de fotos/vídeos por reivindicação (a API exige na aprovação).
   var FOTOS_MINIMAS = 3;
 
+  // Cada troca de tela ganha um número; resposta atrasada de outra tela não desenha.
   var telaSeq = 0;
   function telaVigente() {
     var minha = telaSeq;
@@ -123,8 +104,7 @@
 
   /* ---------- util ---------- */
   function setCrumb(partes) {
-    // Fora da home, o botão VOLTAR abre a trilha (bem visível — volta um
-    // passo na navegação; sem histórico, cai na página inicial).
+    // Fora da home, VOLTAR abre a trilha.
     var html = (partes || []).length
       ? '<button class="btn-voltar" id="crumb-voltar" type="button">Voltar</button>'
       : '';
@@ -146,8 +126,7 @@
     var cls = { 'Em processo': 'proc', 'Aprovada': 'ok', 'Recusada': 'bad', 'Esboço': 'draft' }[st] || 'proc';
     return '<span class="badge ' + cls + '">' + esc(st) + '</span>';
   }
-  // `reserva`: o nome que veio junto do chassi (v.modelo), para modelo que
-  // não está na lista de ativos — sem ela a tela mostrava só o código.
+  // `reserva`: nome do modelo vindo do chassi (modelo inativo).
   function modelName(modeloId, reserva) {
     var m = FG.model(modeloId);
     return m ? (m.nome + ' ' + m.ano) : (reserva || modeloId);
@@ -165,9 +144,7 @@
     // agrupa reivindicações por criador para a mini tabela
     var grupos = {};
     claims.forEach(function (c) {
-      // Colunas em português e só com o que existe (30/09/2026): antes eram
-      // "Claims/DAR/IMP/HQ/New", com DAR sempre 0 e "New" contando rascunhos
-      // que ficam só no navegador.
+      // Contagem por criador.
       var g = grupos[c.criador] || (grupos[c.criador] = { total: 0, analise: 0, aprovadas: 0, recusadas: 0 });
       g.total++;
       if (c.status === 'Em processo') g.analise++;
@@ -218,18 +195,14 @@
     var html = '<h2>Notificações</h2>';
     if (!list.length) html += '<p class="muted">Nenhuma notificação.</p>';
     list.forEach(function (n) {
-      // Anexo enviado pelo admin: imagem inline, vídeo com player ou link.
-      // data-arquivo em vez de src/href — o anexo é privado e vem por fetch
-      // autenticado (FG.carregarArquivos, chamado depois de montar a lista).
+      // Anexo privado: data-arquivo, preenchido por FG.carregarArquivos.
       var anexo = '';
       if (n.anexo) {
         if (n.anexoTipo === 'imagem') anexo = '<img class="nt-img" data-arquivo="' + esc(n.anexo) + '" alt="Anexo" loading="lazy">';
         else if (n.anexoTipo === 'video') anexo = '<video class="nt-video" data-arquivo="' + esc(n.anexo) + '" controls preload="metadata"></video>';
         else anexo = '<a class="link-action" data-arquivo="' + esc(n.anexo) + '" target="_blank" rel="noopener">📎 Abrir anexo</a>';
       }
-      // Aviso vindo de um chamado: leva direto para a conversa. O administrador
-      // atende pelo painel, o revendedor pela aba do portal — o link muda de
-      // destino conforme quem está lendo.
+      // Aviso de chamado: link para a conversa (admin vai ao painel).
       var linkChamado = n.chamadoId
         ? '<a class="link-action nt-chamado" href="' +
           (sess.papel === 'admin' ? '/admin#suporte/' : '#suporte/') + esc(n.chamadoId) +
@@ -258,12 +231,10 @@
      REIVINDICAÇÕES
      ========================================================= */
   var claimFiltro = 'Em processo';
-  // Sub-aba da seção Reivindicações: 'veiculo' (garantia por NIV) | 'varejo'
-  // (garantia de peça de um pedido). Define a lista mostrada e o "Nova".
+  // Sub-aba: 'veiculo' (por NIV) | 'varejo' (por pedido).
   var claimAba = 'veiculo';
 
-  // Rascunhos ("Esboço") vivem no navegador do cliente (localStorage), NÃO no
-  // banco. Só viram reivindicação de verdade ao "Enviar".
+  // Rascunhos ("Esboço") ficam só no navegador.
   var RASC_KEY = 'fullgas_reiv_rascunhos_v1';
   function lerRascunhos() {
     try { return JSON.parse(localStorage.getItem(RASC_KEY) || '[]'); } catch (e) { return []; }
@@ -293,10 +264,7 @@
   }
 
   function claimsDoFiltro() {
-    // Só as da sub-aba ativa (origem). Reivindicações antigas, sem origem, são
-    // tratadas como 'veiculo'. A pré-entrega é garantia DE CHASSI — mora na
-    // mesma sub-aba do veículo; fosse comparada direto com claimAba, ela
-    // sumiria das duas listas.
+    // Só as da sub-aba. Sem origem = 'veiculo'; pré-entrega fica junto com veículo.
     var all = FG.all('claims').filter(function (c) {
       var o = c.origem || 'veiculo';
       return claimAba === 'veiculo' ? (o === 'veiculo' || o === 'preentrega') : o === claimAba;
@@ -325,8 +293,7 @@
       (ehVarejo ? 'Nova reivindicação de varejo' : 'Nova reivindicação') + '</b></button>' +
       '<div class="side-layout">' +
       '<aside class="side-nav"><h2>Reivindicações</h2>' +
-      // Rascunhos ("Esboço") só existem no fluxo de veículo (guardados no
-      // navegador); a aba de varejo não os mostra.
+      // Rascunhos só no fluxo de veículo.
       btnNav('Em processo') + (ehVarejo ? '' : btnNav('Esboço')) + btnNav('Arquivo') +
       '</aside>' +
       '<section>' +
@@ -485,21 +452,13 @@
   }
 
   /* ---------------------------------------------------------
-     FOTOS E VÍDEOS DA REIVINDICAÇÃO
-     ---------------------------------------------------------
-     Um seletor para os dois formulários (veículo e varejo). O <input
-     type="file"> sozinho tinha três defeitos: cada nova escolha APAGAVA a
-     anterior, não havia como tirar um arquivo escolhido por engano e a
-     miniatura não abria. Aqui a lista é nossa: cada escolha soma à lista (até
-     MAX_MIDIA), cada miniatura tem um X e abre em tela cheia. A API confere o
-     mesmo limite (api/src/routes/reivindicacoes.routes.js).
+     FOTOS E VÍDEOS DA REIVINDICAÇÃO — soma escolhas até MAX_MIDIA, com X e tela cheia
      --------------------------------------------------------- */
   var MAX_MIDIA = 5;
   var RE_VIDEO = /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i;
   function ehVideo(f) { return (f.type || '').indexOf('video/') === 0 || RE_VIDEO.test(f.name || ''); }
 
-  // Foto/vídeo em tela cheia, por cima do formulário (que continua aberto e
-  // intacto embaixo). Fecha só no X, como os demais pop-ups do portal.
+  // Foto/vídeo em tela cheia sobre o formulário. Fecha no X.
   function abrirVisualizador(url, video, nome) {
     var tela = document.createElement('div');
     tela.className = 'midia-viewer';
@@ -526,8 +485,7 @@
     x.focus();
   }
 
-  // Liga o seletor aos elementos do formulário. Devolve arquivos() para o
-  // envio e liberar() para soltar as URLs de blob quando o formulário fecha.
+  // Liga o seletor ao formulário. Devolve arquivos() e liberar() (solta os blobs).
   function montarSeletorMidia(input, galeria, contador, dica) {
     var itens = [];   // { arquivo: File, url: URL de blob da prévia }
     function chave(f) { return f.name + '|' + f.size + '|' + f.lastModified; }
@@ -581,8 +539,7 @@
 
     input.addEventListener('change', function () {
       var novos = Array.prototype.slice.call(input.files || []);
-      // Zera o campo: a lista de verdade é `itens`, e assim dá para escolher
-      // de novo um arquivo que acabou de ser removido.
+      // Zera o campo para poder escolher de novo o mesmo arquivo.
       input.value = '';
       var vistos = {};
       itens.forEach(function (it) { vistos[chave(it.arquivo)] = true; });
@@ -644,12 +601,9 @@
           (v.venda ? '' : ' (em estoque)') + '</option>';
       }).join('') +
       '</select></div>' +
-      // A moto escolhida, com foto, concessionária, cliente e o período da
-      // garantia — para conferir o chassi antes de descrever o defeito.
+      // Ficha da moto escolhida.
       '<div id="nc-veic"></div>' +
-      // Aviso do modo pré-entrega. Nasce escondido e só aparece quando o chassi
-      // escolhido ainda não tem venda registrada — o cliente não escolhe este
-      // modo, ele decorre do estado da moto.
+      // Aviso de pré-entrega (aparece se o chassi não tem venda registrada).
       '<div class="pre-entrega-aviso hidden" id="nc-pe-aviso">' +
       '<b class="pe-titulo">🛠 Garantia de pré-entrega</b>' +
       '<span>Este chassi ainda não tem venda registrada, então a reivindicação será aberta como ' +
@@ -658,8 +612,7 @@
       'quando você registrar a venda.</span></div>' +
       '<div class="field"><label>Peça(s) defeituosa(s) *</label>' +
       '<div class="peca-add">' +
-      // Autocomplete PRÓPRIO (dropdown estilizado) — o datalist nativo herdava
-      // o visual do sistema operacional e destoava do resto do portal.
+      // Autocomplete próprio.
       '<div class="ac-wrap"><input id="nc-peca" autocomplete="off" placeholder="Digite o código ou o nome da peça">' +
       '<div class="ac-list hidden" id="nc-peca-ac"></div></div>' +
       '<input id="nc-peca-qtd" type="number" min="1" step="1" value="1" title="Quantidade">' +
@@ -681,19 +634,10 @@
     var midia = seletorMidiaDe('nc');
 
     function fechar() { midia.liberar(); back.remove(); }
-    // Só o X fecha o formulário — clicar no fundo escuro NÃO fecha, para o
-    // cliente não perder o que preencheu por um clique fora sem querer.
+    // Só o X fecha (clique fora não perde o preenchido).
     back.querySelector('.x').addEventListener('click', fechar);
 
-    /* ---------------------------------------------------------
-       MODO PRÉ-ENTREGA
-       ---------------------------------------------------------
-       Não é uma opção na tela: é o estado da moto que decide. Chassi sem venda
-       registrada = a inspeção que antecede a entrega, então o formulário se
-       ajusta sozinho — tira o Tipo (defeito de moto zero é de fábrica, não há
-       o que classificar), tira horas e quilometragem (não rodou) e troca o
-       rótulo da data. Registrada a venda, o mesmo formulário volta ao normal.
-       --------------------------------------------------------- */
+    /* ---- Modo pré-entrega: chassi sem venda → sem Tipo, horas e km; rótulo da data muda ---- */
     var selNiv = document.getElementById('nc-niv');
     var avisoPE = document.getElementById('nc-pe-aviso');
     var campoTipo = document.getElementById('nc-tipo-campo');
@@ -717,8 +661,7 @@
     }
     selNiv.addEventListener('change', aplicarModo);
 
-    // Consultor de peças: resolve o que foi digitado para um SKU do catálogo.
-    // Retorna '' (vazio), o SKU (válido) ou null (digitado mas não encontrado).
+    // Texto digitado → SKU. '' (vazio), SKU ou null (não encontrado).
     function resolverPeca() {
       var v = document.getElementById('nc-peca').value.trim();
       if (!v) return '';
@@ -745,8 +688,7 @@
       }
     }
 
-    // --- Autocomplete próprio: dropdown com até 8 sugestões (código OU nome).
-    // Setas navegam, Enter escolhe, Esc fecha; clicar também escolhe.
+    // Autocomplete: até 8 sugestões; setas, Enter, Esc e clique.
     var ac = document.getElementById('nc-peca-ac');
     var acItens = [], acIdx = -1;
     function acFechar() { ac.classList.add('hidden'); ac.innerHTML = ''; acItens = []; acIdx = -1; }
@@ -837,8 +779,7 @@
         return { sku: p.sku, nome: p.nome || (prod ? prod.nome : ''), quantidade: p.quantidade };
       });
     }
-    // Depois do prefill: o modo é recalculado a partir do chassi selecionado,
-    // valendo tanto para o formulário em branco quanto para rascunho e reenvio.
+    // Recalcula o modo pelo chassi selecionado.
     aplicarModo();
     renderPecas();
     document.getElementById('nc-peca-add').addEventListener('click', function () {
@@ -854,9 +795,7 @@
       renderPecas();
     });
 
-    // Coleta os campos do formulário no formato da API. No modo pré-entrega,
-    // horas e quilometragem vão vazias (a moto não rodou) e a origem acompanha
-    // — quem confere a regra "sem venda registrada" é a API, não esta tela.
+    // Campos no formato da API (pré-entrega sem horas/km).
     function coletar() {
       var pe = ehPreEntrega();
       return {
@@ -882,9 +821,7 @@
       return true;
     }
 
-    // ENVIAR: cria (novo/rascunho) ou atualiza+reenvia (editar). Sobe as fotos.
-    // Durante o envio, uma cortina cobre o modal com um carregamento breve e,
-    // no sucesso, a confirmação de que a garantia será avaliada pela equipe.
+    // ENVIAR: cria ou atualiza+reenvia e sobe as fotos, com cortina de envio.
     document.getElementById('nc-env').addEventListener('click', async function () {
       var d = coletar();
       if (!validarEnvio(d)) return;
@@ -895,17 +832,14 @@
         return;
       }
 
-      // A cortina cobre o overlay INTEIRO (não o .modal, que rola): assim a
-      // mensagem fica sempre centralizada na tela, mesmo com o formulário longo
-      // rolado. Um card branco no centro dá destaque à confirmação.
+      // Cortina sobre o overlay inteiro, centralizada.
       var cortina = document.createElement('div');
       cortina.className = 'claim-envio';
       cortina.innerHTML = '<div class="claim-envio-card"><div class="fg-spinner"></div>' +
         '<p><b>Enviando sua garantia…</b></p></div>';
       back.appendChild(cortina);
 
-      // Espera mínima de ~1,1s: sem ela a cortina "pisca" e o cliente não
-      // percebe que o envio aconteceu.
+      // Espera mínima, para a cortina não piscar.
       var minimo = new Promise(function (r) { setTimeout(r, 1100); });
       var c;
       if (modo === 'editar') {
@@ -943,8 +877,7 @@
       setTimeout(concluir, 5000);
     });
 
-    // SALVAR COMO ESBOÇO: grava no navegador (não vai ao banco). Some ao editar
-    // uma reivindicação já enviada.
+    // SALVAR COMO ESBOÇO: só no navegador.
     var rascBtn = document.getElementById('nc-rasc');
     if (modo === 'editar') { rascBtn.style.display = 'none'; }
     else rascBtn.addEventListener('click', function () {
@@ -964,17 +897,12 @@
     });
   }
 
-  // Modal de NOVA reivindicação de VAREJO: garantia de peça de um PEDIDO. O
-  // revendedor escolhe um pedido seu; a lista de peças oferece SOMENTE os itens
-  // daquele pedido. Sem NIV/prazo. Mesma estrutura (descrição + fotos/vídeos).
+  // Nova reivindicação de VAREJO: peças de um pedido do revendedor.
   function modalClaimVarejo() {
-    // Só pedidos de venda (exclui reposições de garantia) e não cancelados
-    // (30/09/2026). Cliente já vê apenas os seus; admin vê todos.
+    // Só pedidos de venda não cancelados.
     var orders = FG.all('orders').filter(function (o) { return !o.garantia && o.status !== 'Cancelado'; });
 
-    // Quanto de cada peça ainda pode entrar em garantia: o que foi ENVIADO,
-    // menos o que já está em outras reivindicações do pedido (fora as
-    // recusadas). A API confere a mesma conta — a tela só evita o erro.
+    // Livre para garantia = enviado menos outras reivindicações (a API confere).
     function livrePorSku(o) {
       var reclamado = {};
       FG.all('claims').forEach(function (c) {
@@ -1046,9 +974,7 @@
       return itensDoPedido().find(function (x) { return x.artigo === sku; }) || null;
     }
 
-    // Teto = a quantidade comprada daquele item no pedido. Não se pode
-    // reivindicar mais peças do que se comprou. Ajusta o max do campo, o texto
-    // de ajuda e reduz o valor digitado se ele passar do teto.
+    // Teto = quantidade comprada do item.
     function atualizarMaxQtd() {
       var it = itemSelecionado();
       var max = it ? it.saldo.livre : 1;
@@ -1179,8 +1105,7 @@
     var pecas = (c.pecas || []).map(function (p) {
       return '<div class="peca-row"><span>' + esc(p.sku) + ' — ' + esc(p.nome) + ' <b>×' + p.quantidade + '</b></span></div>';
     }).join('') || '<span class="muted">—</span>';
-    // data-arquivo (em vez de src/href): o arquivo é privado e vem por fetch
-    // autenticado. FG.carregarArquivos() preenche depois de montar o HTML.
+    // Arquivo privado: data-arquivo, preenchido por FG.carregarArquivos().
     function anexoThumb(a) {
       var video = (a.tipo && a.tipo.indexOf('video/') === 0) || /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i.test(a.url || a.nome || '');
       var inner = video
@@ -1192,9 +1117,7 @@
       ? '<div class="media-gallery">' + c.anexos.map(anexoThumb).join('') + '</div>'
       : '<span class="muted">Sem fotos ou vídeos</span>';
     function linha(rot, val) { return '<div><span class="cell-label">' + rot + '</span><span class="cell-value">' + val + '</span></div>'; }
-    // Garantia de veículo: a moto (foto, concessionária, cliente) e se o
-    // ocorrido cai dentro do período da garantia. Chassi que já saiu do
-    // estoque da concessionária não está no cache — aí fica só o NIV abaixo.
+    // Ficha da moto (chassi fora do estoque fica só com o NIV).
     var veic = c.origem !== 'varejo' && c.niv
       ? FG.all('vehicles').find(function (x) { return x.niv === c.niv; }) : null;
     back.innerHTML =
@@ -1213,8 +1136,7 @@
           linha('Criador', esc(c.criador || '—')) +
           linha('Data da reivindicação', FG.fmtDateTime(c.data))
         : c.origem === 'preentrega'
-          // Pré-entrega: a moto não rodou, então "Uso" (horas/km) não diz nada
-          // e sai da ficha; a data é a da inspeção, não a de um defeito em uso.
+          // Pré-entrega: sem "Uso"; a data é da inspeção.
           ? linha('Origem', 'Pré-entrega (moto ainda no estoque)') +
             linha('NIV', esc(c.niv || '—')) +
             linha('Criador', esc(c.criador || '—')) +
@@ -1324,8 +1246,7 @@
   /* =========================================================
      DETALHE DO PEDIDO (#pedido/:numero)
      ========================================================= */
-  // Indicador circular por item: verde=enviado, amarelo=parcial, cinza=pendente,
-  // vermelho=cancelado (o pedido inteiro foi cancelado — nada será enviado).
+  // Bolinha da peça: verde enviado, amarelo parcial, cinza pendente, vermelho cancelado.
   function dotItem(it, cancelado) {
     if (cancelado) return '<span class="item-dot dot-cancelado" title="Cancelado"></span>';
     var cls = it.qtdEnviada >= it.qtd ? 'dot-ok' : (it.qtdEnviada > 0 ? 'dot-parcial' : 'dot-pendente');
@@ -1414,8 +1335,7 @@
   /* =========================================================
      AÇÕES DO VEÍCULO
      ========================================================= */
-  // Modal estilizado para registrar a venda com os dados do comprador final.
-  // onDone() é chamado após sucesso (re-renderiza a busca do veículo).
+  // Registrar a venda. onDone() após sucesso.
   function modalVenda(v, onDone) {
     var back = document.createElement('div');
     back.className = 'modal-back';
@@ -1468,9 +1388,7 @@
     });
   }
 
-  // Modal (SÓ ADMIN) para transferir o chassi para outra concessionária,
-  // digitando o nome dela (razão social ou nome fantasia) — ou devolvê-lo à
-  // Fábrica, quando ele já está numa concessionária.
+  // Transferir chassi (admin) pelo nome da concessionária, ou devolver à Fábrica.
   function modalTransferir(v, onDone) {
     var back = document.createElement('div');
     back.className = 'modal-back';
@@ -1534,15 +1452,7 @@
   }
 
   /* =========================================================
-     HISTÓRICO DO VEÍCULO
-     ---------------------------------------------------------
-     A linha do tempo do chassi dentro de "Ações do veículo": cadastro,
-     atribuição e transferências, venda, garantia, reivindicações e o que o
-     administrador lançar à mão (recall, revisão, anotação).
-
-     Quase tudo aqui chega pronto da API — a tela só desenha. O que ela decide
-     é a aparência de cada tipo de evento e quem pode apagar o quê: registro
-     automático não tem botão de excluir, porque ele é o que de fato aconteceu.
+     HISTÓRICO DO VEÍCULO (evento automático não tem botão de excluir)
      ========================================================= */
   var HIST_ICONE = {
     cadastro: '🏷', atribuicao: '🏢', transferencia: '🔁', venda: '🤝',
@@ -1646,8 +1556,7 @@
         titulo: titulo,
         detalhe: document.getElementById('hi-detalhe').value.trim(),
         referencia: document.getElementById('hi-ref').value.trim(),
-        // Data sem hora vira meia-noite UTC; mandamos o meio-dia para o evento
-        // não "voltar um dia" ao ser exibido no fuso do Brasil.
+        // Meio-dia, para a data não voltar um dia no fuso do Brasil.
         data: dataTxt ? dataTxt + 'T12:00:00' : undefined
       });
       if (!r.ok) {
@@ -1677,14 +1586,11 @@
       var v = FG.all('vehicles').find(function (x) { return x.niv.toUpperCase() === q; });
       FG.logSearch(q, v ? 1 : 0);
       if (!v) { box.innerHTML = '<p class="muted">Nenhum veículo encontrado com este NIV.</p>'; return; }
-      // Ficha do veículo (store.js): foto do modelo, dados do chassi,
-      // concessionária, cliente e o período da garantia — tudo numa tela,
-      // com as ações no meio e o histórico do chassi fechando a ficha.
+      // Ficha do veículo, ações e histórico.
       box.innerHTML = FG.fichaVeiculo(v, {
         acoes:
           (v.status === 'Disponível' ? '<button class="btn red" id="av-venda">Registrar venda</button>' : '') +
-          // Sem "Ativar garantia" avulso (30/09/2026): a garantia começa no
-          // registro da venda — ligá-la antes encurtava a do comprador.
+          // A garantia começa no registro da venda.
           (!v.garantia && v.status === 'Disponível'
             ? '<span class="muted" style="font-size:12px;align-self:center;">A garantia começa ao registrar a venda.</span>' : '') +
           (sess.papel === 'admin' ? '<button class="btn" id="av-transf">Transferir revendedor</button>' : '') +
@@ -1728,9 +1634,7 @@
   function renderEstoque() {
     setCrumb(['Estoque do revendedor']); setTabOn('estoque');
     var vehs = FG.all('vehicles');
-    // O admin vê os chassis de todas as concessionárias e os da Fábrica: para
-    // ele a tabela ganha a coluna de localização. A concessionária só vê os
-    // próprios, então a coluna não diria nada.
+    // Admin vê todas as concessionárias: ganha a coluna de localização.
     var admin = sess.papel === 'admin';
     function local(v) { return v.fabrica ? 'Fábrica' : (v.empresa || ''); }
     view.innerHTML =
@@ -1766,24 +1670,18 @@
   function renderFinanceiro() {
     setCrumb(['Conta financeira', 'Faturas']); setTabOn('financeiro');
     var inv = FG.all('invoices'); // faturas reais (cobrança)
-    // Total faturado: soma só o que ainda cobra. Faturas ANULADAS (pedido
-    // cancelado) permanecem na lista com a tarja, mas NÃO entram no cálculo.
+    // Faturas anuladas aparecem, mas não somam.
     var faturado = 0;
     inv.forEach(function (i) { if (i.status !== 'Anulada') faturado += i.valor; });
 
-    // Garantias aprovadas (substituem as antigas "notas de crédito"): as
-    // reivindicações do revendedor que o admin já aprovou.
+    // Garantias aprovadas.
     var garantias = FG.all('claims').filter(function (c) { return c.status === 'Aprovada'; })
       .slice().sort(function (a, b) {
         return (b.dataAprovacao || b.data || '') < (a.dataAprovacao || a.data || '') ? -1 : 1;
       });
     var totalGarantias = garantias.reduce(function (s, c) { return s + (c.valorGarantia || 0); }, 0);
 
-    // Pré-venda: peças já compradas (incluídas na fatura do pedido, sem cobrança
-    // à parte) que AINDA aguardam envio. Derivado dos pedidos; status pelo
-    // estoque atual. Só entra o que tem saldo pendente (qtdEnviada < qtd) e de
-    // pedidos vivos — item já enviado por completo ou pedido cancelado não é
-    // "peça a enviar" e não deve poluir o rastreador.
+    // Pré-venda ainda a enviar (sem pedidos cancelados).
     var preParts = [];
     FG.all('orders').forEach(function (o) {
       if (o.status === 'Cancelado') return;
@@ -1843,8 +1741,7 @@
       '<div class="fin-card"><div class="muted">Documentos</div><div class="v">' + inv.length + '</div></div>' +
       '</div>' +
       '<div class="toolbar"><button class="tool" id="fi-csv">📄 Export. p/ Excel</button></div>' +
-      // Pedido de origem e situação na lista (30/09/2026): antes o cliente não
-      // sabia de qual pedido era cada fatura (a API já mandava).
+      // Pedido de origem e situação de cada fatura.
       '<table class="table"><thead><tr><th class="filt">Tipo</th><th class="filt">N° da fatura</th>' +
       '<th class="filt">Pedido</th><th class="filt">Data da fatura ↓</th><th>Situação</th>' +
       '<th class="right filt">Quantia cobrada</th><th></th></tr></thead><tbody>' +
@@ -1872,8 +1769,7 @@
     });
   }
 
-  // Monta o endereço do destinatário em linhas (uma por <br>), no estilo da
-  // fatura de referência (logradouro/nº, complemento, bairro, cidade-UF/CEP, país).
+  // Endereço do destinatário em linhas (<br>).
   function linhasEndereco(end) {
     if (!end) return [];
     var linhas = [];
@@ -1888,56 +1784,36 @@
     return linhas;
   }
 
-  // Fatura detalhada — replica o layout da fatura de referência (docs/
-  // referencias/fatura_referencia.png): cabeçalho com o logo FULLGAS + dados
-  // do documento, bloco do destinatário (empresa + endereço + país + CNPJ) e a
-  // tabela de itens com os produtos vendidos, quantidades e valores.
-  // Devolve só o HTML (usado tanto para imprimir quanto para baixar em PDF).
+  // HTML da fatura detalhada (layout de docs/referencias/fatura_referencia.png), para imprimir ou PDF.
   function faturaHTML(i) {
     var itens = i.itens || [];
     var somaItens = itens.reduce(function (s, it) { return s + (it.subtotal || 0); }, 0);
     var total = itens.length ? somaItens : i.valor;
     var endLinhas = linhasEndereco(i.endereco).map(esc).join('<br>');
     var nomeEmpresa = esc(i.empresa || sess.empresa || '');
-    // Crus de propósito: os dois só alimentam campo(), que escapa por conta
-    // própria. O separador ', ' não é dado de usuário, então juntar antes de
-    // escapar é seguro.
+    // Crus: o campo() escapa.
     var paisCru = i.pais || (i.endereco && i.endereco.pais) || '';
     var pedidos = (i.pedidos || []).length ? (i.pedidos || []).join(', ') : '';
 
-    // Estilos inline (o print-area é isolado; nada de classes externas).
-    // Corpos maiores para leitura confortável no A4 — mesma estrutura, letras
-    // proporcionais ao papel (antes saíam pequenas demais).
+    // Estilos inline (o print-area é isolado), tamanhos para A4.
     var thBase = 'text-align:left;padding:9px 8px;border-bottom:2px solid #e5b100;font-size:14px;';
     var tdBase = 'padding:9px 8px;border-bottom:1px solid #e5e5e5;font-size:14px;vertical-align:top;';
     var lbl = 'font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.4px;';
     var val = 'font-size:15px;font-weight:700;color:#222;';
 
-    // O escape acontece AQUI DENTRO, não em cada chamada. Antes o helper
-    // interpolava o valor cru e cabia a quem chamasse lembrar do esc() — os
-    // seis call sites lembravam, mas é o tipo de contrato que se perde no
-    // sétimo. Com o escape no helper, esquecer deixa de ser possível.
+    // Escapa aqui dentro: quem chama passa o valor cru.
     function campo(rotulo, valor) {
       return '<div style="margin-bottom:10px;"><div style="' + lbl + '">' + esc(rotulo) + '</div>' +
         '<div style="' + val + '">' + (valor ? esc(valor) : '—') + '</div></div>';
     }
 
-    // Logo da marca (data URI carregado por js/logo-data.js). Se por algum
-    // motivo não estiver disponível, cai no nome em texto.
-    // Largura e altura explícitas (110x70 = proporção original 600x382): evita
-    // o reflow do `width:auto` durante a captura do PDF.
+    // Logo (js/logo-data.js) com tamanho fixo; sem ele, o nome em texto.
     var logo = window.FG_LOGO
       ? '<img src="' + window.FG_LOGO + '" alt="FULLGAS" width="110" height="70" ' +
         'style="width:110px;height:70px;display:block;flex:0 0 110px;">'
       : '<div style="font-size:26px;font-weight:800;font-style:italic;color:#e5b100;">FULLGAS</div>';
 
-    // O PADDING LATERAL PRECISA ESTAR AQUI, na raiz do documento.
-    // O html2pdf recebe ESTE elemento e o clona para dentro de um container
-    // próprio, do tamanho da página — a margem do container que o segura na
-    // tela é jogada fora. Sem este padding o conteúdo encostava na borda da
-    // folha e o "S" de FULLGAS saía cortado (a logo fica colada à direita por
-    // causa do space-between). Medido: 34 linhas de pixel pintadas na última
-    // coluna do canvas antes da correção, zero depois.
+    // Padding lateral na raiz: o html2pdf clona só este elemento (sem ele, a logo sai cortada).
     return '<div style="font-family:Arial,Helvetica,sans-serif;color:#222;' +
       'max-width:760px;box-sizing:border-box;padding:0 18px;">' +
 
@@ -1951,8 +1827,7 @@
 
       /* ---- grade de dados do documento ---- */
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 24px;margin-top:22px;">' +
-      // Valores CRUS: quem escapa é o campo() (ver o helper acima). Passar
-      // esc() aqui escaparia duas vezes e um "&" viraria "&amp;" na tela.
+      // Valores crus (o campo() escapa).
       campo('Fatura n°', i.numero) +
       campo('Data da fatura', FG.fmtDate(i.data)) +
       campo('Pedido(s)', pedidos) +
@@ -2002,13 +1877,10 @@
       '<td style="padding:12px;text-align:right;font-size:19px;font-weight:800;border-top:2px solid #e5b100;">' + FG.fmtMoney(total) + '</td></tr>' +
       '</table></div>' +
 
-      // Sem rodapé: a nota de "documento demonstrativo gerado em <data>" saiu a
-      // pedido do dono — não acrescenta nada ao documento que o cliente recebe.
       '</div>';
   }
 
-  // Imprimir: joga o HTML no #print-area (isolado por @media print) e chama a
-  // impressão do navegador (o usuário pode escolher "Salvar como PDF").
+  // Imprimir: põe o HTML no #print-area e abre a impressão do navegador.
   function imprimirFatura(i) {
     var area = document.getElementById('print-area');
     area.innerHTML = faturaHTML(i);
@@ -2017,11 +1889,7 @@
     setTimeout(function () { area.classList.add('hidden'); }, 300);
   }
 
-  // A biblioteca de PDF (html2pdf, ~900 KB) só é baixada no primeiro clique em
-  // "Baixar PDF". Antes ela vinha no <script> do portal.html em TODA abertura
-  // do portal: num computador fraco eram ~0,4 s de CPU a cada página, para
-  // uma função que quase ninguém usa. Depois do primeiro download ela fica no
-  // cache do navegador como qualquer outro arquivo.
+  // html2pdf (~900 KB) só é baixado no primeiro "Baixar PDF".
   var html2pdfPromessa = null;
   function carregarHtml2pdf() {
     if (window.html2pdf) return Promise.resolve(window.html2pdf);
@@ -2041,8 +1909,7 @@
     return html2pdfPromessa;
   }
 
-  // Baixar: gera um arquivo PDF de verdade (html2pdf) e dispara o download,
-  // sem passar pela caixa de impressão. Nome: fatura-<numero>.pdf.
+  // Baixar: gera fatura-<numero>.pdf direto.
   function baixarFaturaPDF(i, btn) {
     var rotulo = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
@@ -2058,9 +1925,7 @@
 
   function gerarFaturaPDF(i, btn, rotulo) {
 
-    // Container temporário fora da tela (o html2pdf renderiza o elemento real).
-    // Fica preso ao <html> (não ao <body>) para escapar do `zoom` global da
-    // interface — assim o PDF sai sempre no tamanho projetado.
+    // Container fora da tela, preso ao <html> para escapar do zoom do body.
     var holder = document.createElement('div');
     holder.style.cssText = 'position:fixed;left:-9999px;top:0;width:760px;background:#fff;padding:24px;zoom:1;';
     holder.innerHTML = faturaHTML(i);
@@ -2082,13 +1947,7 @@
   }
 
   /* =========================================================
-     MINHA CONTA — cadastro da empresa + contas internas
-     ---------------------------------------------------------
-     O GESTOR (conta que se cadastrou) edita os dados da empresa
-     e gerencia as contas internas (sub-dealers): cria contas
-     para funcionários da concessionária e restringe as áreas
-     que cada uma acessa (loja, finder, pedidos, financeiro...).
-     Conta interna vê tudo somente-leitura.
+     MINHA CONTA — cadastro da empresa (gestor edita; conta interna só lê)
      ========================================================= */
   var AREA_LABELS = {
     loja: 'Loja', finder: 'Localizador de Peças', pedidos: 'Pedidos',
@@ -2122,8 +1981,7 @@
         '<h3 class="sec-title">Dados da empresa</h3>' +
         '<div class="conta-grid">' +
         '<div class="field"><label>Razão social</label><input type="text" value="' + esc(c.empresa.razaoSocial) + '" readonly disabled></div>' +
-        // CNPJ travado para o cliente: é a chave do vínculo com o Tiny. Só a
-        // Fullgas muda, entrando na conta pela alteração de identidade.
+        // CNPJ travado (chave do Tiny); só o admin em "Entrar na conta" muda.
         '<div class="field"><label for="ct-cnpj">CNPJ</label><input id="ct-cnpj" type="text" maxlength="18" value="' + esc(c.empresa.cnpj) + '"' +
           (FG.identidadeAssumida() ? ro : ' readonly disabled title="Para alterar o CNPJ, abra um chamado no Suporte."') + '>' +
           (FG.identidadeAssumida() ? '' : '<small class="muted">Para alterar o CNPJ, abra um chamado no Suporte.</small>') + '</div>' +
@@ -2146,8 +2004,7 @@
         (gestor ? '<button class="btn red" id="ct-salvar" type="button">Salvar dados da empresa</button>' : '') +
         // A gestão de sub-dealers vive na aba "Subdealers" (só o gestor a vê).
         (gestor ? '<p class="muted" style="font-size:12px;margin-top:18px;">As contas internas (sub-dealers) são gerenciadas na aba <a href="#subdealers">Subdealers</a>.</p>' : '') +
-        // Trocar a própria senha (30/09/2026) — vale para gestor e conta
-        // interna. Some na identidade assumida: a Fullgas não troca por ele.
+        // Trocar a própria senha (some em identidade assumida).
         (FG.identidadeAssumida() ? '' :
           '<h3 class="sec-title">Trocar minha senha</h3>' +
           '<div class="conta-grid">' +
@@ -2216,9 +2073,7 @@
         if (/[^A-Za-zÀ-ÖØ-öø-ÿ'. -]/.test(dados.endereco.cidade)) { FG.toast('Cidade não pode conter números ou caracteres especiais.', 'erro'); return; }
         FG.contaSalvarEmpresa(dados).then(function (r) {
           if (!r.ok) { FG.toast(r.msg || 'Não foi possível salvar.', 'erro'); return; }
-          // E-mail é também o login: se mudou, atualiza a sessão em memória e no
-          // localStorage e o cabeçalho, para o portal refletir na hora (o próximo
-          // login usa o novo e-mail).
+          // E-mail é o login: atualiza a sessão e o cabeçalho.
           if (r.email && r.email !== sess.email) {
             sess.email = r.email;
             try {
@@ -2237,14 +2092,7 @@
   }
 
   /* =========================================================
-     SUBDEALERS — gestão das contas internas (só o gestor)
-     ---------------------------------------------------------
-     Aba exclusiva da conta gestora: cria contas para os usuários
-     internos da concessionária, restringe as áreas que cada uma
-     acessa, bloqueia/desbloqueia, redefine senha e exclui. As
-     contas nascem PENDENTES — só entram depois que o administrador
-     Fullgas aprova (mesma fila de qualquer concessionário). Um
-     sub-dealer não vê esta aba nem cria outras contas.
+     SUBDEALERS — contas internas (só o gestor). Nascem pendentes até o admin aprovar.
      ========================================================= */
   function renderSubdealers() {
     setCrumb(['Subdealers']); setTabOn('subdealers');
@@ -2393,26 +2241,13 @@
   }
 
   /* =========================================================
-     SUPORTE TÉCNICO (helpdesk)
-     ---------------------------------------------------------
-     A tela cheia do mesmo helpdesk que o pop-up flutuante do canto da tela
-     (js/suporte.js) oferece. A divisão de trabalho entre os dois:
-
-       pop-up  abre chamado de qualquer tela e avisa quando há resposta;
-       esta    lista tudo e é onde a conversa acontece.
-
-     Os chamados NÃO vêm do cache do FG: são buscados a cada render. Conversa
-     envelhece rápido, e uma resposta do suporte guardada em cache seria uma
-     resposta que o revendedor não vê até recarregar a página.
+     SUPORTE TÉCNICO — lista e conversa (o pop-up js/suporte.js abre chamados)
+     Chamados são buscados a cada render, sem cache.
      ========================================================= */
   // 'andamento' (o que ainda espera alguém) | 'encerrados' | 'todos'
   var supFiltro = 'andamento';
 
-  /* Qual chamado está desenhado na tela AGORA, e qual foi a última mensagem
-     que já apareceu nele. É o que permite ao batimento (js/ao-vivo.js) colar
-     só as mensagens novas no fim da conversa em vez de redesenhar a tela —
-     redesenhar apagaria o que o revendedor está digitando na caixa de
-     resposta. null = não estamos dentro de um chamado. */
+  // Chamado aberto e último id desenhado: o batimento cola só as mensagens novas. null = fora de chamado.
   var supAberto = null;   // { id, ultimoId, status }
 
   function supMaiorId(conversa) {
@@ -2442,19 +2277,11 @@
     FG.toast('Chamados são abertos pelas concessionárias; o administrador responde pelo painel.', 'erro');
   }
 
-  // Algo mudou no suporte: os DOIS contadores precisam saber.
-  //
-  // O badge 🎧 do pop-up conta mensagens não lidas; a carta ✉️ do topo conta
-  // notificações. Abrir um chamado zera os dois no servidor (a API marca as
-  // mensagens E as notificações daquele chamado como lidas), então deixar de
-  // recarregar aqui deixaria a carta acesa apontando para uma conversa que o
-  // usuário acabou de ler.
+  // Algo mudou no suporte: atualiza o badge e a carta (abrir um chamado zera os dois).
   function supMudou() {
     window.dispatchEvent(new Event('fg-suporte-mudou'));
     FG.recarregarNotifs().then(refreshPill);
-    // Realinha o batimento com o que ACABOU de acontecer. Sem isto, o próximo
-    // ciclo compararia os números novos com um retrato anterior à ação do
-    // usuário e anunciaria como "novidade" a resposta que ele mesmo enviou.
+    // Realinha o batimento, para não anunciar a própria ação como novidade.
     if (FG.aoVivo) FG.aoVivo.agora();
   }
 
@@ -2526,8 +2353,7 @@
 
     var vigente = telaVigente();
     FG.suporteChamado(id).then(function (c) {
-      // Saiu antes de abrir: não desenha e não se registra como chamado aberto
-      // (o batimento colaria mensagens numa tela que não é a dele).
+      // Saiu antes de carregar: não desenha.
       if (!vigente()) return;
       if (!c) {
         view.innerHTML = '<h2>Chamado</h2><p class="muted">Chamado não encontrado.</p>' +
@@ -2535,8 +2361,7 @@
         return;
       }
       setCrumb(['Suporte Técnico', c.numero]);
-      // Abrir o detalhe marcou as respostas como lidas no servidor: o badge do
-      // pop-up precisa saber, senão continua contando o que já foi lido.
+      // Abrir marcou como lidas: atualiza o badge.
       supMudou();
 
       var encerrado = supEncerrado(c.status);
@@ -2578,8 +2403,7 @@
       view.innerHTML = html;
       FG.carregarArquivos(view);      // anexos são privados: vêm por fetch autenticado
 
-      // A partir daqui o batimento sabe o que está na tela e até onde a
-      // conversa já foi desenhada.
+      // Registra o que está na tela para o batimento.
       supAberto = { id: c.id, ultimoId: supMaiorId(c.conversa), status: c.status };
 
       var bEnc = document.getElementById('sup-encerrar');
@@ -2627,22 +2451,19 @@
     });
   }
 
-  // Uma mensagem da conversa. 'sistema' é a mudança de status: entra como uma
-  // linha discreta no meio do fio, sem balão nem autor.
+  // Mensagem: 'sistema' vira linha discreta; as demais, balões.
   function supMensagemHtml(m) {
     if (m.autor === 'sistema') {
       return '<div class="sup-msg de-sistema">' + esc(m.texto) + ' · ' + FG.fmtDateTime(m.criadoEm) + '</div>';
     }
     var anexo = '';
     if (m.anexo) {
-      // data-arquivo (e não src/href): o anexo é privado e sai por
-      // /api/arquivos, que confere de quem é. FG.carregarArquivos resolve.
+      // Anexo privado: data-arquivo, resolvido por FG.carregarArquivos.
       if (m.anexoTipo === 'imagem') anexo = '<img class="sup-anexo-img" data-arquivo="' + esc(m.anexo) + '" alt="Anexo" loading="lazy">';
       else if (m.anexoTipo === 'video') anexo = '<video class="sup-anexo-video" data-arquivo="' + esc(m.anexo) + '" controls preload="metadata"></video>';
       else anexo = '<a class="link-action" data-arquivo="' + esc(m.anexo) + '" target="_blank" rel="noopener">📎 Abrir anexo</a>';
     }
-    // Aqui quem lê é o revendedor: o lado dele (autor 'cliente' — dele ou de um
-    // colega da concessionária) vai para a direita, como em qualquer conversa.
+    // Aqui o revendedor lê: o lado dele à direita.
     return '<div class="sup-msg de-' + (m.autor === 'admin' ? 'outro' : 'mim') + '">' +
       '<span class="sup-msg-quem">' + esc(m.autor === 'admin' ? ('Suporte Fullgas' + (m.autorNome ? ' · ' + m.autorNome : '')) : (m.autorNome || 'Você')) + '</span>' +
       (m.texto ? '<span class="sup-msg-txt">' + esc(m.texto) + '</span>' : '') +
@@ -2652,18 +2473,8 @@
   }
 
   /* =========================================================
-     AO VIVO — o que fazer quando o batimento diz que mudou
-     ---------------------------------------------------------
-     js/ao-vivo.js pergunta ao servidor de 10 em 10 segundos e dispara
-     `fg-pulso` só quando algum número se mexeu. Aqui decidimos o efeito na
-     tela, e a regra que organiza tudo é uma só:
-
-       NUNCA REDESENHAR O QUE O USUÁRIO ESTÁ USANDO.
-
-     Dentro de um chamado, as mensagens novas são COLADAS no fim da conversa.
-     Redesenhar a tela inteira apagaria o texto meio digitado na caixa de
-     resposta e o arquivo já escolhido no anexo — e faria isso no meio de uma
-     frase, a cada 10 segundos.
+     AO VIVO — reage ao batimento sem redesenhar o que está em uso
+     (dentro de um chamado, só cola as mensagens novas)
      ========================================================= */
 
   // Cola no fim da conversa as mensagens que ainda não estão na tela.
@@ -2672,16 +2483,14 @@
     if (!alvo) return;
 
     FG.suporteChamado(alvo.id).then(function (c) {
-      // A resposta demorou e o usuário já saiu (ou trocou de chamado):
-      // despejar as mensagens agora as colaria na tela errada.
+      // Já saiu do chamado: descarta.
       if (!c || !supAberto || supAberto.id !== alvo.id) return;
 
       var novas = (c.conversa || []).filter(function (m) {
         return Number(m.id) > alvo.ultimoId;
       });
 
-      // O status muda sem mensagem nova? O rótulo do topo é trocado no lugar,
-      // sem tocar no resto da tela.
+      // Status mudou: troca só o rótulo.
       if (c.status !== supAberto.status) {
         var pill = view.querySelector('.sup-det-head .sup-st');
         if (pill) pill.outerHTML = supPill(c.status);
@@ -2693,9 +2502,7 @@
       var fio = view.querySelector('.sup-conversa');
       if (!fio) return;
 
-      // innerHTML num elemento solto e depois append: o innerHTML += no
-      // próprio fio recriaria os balões antigos, e os anexos já resolvidos
-      // (URLs de blob) morreriam junto.
+      // Monta fora e anexa: innerHTML += recriaria os balões e perderia os blobs.
       var caixa = document.createElement('div');
       caixa.innerHTML = novas.map(supMensagemHtml).join('');
       var ultimo = null;
@@ -2704,13 +2511,10 @@
       FG.carregarArquivos(fio);       // anexos das mensagens recém-coladas
       supAberto.ultimoId = supMaiorId(c.conversa);
 
-      // Buscar o chamado marcou as mensagens como lidas no servidor: a carta
-      // ✉️ e o badge 🎧 precisam saber, senão ficariam acesos apontando para
-      // uma conversa que o usuário está lendo neste instante.
+      // Marcou como lidas: atualiza carta e badge.
       supMudou();
 
-      // Só avisa se veio alguém do outro lado. Mensagem do próprio revendedor
-      // (enviada de outra aba) e linha de sistema não merecem interromper.
+      // Só avisa se a mensagem veio do suporte.
       if (novas.some(function (m) { return m.autor === 'admin'; })) {
         FG.toast('O suporte respondeu no chamado ' + c.numero + '.');
       }
@@ -2723,14 +2527,11 @@
   window.addEventListener('fg-pulso', function (e) {
     var mudou = e.detail.mudou;
 
-    // A carta ✉️ do topo. É o pedido central: o número acende sozinho, sem
-    // recarregar a página. `refreshPill` já existia — só nunca era chamado
-    // por iniciativa do servidor.
+    // Carta ✉️ do topo.
     if (mudou.notificacoes) {
       FG.recarregarNotifs().then(function () {
         refreshPill();
-        // Só quando SOBE. Piscar porque o número caiu (o usuário leu a
-        // notificação em outra aba) seria alarme ao contrário.
+        // Pisca só quando sobe.
         if (mudou.chegouNotificacao) piscarPill();
         // A caixa de entrada aberta na tela também fica velha.
         if (location.hash === '#notificacoes') renderNotifs();
@@ -2746,11 +2547,9 @@
     }
   });
 
-  // O pop-up avisa quando abriu um chamado novo: a lista atrás dele se atualiza
-  // sozinha, em vez de mostrar um estado que já não é verdade.
+  // Chamado novo aberto pelo pop-up: atualiza a lista.
   window.addEventListener('fg-suporte-novo', function () {
-    // Só quando a LISTA está na tela. Estando dentro de um chamado
-    // (#suporte/12), redesenhar jogaria a conversa fora sem o usuário pedir.
+    // Só na lista (dentro de um chamado perderia a conversa).
     if (location.hash === '#suporte') renderSuporte();
   });
 
@@ -2810,10 +2609,9 @@
       location.hash = '#home';
       return;
     }
-    // Sair de um chamado (para onde for) apaga o alvo do batimento. Quem
-    // continuar num chamado o preenche de novo ao terminar de desenhar.
+    // Sair do chamado limpa o alvo do batimento.
     supAberto = null;
-    telaSeq++;   // respostas pendentes da tela anterior não desenham mais
+    telaSeq++;   // respostas da tela anterior não desenham mais
 
     switch (rota) {
       case 'home': renderHome(); break;
@@ -2825,8 +2623,7 @@
       case 'estoque': renderEstoque(); break;
       case 'financeiro': renderFinanceiro(); break;
       case 'conta': renderConta(); break;
-      // #suporte = lista; #suporte/12 = o chamado 12. Sem trava de área: pedir
-      // ajuda é o único caminho de quem PERDEU o acesso a alguma coisa.
+      // #suporte = lista; #suporte/12 = chamado. Sem trava de área.
       case 'suporte':
         if (partes[1]) renderSuporteChamado(partes[1]); else renderSuporte();
         break;
@@ -2841,5 +2638,5 @@
   window.addEventListener('hashchange', route);
   route();
 
-  }); // fim FG.pronto.then — tela montada só após o cache chegar
+  }); // fim FG.pronto.then
 })();

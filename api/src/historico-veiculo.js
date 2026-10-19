@@ -1,17 +1,5 @@
-// ============================================================
-// Histórico do veículo — registro dos eventos da vida do chassi
-// ------------------------------------------------------------
-// Um lugar só para gravar o que acontece com uma moto: cadastro, atribuição e
-// transferências entre concessionárias, venda, garantia, reivindicações,
-// recalls e anotações. Quem chama não precisa saber a forma da tabela.
-//
-// REGRA CENTRAL: registrar o histórico NUNCA pode derrubar a ação que ele está
-// registrando. Se a gravação falhar, o erro vai para o log e a venda (ou a
-// transferência, ou a aprovação da garantia) segue seu curso normalmente — o
-// contrário seria deixar uma funcionalidade de auditoria decidir se o negócio
-// acontece. Por isso `registrarEvento` engole o próprio erro e devolve
-// true/false, em vez de propagar.
-// ============================================================
+// Histórico do veículo: cadastro, transferências, venda, garantia, recalls e notas.
+// Regra: registrar NUNCA derruba a ação registrada (erro vai para o log).
 import { query } from './db.js';
 import { FABRICA, sqlNaFabrica } from './fabrica.js';
 
@@ -21,28 +9,10 @@ export const TIPOS_HISTORICO = [
   'reivindicacao', 'recall', 'revisao', 'nota'
 ];
 
-// Tipos que uma PESSOA pode lançar pelo painel. Os demais são gravados pelo
-// próprio sistema quando a ação correspondente acontece — deixar alguém
-// escrever "venda registrada" à mão tornaria o histórico não confiável.
+// Tipos que uma pessoa pode lançar à mão pelo painel.
 export const TIPOS_MANUAIS = ['recall', 'revisao', 'nota'];
 
-/**
- * Grava um evento no histórico de um chassi.
- *
- * @param {object} ev
- * @param {number} ev.veiculoId   obrigatório
- * @param {string} ev.tipo        um de TIPOS_HISTORICO
- * @param {string} ev.titulo      linha principal ("Venda registrada")
- * @param {string} [ev.detalhe]   complemento livre
- * @param {object} [ev.user]      req.user — de onde saem id e e-mail
- * @param {string} [ev.usuarioNome] nome já resolvido (senão usa o e-mail)
- * @param {number} [ev.empresaId]   dono do chassi no momento; null = Fábrica
- * @param {string} [ev.empresaNome]
- * @param {string} [ev.referencia] nº da reivindicação/pedido/campanha
- * @param {boolean} [ev.manual]   lançado à mão pelo painel
- * @param {Date|string} [ev.dataEvento] quando aconteceu (padrão: agora)
- * @returns {Promise<boolean>} true se gravou
- */
+// Grava um evento no histórico do chassi. Devolve true se gravou.
 export async function registrarEvento(ev) {
   try {
     if (!ev?.veiculoId || !TIPOS_HISTORICO.includes(ev.tipo) || !ev.titulo) {
@@ -77,16 +47,13 @@ export async function registrarEvento(ev) {
   }
 }
 
-// Resolve o VeiculoId a partir do NIV. Devolve null quando não existe —
-// usado pelos pontos que só têm o número do chassi em mãos.
+// VeiculoId a partir do NIV (null se não existe).
 export async function veiculoIdPorNiv(niv) {
   const rows = await query('SELECT VeiculoId FROM dbo.Veiculo WHERE Niv = @niv', { niv });
   return rows[0]?.VeiculoId ?? null;
 }
 
-// Linha do banco → JSON do front. Evento gravado sem concessionária, ou com a
-// empresa de um administrador, aconteceu na Fábrica — e é assim que aparece,
-// mesmo nos registros antigos que guardaram o nome da empresa do admin.
+// Linha do banco → JSON do front. Sem empresa ou empresa de admin = Fábrica.
 export function toEvento(r) {
   const fabrica = !!r.NaFabrica;
   return {
@@ -103,14 +70,8 @@ export function toEvento(r) {
   };
 }
 
-// Histórico de um chassi, do mais recente para o mais antigo. Empate na data
-// (backfill gravou vários eventos com o mesmo carimbo) cai no id, que preserva
-// a ordem de inserção.
-//
-// `user` (quem está lendo): o evento de VENDA guarda nome e CPF do comprador
-// no detalhe. Para outra concessionária — a moto foi transferida depois da
-// venda — o detalhe sai vazio (achado de 30/09/2026). Admin e chamadas
-// internas (sem `user`) veem tudo.
+// Histórico do chassi, do mais recente ao mais antigo.
+// Para outra concessionária, o detalhe da venda (dados do comprador) sai vazio.
 export async function historicoDoVeiculo(veiculoId, user) {
   const rows = await query(
     `SELECT h.HistoricoId, h.Tipo, h.Titulo, h.Detalhe, h.UsuarioNome, h.EmpresaNome,

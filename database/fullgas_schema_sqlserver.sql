@@ -1,26 +1,12 @@
-/* ============================================================================
-   FULLGAS B2B — Schema relacional (Microsoft SQL Server / T-SQL)
-   ----------------------------------------------------------------------------
-   Conteúdo: criação do banco, tabelas, chaves primárias/estrangeiras,
-             constraints de integridade e índices. SEM dados.
+-- FULLGAS B2B - Schema (SQL Server): banco, tabelas, chaves, constraints e indices. Sem dados.
+-- Mantenha os GO entre os lotes.
 
-   Abra no SQL Server Management Studio (SSMS) ou Azure Data Studio e execute.
-   Os blocos GO separam lotes — mantenha-os.
-   ============================================================================ */
-
-/* OBRIGATÓRIO — não remova.
-   O índice UQ_Empresa_Cnpj é FILTRADO (tem WHERE), e o SQL Server recusa criar
-   índice filtrado com QUOTED_IDENTIFIER desligado. O SSMS liga essa opção
-   sozinho, então rodando por lá o script "funciona"; o sqlcmd entra com ela
-   DESLIGADA e o script quebra no meio — exatamente o que acontece ao provisionar
-   o servidor pela linha de comando. Ligar aqui deixa os dois caminhos iguais. */
+-- Obrigatorio: indice filtrado exige QUOTED_IDENTIFIER ON (o sqlcmd entra com OFF).
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO
 
-/* ----------------------------------------------------------------------------
-   0) Banco de dados
-   ---------------------------------------------------------------------------- */
+-- ---- 0) Banco de dados ----
 IF DB_ID(N'FullgasB2B') IS NULL
     CREATE DATABASE FullgasB2B;
 GO
@@ -50,9 +36,7 @@ IF OBJECT_ID(N'dbo.Usuario','U')          IS NOT NULL DROP TABLE dbo.Usuario;
 IF OBJECT_ID(N'dbo.Empresa','U')          IS NOT NULL DROP TABLE dbo.Empresa;
 GO
 
-/* ============================================================================
-   1) EMPRESAS (concessionárias) e USUÁRIOS
-   ============================================================================ */
+-- ---- 1) Empresas e usuarios ----
 
 /* Uma concessionária/revenda. Os usuários pertencem a uma empresa. */
 CREATE TABLE dbo.Empresa (
@@ -70,9 +54,7 @@ CREATE TABLE dbo.Empresa (
 );
 GO
 
-/* CNPJ único, mas permitindo vários NULL (empresas sem CNPJ cadastrado).
-   No SQL Server, UNIQUE comum trata múltiplos NULL como duplicados; por isso
-   usamos um índice único FILTRADO, que só exige unicidade quando há valor. */
+-- CNPJ unico, aceitando varios NULL (indice filtrado).
 CREATE UNIQUE INDEX UQ_Empresa_Cnpj ON dbo.Empresa (Cnpj) WHERE Cnpj IS NOT NULL;
 GO
 
@@ -103,7 +85,7 @@ CREATE TABLE dbo.Usuario (
     EmpresaId       INT             NOT NULL,
     Nome            NVARCHAR(120)   NOT NULL,
     Email           NVARCHAR(160)   NOT NULL,
-    SenhaHash       VARBINARY(256)  NULL,    -- guarde HASH (ex.: bcrypt/PBKDF2), nunca texto puro
+    SenhaHash       VARBINARY(256)  NULL,    -- hash bcrypt, nunca texto puro
     Papel           VARCHAR(10)     NOT NULL CONSTRAINT DF_Usuario_Papel  DEFAULT ('cliente'),
     Status          VARCHAR(12)     NOT NULL CONSTRAINT DF_Usuario_Status DEFAULT ('pendente'),
     UltimoAcessoEm  DATETIME2(0)    NULL,
@@ -118,9 +100,7 @@ CREATE TABLE dbo.Usuario (
 );
 GO
 
-/* ============================================================================
-   2) CATÁLOGO: categorias, produtos (SKUs)
-   ============================================================================ */
+-- ---- 2) Catalogo: categorias e produtos ----
 
 CREATE TABLE dbo.Categoria (
     CategoriaId     INT             IDENTITY(1,1) NOT NULL,
@@ -157,9 +137,7 @@ CREATE TABLE dbo.Produto (
 );
 GO
 
-/* ============================================================================
-   3) MOTOS: modelos e veículos cadastrados (com NIV/chassi)
-   ============================================================================ */
+-- ---- 3) Motos: modelos e veiculos (NIV) ----
 
 /* Modelo (família + ano), ex.: FG 125 2025. */
 CREATE TABLE dbo.ModeloMoto (
@@ -200,12 +178,7 @@ CREATE TABLE dbo.Veiculo (
 );
 GO
 
-/* ============================================================================
-   4) PARTS FINDER: seções por modelo e peças de cada seção
-   ----------------------------------------------------------------------------
-   Cada modelo tem seções no lado 'chassi' ou 'engine'. Cada seção lista
-   peças (produtos) com posição no diagrama, quantidade e tempo de mão de obra.
-   ============================================================================ */
+-- ---- 4) Parts Finder: secoes por modelo ('chassi' ou 'engine') e pecas de cada secao ----
 
 CREATE TABLE dbo.SecaoModelo (
     SecaoId         INT             IDENTITY(1,1) NOT NULL,
@@ -213,7 +186,7 @@ CREATE TABLE dbo.SecaoModelo (
     Lado            VARCHAR(8)      NOT NULL,   -- 'chassi' | 'engine'
     Numero          VARCHAR(8)      NOT NULL,   -- '01', '02', ...
     Nome            NVARCHAR(120)   NOT NULL,
-    Destaque        VARCHAR(20)     NULL,       -- chave de destaque no diagrama (fork, frame, engine...)
+    Destaque        VARCHAR(20)     NULL,       -- destaque no diagrama (fork, frame, engine...)
     Ordem           INT             NOT NULL CONSTRAINT DF_SecaoModelo_Ordem DEFAULT (0),
     CONSTRAINT PK_SecaoModelo PRIMARY KEY (SecaoId),
     CONSTRAINT FK_SecaoModelo_Modelo FOREIGN KEY (ModeloId)
@@ -238,9 +211,7 @@ CREATE TABLE dbo.PecaSecao (
 );
 GO
 
-/* ============================================================================
-   5) PEDIDOS e itens
-   ============================================================================ */
+-- ---- 5) Pedidos e itens ----
 
 CREATE TABLE dbo.Pedido (
     PedidoId        INT             IDENTITY(1,1) NOT NULL,
@@ -283,9 +254,7 @@ CREATE TABLE dbo.PedidoItem (
 );
 GO
 
-/* ============================================================================
-   6) FATURAS e ENTREGAS
-   ============================================================================ */
+-- ---- 6) Faturas e entregas ----
 
 CREATE TABLE dbo.Fatura (
     FaturaId        INT             IDENTITY(1,1) NOT NULL,
@@ -351,9 +320,7 @@ CREATE TABLE dbo.PedidoFatura (
 );
 GO
 
-/* ============================================================================
-   7) GARANTIA / REIVINDICAÇÕES
-   ============================================================================ */
+-- ---- 7) Garantia / reivindicacoes ----
 
 CREATE TABLE dbo.Reivindicacao (
     ReivindicacaoId INT             IDENTITY(1,1) NOT NULL,
@@ -379,9 +346,7 @@ CREATE TABLE dbo.Reivindicacao (
 );
 GO
 
-/* ============================================================================
-   8) NOTIFICAÇÕES e LOG DE BUSCAS (alimenta o dashboard)
-   ============================================================================ */
+-- ---- 8) Notificacoes e log de buscas ----
 
 CREATE TABLE dbo.Notificacao (
     NotificacaoId   INT             IDENTITY(1,1) NOT NULL,
@@ -412,9 +377,7 @@ CREATE TABLE dbo.LogBusca (
 );
 GO
 
-/* ============================================================================
-   9) ÍNDICES de apoio (consultas mais comuns)
-   ============================================================================ */
+-- ---- 9) Indices de apoio ----
 CREATE INDEX IX_Usuario_Empresa        ON dbo.Usuario (EmpresaId);
 CREATE INDEX IX_Usuario_Status         ON dbo.Usuario (Status);
 CREATE INDEX IX_Produto_Categoria      ON dbo.Produto (CategoriaId);

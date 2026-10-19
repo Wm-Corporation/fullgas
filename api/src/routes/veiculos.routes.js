@@ -1,6 +1,4 @@
-// ============================================================
-// Rotas de veículos (motos no estoque, identificadas pelo NIV)
-// ============================================================
+// ---- Veículos (motos identificadas pelo NIV) ----
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireAdmin, requireArea, requireAreaAny } from '../auth.js';
@@ -14,13 +12,7 @@ import { GARANTIA_DIAS, fimDaGarantia } from '../utils/garantia.js';
 
 const router = Router();
 
-// Ano da UNIDADE (não do modelo — o mesmo modelo é montado em anos
-// diferentes). Teto dinâmico porque a indústria já vende o ano-modelo
-// seguinte ANTES de virar o ano civil — em setembro de 2026, por exemplo, o
-// ano-modelo 2028 já circula. +2 cobre esse adiantamento; +1 (usado até
-// 22/09/2026) ficou curto demais e recusava um ano que já existia no mercado.
-// O banco só barra a digitação absurda (CK, faixa larga de 1980 a 2100); o
-// limite de verdade é este, que sabe a data de hoje.
+// Ano da unidade: até o ano atual + 2 (o ano-modelo sai antes do ano civil).
 function validarAno(ano) {
   const anoMax = new Date().getFullYear() + 2;
   if (!Number.isInteger(ano) || ano < 1980 || ano > anoMax) {
@@ -29,24 +21,9 @@ function validarAno(ano) {
   return null;
 }
 
-// Mapeia uma linha do banco para o formato que o front (store.js) já espera:
-// { niv, modeloId (código do modelo), ano, status, entrada, fabrica, venda?, garantia? }.
-// Desde 06/10/2026 vêm também a foto do modelo (foto/miniatura), os dados da
-// concessionária (concessionaria) e o período da garantia (garantiaFim) — é o
-// que a ficha do veículo mostra no portal, nas ações e nas reivindicações.
-//
-// `entrada` (EntradaEstoque) é o dia em que o chassi entrou NO ESTOQUE ATUAL —
-// a concessionária de hoje, ou a Fábrica. Toda atribuição/transferência a
-// reinicia (21/09/2026): antes ela era gravada uma única vez, no cadastro, e
-// uma moto transferida ontem aparecia no estoque novo "desde" o dia em que a
-// fábrica a cadastrou, meses antes. A entrada no SISTEMA não se perdeu: está
-// em Veiculo.CriadoEm e no evento 'cadastro' do histórico, que é justamente
-// onde se lê a vida inteira do chassi.
-// Cor e nº do motor saíram da tela (16/09/2026); as colunas seguem no banco.
-//
-// Dados do COMPRADOR só para quem registrou a venda (VendaEmpresaId) e para o
-// admin: uma moto vendida e depois transferida não expõe o consumidor à nova
-// concessionária (achado de 30/09/2026). `user` ausente = chamada interna.
+// Linha do banco → formato do front.
+// `entrada` = quando entrou no estoque ATUAL (reinicia a cada transferência).
+// Dados do comprador só para quem registrou a venda e para o admin.
 function podeVerComprador(r, user) {
   return !user || user.papel === 'admin' || (r.VendaEmpresaId != null && r.VendaEmpresaId === user.empresaId);
 }
@@ -58,9 +35,7 @@ function urlAbs(req, rel) {
   return req.protocol + '://' + req.get('host') + rel;
 }
 
-// Endereço principal da concessionária em partes curtas, como numa etiqueta:
-// "Rua X, 270 - Sala 2 — Centro", "Taubaté/SP" e o CEP à parte (a ficha
-// completa mostra o CEP; o resumo dos pop-ups, só a cidade).
+// Endereço da concessionária em partes curtas (rua, cidade/UF, CEP).
 function enderecoConcessionaria(r) {
   const rua = [r.EndLogradouro, r.EndNumero].filter(Boolean).join(', ') +
     (r.EndComplemento ? ' - ' + r.EndComplemento : '');
@@ -77,25 +52,19 @@ function toVeiculo(r, req) {
   const v = {
     niv: r.Niv,
     modeloId: r.ModeloCodigo,
-    // Nome do modelo junto do chassi: a lista /veiculos/modelos só traz os
-    // modelos ATIVOS, e um chassi de modelo desativado no Localizador ficava
-    // na tela só com o código.
+    // Nome do modelo junto (modelo desativado não vem em /veiculos/modelos).
     modelo: r.ModeloEtiqueta || [r.ModeloNome, r.ModeloAno].filter(Boolean).join(' ') || r.ModeloCodigo,
     ano: r.Ano,
     status: r.Status,
     entrada: r.EntradaEstoque,
-    // Na Fábrica não há concessionária: empresa/empresaId vêm null mesmo que o
-    // chassi aponte para a empresa de um administrador (ver fabrica.js).
+    // Na Fábrica não há concessionária (ver fabrica.js).
     fabrica: naFabrica,
     empresaId: naFabrica ? null : r.EmpresaId,
     empresa: naFabrica ? null : r.EmpresaNome,
-    // A foto é do MODELO (ModeloMoto.ImagemUrl, a mesma do Localizador de
-    // Peças): todo chassi daquele modelo mostra a mesma moto. A miniatura
-    // (≤320 px, WebP) é a que as listas usam; null enquanto não foi gerada.
+    // Foto do MODELO (a mesma do Localizador); miniatura null enquanto não gerada.
     foto: urlAbs(req, r.ModeloImagem),
     miniatura: urlAbs(req, miniaturaDe(r.ModeloImagem)),
-    // Quem responde pelo chassi hoje, como aparece na ficha. Só chega aqui
-    // quem já pode ver o chassi — a própria concessionária ou o admin.
+    // Concessionária responsável hoje.
     concessionaria: naFabrica || !r.EmpresaId ? null : {
       nome: r.EmpresaNome,
       fantasia: r.EmpresaFantasia || '',
@@ -153,17 +122,13 @@ const ERRO_DESTINO_FABRICA =
   'Esta empresa é a Fábrica (conta de administrador) e não recebe chassi como concessionária. ' +
   'Para deixar o chassi na Fábrica, não escolha concessionária.';
 
-// Cliente vê SOMENTE veículos atribuídos à própria empresa; admin vê todos.
-// Todo chassi é inserido/atribuído por um administrador — enquanto um chassi
-// não tiver EmpresaId, ele não aparece para nenhum cliente. Devolve o trecho
-// WHERE e os parâmetros conforme o papel.
+// Cliente vê só os veículos da empresa; admin vê todos. Devolve { where, params }.
 function escopoEmpresa(user) {
   if (user.papel === 'admin') return { where: '', params: {} };
   return { where: ' v.EmpresaId = @empresaId', params: { empresaId: user.empresaId } };
 }
 
-// GET /api/veiculos/modelos — lista de modelos (alimenta FG.model no front).
-// Declarado ANTES de /:niv para não ser capturado como se "modelos" fosse um NIV.
+// GET /api/veiculos/modelos — antes de /:niv, para "modelos" não virar um NIV.
 router.get('/veiculos/modelos', requireAuth, async (req, res, next) => {
   try {
     const rows = await query(
@@ -178,9 +143,7 @@ router.get('/veiculos/modelos', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// GET /api/empresas — lista de concessionárias ativas (SÓ ADMIN). Alimenta o
-// autocomplete de atribuição/transferência de chassi e o destino das
-// notificações. A Fábrica não é concessionária e fica de fora.
+// GET /api/empresas (admin) — concessionárias ativas, sem a Fábrica.
 router.get('/empresas', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
     const rows = await query(
@@ -194,10 +157,7 @@ router.get('/empresas', requireAuth, requireAdmin, async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// POST /api/veiculos (SÓ ADMIN) — cadastra um chassi novo.
-//   { niv, modeloId (código do modelo), ano, empresaId? }
-// empresaId opcional: já nasce atribuído àquela concessionária; sem ele o
-// chassi nasce na Fábrica (nenhum cliente vê até o admin atribuir).
+// POST /api/veiculos (admin) — { niv, modeloId, ano, empresaId? }. Sem empresa, nasce na Fábrica.
 router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const niv = String(req.body?.niv || '').trim().toUpperCase();
@@ -236,17 +196,13 @@ router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
     const rows = await query(SELECT_VEIC + ' WHERE v.Niv = @niv', { niv });
     const veic = rows[0];
 
-    // O cadastro é sempre feito na Fábrica (empresaId null = Fábrica no
-    // histórico); a concessionária, quando já vem escolhida, entra no evento
-    // de atribuição logo abaixo. O detalhe guarda o nome do modelo, não o
-    // código: o código muda quando o modelo é renomeado.
+    // Cadastro sempre na Fábrica; detalhe com o nome do modelo (o código muda ao renomear).
     await registrarEvento({
       veiculoId: veic.VeiculoId, tipo: 'cadastro', titulo: 'Chassi cadastrado na Fábrica',
       detalhe: (mod.Etiqueta || (mod.Nome + ' ' + mod.Ano)) + ' · Ano ' + ano,
       user: req.user, empresaId: null
     });
-    // Nascer atribuído é um segundo fato: separá-lo do cadastro deixa claro,
-    // meses depois, desde quando aquela concessionária responde pelo chassi.
+    // Já atribuído: evento de atribuição separado.
     if (veic.EmpresaId) {
       await registrarEvento({
         veiculoId: veic.VeiculoId, tipo: 'atribuicao',
@@ -259,15 +215,12 @@ router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// GET /api/veiculos — lista da empresa do usuário; admin vê todos.
-// 'estoque' OU 'acoes': a mesma lista alimenta a tela de estoque do
-// revendedor e a busca de chassi da tela de ações.
+// GET /api/veiculos — da empresa (admin: todos). Áreas 'estoque' ou 'acoes'.
 router.get('/veiculos', requireAuth, requireAreaAny(['estoque', 'acoes']), async (req, res, next) => {
   try {
     const esc = escopoEmpresa(req.user);
     const rows = await query(
-      // Mais recentes primeiro: quem chegou por último ao estoque de quem está
-      // olhando — não quem foi cadastrado por último lá na Fábrica.
+      // Último a chegar no estoque primeiro.
       SELECT_VEIC + (esc.where ? ' WHERE' + esc.where : '') + ' ORDER BY v.EntradaEstoque DESC',
       esc.params
     );
@@ -288,8 +241,7 @@ router.get('/veiculos/:niv', requireAuth, requireAreaAny(['estoque', 'acoes']), 
   } catch (e) { next(e); }
 });
 
-// Carrega o veículo pelo NIV aplicando o escopo de empresa. Devolve a linha
-// crua (com VeiculoId/Status) ou null se não existe / fora do escopo.
+// Veículo pelo NIV dentro do escopo, ou null.
 async function acharVeiculo(niv, user) {
   const esc = escopoEmpresa(user);
   const rows = await query(
@@ -299,11 +251,7 @@ async function acharVeiculo(niv, user) {
   return rows[0] || null;
 }
 
-// POST /api/veiculos/:niv/venda  { cliente } — registra a venda.
-// Muda Status para 'Vendido', grava data/cliente e ativa a garantia se ainda
-// não estiver ativa. Só vale para veículo 'Disponível'.
-// Registrar a venda grava PII do consumidor final (nome, CPF, e-mail,
-// telefone, endereço) — é ação, não consulta, e exige a área 'acoes'.
+// POST /api/veiculos/:niv/venda  { cliente } — registra a venda e ativa a garantia. Só 'Disponível'.
 router.post('/veiculos/:niv/venda', requireAuth, requireArea('acoes'), async (req, res, next) => {
   try {
     const { cliente, cpf, email, telefone, endereco } = req.body;
@@ -311,8 +259,7 @@ router.post('/veiculos/:niv/venda', requireAuth, requireArea('acoes'), async (re
     if (!nome) return res.status(400).json({ erro: 'Informe o nome do cliente.' });
     if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
       return res.status(400).json({ erro: 'E-mail do cliente inválido.' });
-    // CPF: aceita com ou sem máscara, mas precisa ser um CPF válido (dígitos
-    // verificadores) — a venda não pode ser corrigida depois.
+    // CPF precisa ser válido (a venda não é corrigida depois).
     if (cpf && !cpfValido(cpf))
       return res.status(400).json({ erro: 'CPF do cliente inválido — confira os dígitos.' });
 
@@ -352,9 +299,7 @@ router.post('/veiculos/:niv/venda', requireAuth, requireArea('acoes'), async (re
       detalhe: 'Cliente: ' + nome + (cpf ? ' · CPF ' + String(cpf).trim() : ''),
       user: req.user, empresaId: atualizado.EmpresaId, empresaNome: atualizado.EmpresaNome
     });
-    // A venda ativa a garantia quando ela ainda não estava ativa (COALESCE no
-    // UPDATE acima). Só registramos o evento nesse caso — senão o histórico
-    // mostraria a garantia "ativando" de novo a cada venda.
+    // Evento de garantia só se ela ativou agora.
     if (!veic.GarantiaAtivaEm && atualizado.GarantiaAtivaEm) {
       await registrarEvento({
         veiculoId: veic.VeiculoId, tipo: 'garantia',
@@ -367,12 +312,8 @@ router.post('/veiculos/:niv/venda', requireAuth, requireArea('acoes'), async (re
   } catch (e) { next(e); }
 });
 
-// PUT /api/veiculos/:niv/transferir (SÓ ADMIN) — transfere o chassi para
-// outra concessionária. Quem recebe passa a ter o chassi "desde hoje":
-// EntradaEstoque é reiniciada (ver o comentário de toVeiculo). Aceita { empresaId } (vindo do autocomplete do front)
-// ou { empresa } com o NOME (razão social ou fantasia; case-insensitive pela
-// collation). Nome ambíguo ou inexistente devolve erro com sugestões.
-// { fabrica: true } devolve o chassi à Fábrica (tira a concessionária).
+// PUT /api/veiculos/:niv/transferir (admin) — { empresaId } | { empresa: nome } | { fabrica: true }.
+// Reinicia a EntradaEstoque. Nome ambíguo devolve sugestões.
 router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const paraFabrica = req.body?.fabrica === true;
@@ -403,8 +344,7 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
       return res.json(toVeiculo(rows[0], req));
     }
 
-    // A empresa da Fábrica entra na busca só para o erro sair claro ("isso é a
-    // Fábrica"), em vez de um "não encontrada" que confundiria.
+    // A Fábrica entra na busca só para dar um erro claro.
     const colunas = `e.EmpresaId, e.RazaoSocial, ${sqlNaFabrica('e.EmpresaId')} AS EhFabrica`;
     const emp = await (empresaId
       ? query(`SELECT ${colunas} FROM dbo.Empresa e WHERE e.Ativo = 1 AND e.EmpresaId = @eid`, { eid: empresaId })
@@ -440,9 +380,7 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
       { eid: emp[0].EmpresaId, id: veic.VeiculoId }
     );
 
-    // Um chassi que sai da Fábrica está sendo ATRIBUÍDO; um que já estava numa
-    // concessionária está sendo TRANSFERIDO. A distinção importa na leitura do
-    // histórico.
+    // Saindo da Fábrica = atribuição; entre concessionárias = transferência.
     const primeiraVez = !!veic.NaFabrica;
     await registrarEvento({
       veiculoId: veic.VeiculoId,
@@ -459,15 +397,7 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
   } catch (e) { next(e); }
 });
 
-// PUT /api/veiculos/:niv/ano (SÓ ADMIN) — corrige o ano de um chassi já
-// cadastrado. { ano }
-//
-// O NIV é imutável (é a identidade da moto), mas o ano é só um dado digitado
-// no cadastro — e digitação errada acontece. Diferente do NIV, corrigi-lo não
-// tem por que exigir cadastrar um chassi novo. A correção fica registrada no
-// histórico do veículo (tipo 'nota', a mesma categoria de uma anotação
-// administrativa) para quem olhar o chassi depois entender de onde veio a
-// mudança — sem isso, o valor trocaria "sozinho" aos olhos de quem consulta.
+// PUT /api/veiculos/:niv/ano (admin) — { ano }. Corrige o ano e registra no histórico.
 router.put('/veiculos/:niv/ano', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const ano = Number(req.body?.ano);
@@ -494,22 +424,11 @@ router.put('/veiculos/:niv/ano', requireAuth, requireAdmin, async (req, res, nex
   } catch (e) { next(e); }
 });
 
-// (Não existe mais POST /api/veiculos/:niv/garantia — decisão de 30/09/2026.
-// A garantia da moto começa no REGISTRO DA VENDA, acima. Ativá-la avulsa, com a
-// moto ainda no pátio, fazia o prazo de 90 dias do comprador correr antes de
-// ele receber a moto.)
+// (A garantia começa no registro da venda; não há ativação avulsa.)
 
-/* ============================================================
-   HISTÓRICO DO VEÍCULO
-   ------------------------------------------------------------
-   A linha do tempo do chassi. A maior parte das entradas nasce sozinha, dos
-   pontos acima e das reivindicações; o POST existe para o que o sistema não
-   tem como saber por conta própria — recall, revisão feita na oficina, uma
-   observação sobre aquele chassi.
-   ============================================================ */
+// ---- Histórico do veículo ----
 
-// GET /api/veiculos/:niv/historico — respeita o mesmo escopo do veículo:
-// o cliente só lê o histórico de um chassi que é dele.
+// GET /api/veiculos/:niv/historico — mesmo escopo do veículo.
 router.get('/veiculos/:niv/historico', requireAuth, requireAreaAny(['estoque', 'acoes']), async (req, res, next) => {
   try {
     const veic = await acharVeiculo(req.params.niv, req.user);
@@ -518,12 +437,7 @@ router.get('/veiculos/:niv/historico', requireAuth, requireAreaAny(['estoque', '
   } catch (e) { next(e); }
 });
 
-// POST /api/veiculos/:niv/historico (SÓ ADMIN) — lança um evento à mão.
-//   { tipo: 'recall' | 'revisao' | 'nota', titulo, detalhe?, referencia?, data? }
-//
-// Só administrador: o histórico é a memória oficial do chassi e vale como
-// prova em garantia. Deixar cada concessionária escrever nele abriria espaço
-// para versões conflitantes do que aconteceu com a moto.
+// POST /api/veiculos/:niv/historico (admin) — { tipo: 'recall' | 'revisao' | 'nota', titulo, detalhe?, referencia?, data? }
 router.post('/veiculos/:niv/historico', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const tipo = String(req.body?.tipo || '').trim();
@@ -535,8 +449,7 @@ router.post('/veiculos/:niv/historico', requireAuth, requireAdmin, async (req, r
       return res.status(400).json({ erro: 'Tipo inválido — use ' + TIPOS_MANUAIS.join(', ') + '.' });
     if (!titulo) return res.status(400).json({ erro: 'Informe o título do registro.' });
 
-    // Data opcional (um recall pode ser lançado hoje para uma campanha de
-    // semana passada). Recusamos data futura: histórico é do que já aconteceu.
+    // Data opcional, nunca no futuro.
     let dataEvento = null;
     if (req.body?.data) {
       dataEvento = new Date(req.body.data);
@@ -560,10 +473,7 @@ router.post('/veiculos/:niv/historico', requireAuth, requireAdmin, async (req, r
   } catch (e) { next(e); }
 });
 
-// DELETE /api/veiculos/:niv/historico/:id (SÓ ADMIN) — apaga um lançamento
-// MANUAL (corrigir um recall digitado errado). Evento automático não sai: ele
-// é o registro do que de fato aconteceu, e poder apagá-lo esvaziaria o
-// histórico de sentido.
+// DELETE /api/veiculos/:niv/historico/:id (admin) — só lançamento manual.
 router.delete('/veiculos/:niv/historico/:id', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const veic = await acharVeiculo(req.params.niv, req.user);

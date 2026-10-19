@@ -1,13 +1,4 @@
-/* ============================================================================
-   MIGRAÇÃO 009 — Peças defeituosas da reivindicação (lista com quantidade)
-   ----------------------------------------------------------------------------
-   Antes a reivindicação tinha UMA peça (coluna Reivindicacao.NumeroPeca). Agora
-   o cliente pode informar VÁRIAS peças, cada uma com sua quantidade. Esta tabela
-   guarda essa lista (1-N). A coluna NumeroPeca permanece (passa a refletir a 1ª
-   peça, por compatibilidade), mas a fonte de verdade é esta tabela.
-
-   Idempotente: cria a tabela só se ainda não existir. Pode rodar 2x.
-   ============================================================================ */
+-- 009 - Lista de pecas da reivindicacao (com quantidade). NumeroPeca fica so por compatibilidade. Idempotente.
 
 USE FullgasB2B;
 GO

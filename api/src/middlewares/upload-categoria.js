@@ -1,8 +1,4 @@
-// ============================================================
-// Middleware de upload da foto da categoria (miniatura da grade da loja).
-// Espelha o upload-produto.js: isola a configuração do multer e a validação
-// do arquivo; a rota só o encadeia antes do controller.
-// ============================================================
+// Upload da foto da categoria.
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -13,8 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const CAT_DIR = path.join(__dirname, '..', '..', 'uploads', 'categorias');
 fs.mkdirSync(CAT_DIR, { recursive: true });
 
-// URL pública (relativa) onde as fotos ficam acessíveis. Usada também pelo
-// service para montar o caminho gravado no banco.
+// URL pública (relativa) das fotos.
 export const CAT_URL_BASE = '/uploads/categorias/';
 
 const uploadCat = multer({

@@ -1,13 +1,7 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 030 - Recuperacao de senha ("esqueci minha senha").
--- Guarda apenas o HASH SHA-256 do token enviado por e-mail: quem tiver acesso
--- ao banco nao consegue reconstruir o link. O token cru so existe no e-mail.
--- ON DELETE CASCADE: excluir uma conta interna nao pode esbarrar nesta FK.
--- Idempotente.
--- ============================================================
+-- 030 - Recuperacao de senha: guarda so o hash SHA-256 do token. Idempotente.
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO

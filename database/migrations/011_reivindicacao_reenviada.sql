@@ -1,13 +1,4 @@
-/* ============================================================================
-   MIGRAÇÃO 011 — Sinal de "reenviada pelo revendedor"
-   ----------------------------------------------------------------------------
-   Fecha o ciclo devolver ↔ reenviar: quando o revendedor completa e REENVIA uma
-   reivindicação que havia sido devolvida, marcamos Reenviada=1 para o admin ver
-   um aviso de que ela foi atualizada. O admin, ao agir (devolver de novo, mudar
-   status), zera o sinal. O ciclo pode repetir quantas vezes for preciso.
-
-   Idempotente: pode rodar 2x.
-   ============================================================================ */
+-- 011 - Reenviada = 1 quando o revendedor reenvia uma reivindicacao devolvida. Idempotente.
 
 USE FullgasB2B;
 GO

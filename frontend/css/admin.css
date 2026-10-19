@@ -12,15 +12,11 @@
   --adm-ink: #303030;
 }
 
-/* Alturas de tela divididas pelo zoom do body (--zoom-ui, em styles.css): lá
-   dentro, 100vh mede 115% da janela. Com o 100vh cru, a barra lateral ficava
-   mais alta que a tela e, por ser sticky, os últimos itens (Reivindicações,
-   Suporte, Notificações, Portal) nunca apareciam num notebook. */
+/* Alturas divididas pelo zoom do body (--zoom-ui), senão a barra lateral passa da tela. */
 body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; min-height: calc(100vh / var(--zoom-ui)); }
 
 /* ---------- sidebar ---------- */
-/* overflow-y: se a janela for baixa demais para todos os itens, a barra rola
-   por conta própria em vez de esconder o fim da lista. */
+/* Janela baixa: a barra rola sozinha. */
 .adm-side {
   width: 92px; background: var(--adm-side); flex-shrink: 0; display: flex; flex-direction: column; align-items: stretch;
   position: sticky; top: 0; height: calc(100vh / var(--zoom-ui));
@@ -37,8 +33,7 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .adm-side a.item svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; }
 .adm-side a.item:hover { background: var(--adm-side-hover); color: #fff; }
 .adm-side a.item.on { background: var(--adm-side-hover); color: #fff; border-left-color: var(--adm-orange); }
-/* Item da barra com contador (chamados de suporte esperando resposta). O
-   número fica no canto do ícone, como o sino do topo. */
+/* Item da barra com contador no canto do ícone. */
 .adm-side a.item-badge { position: relative; }
 .adm-side a.item-badge .dot {
   position: absolute; top: 8px; right: 12px;
@@ -110,16 +105,14 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .pill-status.ps-voce { background: #fff3cd; color: #8a6d00; }
 .pill-status.ps-preentrega { background: #dbeafe; color: #1d4ed8; }
 
-/* Linha de contexto no topo das abas Clientes/Administradores: diz o que
-   aquela lista contém e leva à outra aba. */
+/* Linha de contexto no topo das abas Clientes/Administradores. */
 .adm-hint {
   font-size: 12.5px; color: #666; line-height: 1.55;
   margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px dashed var(--adm-line);
 }
 .adm-hint a { color: var(--adm-blue); }
 
-/* Erro do formulário de novo administrador (não usa toast: o aviso precisa
-   ficar visível ao lado dos campos enquanto a pessoa corrige). */
+/* Erro do formulário de novo administrador. */
 .na-erro {
   margin: 4px 0 0; padding: 9px 12px; font-size: 12.5px;
   background: #fee2e2; border-left: 3px solid #b91c1c; color: #7f1d1d;
@@ -154,8 +147,7 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .usr-acao.perigo .usr-acao-btn { color: #b91c1c; border-color: #e8b4b4; }
 .usr-acao.perigo .usr-acao-btn:hover { background: #fee2e2; }
 
-/* Lista de preço (migration 048): seletor dentro dos cartões "Aprovar
-   cadastro" e "Lista de preço", e a célula da tabela de clientes. */
+/* Lista de preço: seletor nos cartões e célula da tabela de clientes. */
 .lp-escolha { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; }
 .lp-sel { flex: 1 1 260px; max-width: 100%; padding: 6px 8px; font-size: 12.5px; border: 1px solid #bbb; border-radius: 3px; background: #fff; }
 .lp-escolha .link-action { font-size: 12px; }
@@ -221,8 +213,7 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 
 select.inline-status { border: 1px solid #ccc; padding: 5px 8px; font-size: 12px; background: #fff; }
 
-/* modal reaproveita styles.css (.modal-back/.modal, já centralizado e sempre
-   dentro da tela) — versão laranja */
+/* Modal do styles.css, em laranja. */
 body.admin .modal { border-top-color: var(--adm-orange); }
 body.admin .field input:focus, body.admin .field select:focus, body.admin .field textarea:focus { outline-color: var(--adm-orange); }
 
@@ -265,10 +256,7 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .fnd-hab { font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 
 /* editor visual de áreas clicáveis (hotspots) */
-/* Editor do diagrama com zoom (igual ao finder do cliente): barra de
-   ferramentas em cima, quadro (viewport) com rolagem embaixo. O JS define a
-   largura do canvas (natW*z); a imagem ocupa 100% do canvas e as caixas se
-   posicionam em % — tudo escala junto. */
+/* Editor do diagrama com zoom: o JS define a largura do canvas; caixas em %. */
 .ha-wrap {
   border: 1px solid #ccc; background: #fafafa; margin-bottom: 14px;
   display: flex; flex-direction: column;
@@ -298,8 +286,7 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .ha-canvas.ha-nonum .ha-box span { display: none; }
 
 .ha-list-head, .ha-row {
-  /* 5 colunas: grip (arrastar) · nº posição · tamanho · link number · remover
-     (a coluna "Texto (opcional)" foi removida — nunca é usada) */
+  /* grip · nº · tamanho · link number · remover */
   display: grid; grid-template-columns: 20px 22px 150px 1fr 30px;
   gap: 8px; align-items: center; padding: 4px 2px;
 }
@@ -318,15 +305,13 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .ha-row.arrastando { opacity: .5; }
 .ha-row.drop-alvo { box-shadow: inset 0 2px 0 var(--adm-orange); background: #fdf6dd; }
 
-/* Status de compra da peça na tabela do finder (mesmo princípio de cores da
-   loja: verde em estoque, amarelo pré-venda, vermelho indisponível). */
+/* Status da peça: verde em estoque, amarelo pré-venda, vermelho indisponível. */
 .fnde-status { font-size: 11px; font-weight: 700; white-space: nowrap; }
 .fnde-status.ok { color: #15803d; }
 .fnde-status.pre { color: #b45309; }
 .fnde-status.out { color: #b91c1c; }
 
-/* Diagrama à ESQUERDA + lista de áreas clicáveis à DIREITA, com rolagem
-   própria — espelho invertido do layout que o cliente vê no finder. */
+/* Diagrama à esquerda, áreas clicáveis à direita. */
 .ha-2col { display: grid; grid-template-columns: 1fr 400px; gap: 14px; align-items: start; }
 @media (max-width: 1100px) { .ha-2col { grid-template-columns: 1fr; } }
 .ha-side { border: 1px solid var(--adm-line); background: #fff; }
@@ -340,8 +325,7 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
   .fnd-2col { grid-template-columns: 1fr; }
 }
 
-/* ---- administração de usuários: linha expansível com o cadastro completo
-   (empresa + endereço bem divididos campo a campo) ---- */
+/* ---- Usuários: linha expansível com o cadastro completo ---- */
 .usr-exp { margin-left: 6px; white-space: nowrap; }
 .usr-det > td { background: #faf8f6; border-top: none; padding: 12px 16px 14px; }
 .usr-det-sec { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
@@ -357,15 +341,13 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .usr-del { color: #b91c1c; border-color: #d9a5a5; }
 .usr-del:hover { border-color: #b91c1c; background: #fdecec; }
 
-/* ---- aba Chassis: formulário de cadastro em grade (o selo da Fábrica é o
-   .selo-fabrica do styles.css) */
+/* ---- Chassis: formulário de cadastro ---- */
 .ch-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 14px; align-items: end; }
 .ch-form .field { margin: 0; }
 /* foto do modelo na 1ª coluna da tabela de chassis (FG.fotoVeiculo 'mini') */
 .tbl td.ch-td-foto { width: 88px; padding-top: 4px; padding-bottom: 4px; }
 
-/* ---- aba Chassis: "Fotos dos modelos" — uma ficha por modelo, com a foto
-   que aparece em todo chassi dele (06/10/2026) */
+/* ---- Chassis: fotos dos modelos ---- */
 .mf-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
 .mf-item {
   border: 1px solid var(--adm-line); background: #fff; padding: 10px;
@@ -380,8 +362,7 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .mf-enviar.enviando { opacity: .6; cursor: progress; }
 .mf-alerta { color: #b45309; }
 
-/* Textos amarelos do admin: só NEGRITO (contorno removido a pedido do
-   dono — ver o bloco "TEXTOS AMARELOS" no styles.css). */
+/* Textos amarelos: só negrito (ver "TEXTOS AMARELOS" no styles.css). */
 .kpi .k-val, .chart-stats .s .v, .adm-side .logo-cell .g-badge {
   font-weight: 700;
 }

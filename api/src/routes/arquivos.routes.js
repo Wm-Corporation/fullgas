@@ -1,15 +1,4 @@
-// ============================================================
-// Entrega de arquivos SENSÍVEIS com verificação de posse.
-// ------------------------------------------------------------
-// Antes disto, tudo em /uploads era servido estaticamente e sem autenticação:
-// as fotos e vídeos de reivindicação de garantia de TODAS as concessionárias
-// ficavam legíveis para quem tivesse (ou adivinhasse) a URL. Nada impedia uma
-// concessionária de ver o material da outra.
-//
-// Aqui cada arquivo só sai depois de conferir, no banco, que ele pertence à
-// empresa de quem pediu. As imagens de catálogo (produtos, categorias, finder)
-// continuam no estático de /uploads — são o mesmo conteúdo para todo mundo.
-// ============================================================
+// Entrega de arquivos sensíveis (garantia, notificação, suporte) só para o dono.
 import { Router } from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -21,16 +10,13 @@ const router = Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_ROOT = path.join(__dirname, '..', '..', 'uploads');
 
-// Pastas que esta rota entrega. O nome vem da URL, então é obrigatório validar
-// contra esta lista: sem isso, `tipo` viraria caminho livre no disco.
+// Pastas permitidas (o nome vem da URL).
 const PASTAS = new Set(['reivindicacoes', 'notificacoes', 'suporte']);
 
-// Só nome de arquivo simples: sem barra, sem '..', sem dois-pontos. Os nomes
-// são gerados pela API (data + aleatório + extensão), nunca vêm do usuário.
+// Só nome simples: sem barra, '..' ou dois-pontos.
 const NOME_OK = /^[A-Za-z0-9._-]{1,120}$/;
 
-// Confere no banco se o arquivo pertence a quem está pedindo.
-// Devolve true/false. Admin enxerga tudo.
+// O arquivo é de quem pediu? Admin vê tudo.
 async function podeVer(tipo, nome, user) {
   const ehAdmin = user.papel === 'admin';
   const url = `/uploads/${tipo}/${nome}`;
@@ -49,12 +35,7 @@ async function podeVer(tipo, nome, user) {
   }
 
   if (tipo === 'suporte') {
-    // O anexo pertence a uma mensagem de chamado, e o chamado pertence a QUEM
-    // O ABRIU — não à empresa dele. Vale para os dois sentidos: a foto que o
-    // revendedor mandou e o arquivo que o suporte respondeu só são visíveis
-    // para o dono do chamado (e para o administrador, que atende).
-    // Conferir aqui não é redundância: o anexo sai por uma URL própria, que
-    // circula fora da tela do chamado.
+    // Anexo de chamado: só o dono do chamado (não a empresa toda) e o admin.
     const rows = await query(
       `SELECT TOP 1 c.UsuarioId
          FROM dbo.SuporteMensagem m
@@ -88,15 +69,13 @@ router.get('/arquivos/:tipo/:nome', requireAuth, async (req, res, next) => {
       return res.status(404).json({ erro: 'Arquivo não encontrado.' });
     }
 
-    // Resposta idêntica para "não existe" e "não é seu": quem não tem acesso
-    // não descobre se o arquivo existe.
+    // Mesma resposta para "não existe" e "não é seu".
     if (!(await podeVer(tipo, nome, req.user))) {
       return res.status(404).json({ erro: 'Arquivo não encontrado.' });
     }
 
     const caminho = path.join(UPLOADS_ROOT, tipo, nome);
-    // Cinto e suspensório: mesmo com o nome já validado, garante que o caminho
-    // resolvido não escapou da pasta de uploads.
+    // Garante que o caminho não escapou da pasta.
     if (!caminho.startsWith(path.join(UPLOADS_ROOT, tipo) + path.sep)) {
       return res.status(404).json({ erro: 'Arquivo não encontrado.' });
     }
@@ -104,9 +83,7 @@ router.get('/arquivos/:tipo/:nome', requireAuth, async (req, res, next) => {
       return res.status(404).json({ erro: 'Arquivo não encontrado.' });
     }
 
-    // Conteúdo privado: não pode ficar em cache compartilhado (Cloudflare,
-    // proxy da empresa), senão o arquivo de uma concessionária poderia ser
-    // entregue a outra.
+    // Privado: nunca em cache compartilhado.
     res.set('Cache-Control', 'private, max-age=300');
     res.set('X-Content-Type-Options', 'nosniff');
     res.sendFile(caminho);

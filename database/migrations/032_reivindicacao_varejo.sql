@@ -1,22 +1,4 @@
-/* ============================================================================
-   MIGRAÇÃO 032 — Reivindicação de Varejo (garantia de peça de um pedido)
-   ----------------------------------------------------------------------------
-   Além da garantia por CHASSI (Reivindicacao.VeiculoId), o revendedor passa a
-   abrir garantia de uma PEÇA que está em um dos seus PEDIDOS. Reaproveitamos a
-   tabela Reivindicacao com um discriminador de origem:
-
-     • Origem   — 'veiculo' (fluxo antigo, por NIV) | 'varejo' (por pedido).
-     • PedidoId — preenchido só no varejo (o pedido que contém a peça).
-
-   E marcamos no pedido quais peças tiveram garantia aprovada:
-
-     • PedidoItem.GarantiaNumero — nº da reivindicação de varejo aprovada que
-       atingiu aquele item (NULL = sem garantia).
-
-   Idempotente: cada passo verifica antes de alterar. Pode rodar 2x.
-   Rodar como administrador (fullgas_app não tem DDL):
-     sqlcmd -S localhost -E -C -i database/migrations/032_reivindicacao_varejo.sql
-   ============================================================================ */
+-- 032 - Reivindicacao de varejo: Origem ('veiculo' | 'varejo'), PedidoId e PedidoItem.GarantiaNumero. Idempotente.
 
 USE FullgasB2B;
 GO

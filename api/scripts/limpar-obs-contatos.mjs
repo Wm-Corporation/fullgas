@@ -1,24 +1,7 @@
-/* ============================================================
-   Tira do Tiny o texto "Sincronizado pelo portal Fullgas B2B." da
-   observação dos contatos das concessionárias.
-   ------------------------------------------------------------
-   Por que existe: até 05/10/2026 o portal gravava esse texto na observação
-   do contato quando ela estava vazia. O contato é o MESMO para o Magento e o
-   Fullgas, e o Tiny leva a observação do contato para os pedidos — então
-   pedidos do Magento apareciam como sincronizados pelo Fullgas. O código não
-   grava mais o texto (tiny-contatos.js → MARCA_ANTIGA), mas os contatos que
-   já o têm só perdem quando forem enviados de novo. Este script faz isso de
-   uma vez, só nos contatos que têm o texto.
-
-   Uso, dentro de api/, como o usuário fullgas (usa o .env da API):
-
-     node scripts/limpar-obs-contatos.mjs            # só LISTA, não altera nada
-     node scripts/limpar-obs-contatos.mjs --aplicar  # corrige e confere
-
-   A correção usa o mesmo envio do dia a dia (atualizarContatoTiny): preserva
-   a observação que alguém tenha escrito no Tiny e a lista de preço do
-   contato, e tira só o nosso texto. Depois relê o contato para conferir.
-   ============================================================ */
+// Tira dos contatos do Tiny o texto antigo "Sincronizado pelo portal Fullgas B2B.".
+// Rode dentro de api/, como fullgas:
+//   node scripts/limpar-obs-contatos.mjs            # só lista
+//   node scripts/limpar-obs-contatos.mjs --aplicar  # corrige e confere
 import 'dotenv/config';
 import { query } from '../src/db.js';
 import { obterContato } from '../src/tiny.js';

@@ -1,10 +1,4 @@
-// Prazo da garantia do VEÍCULO: 90 dias a partir de Veiculo.GarantiaAtivaEm
-// (ativada na venda). Vencido — ou nunca ativada — o chassi não aceita novas
-// reivindicações. O varejo (garantia por pedido) NÃO tem prazo.
-//
-// Mora aqui, e não dentro da rota de reivindicações, porque a ficha do veículo
-// (veiculos.routes.js) também mostra o período — início e fim — e as duas
-// telas precisam contar o mesmo prazo.
+// Garantia do veículo: 90 dias a partir da venda. Varejo não tem prazo.
 export const GARANTIA_DIAS = 90;
 
 // Último instante da garantia, ou null se ela nunca foi ativada.

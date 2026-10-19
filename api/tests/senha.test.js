@@ -1,8 +1,4 @@
-// Política de senha (Fase 6). Regra ÚNICA para os cinco pontos que definem
-// senha: cadastro público, redefinição por e-mail, criação de admin, criação
-// de conta interna e reset dessa conta pelo gestor. Antes cada um repetia o
-// próprio `length < 6` — e o de admin usava 8, divergência que ninguém via
-// porque estava espalhada.
+// Política de senha única (cadastro, redefinição, admin e contas internas).
 import { describe, it, expect } from 'vitest';
 import { erroSenha, SENHA_MINIMA } from '../src/validacao.js';
 
@@ -17,8 +13,7 @@ describe('erroSenha', () => {
   });
 
   it('aceita frase longa sem símbolo (comprimento é o que vale)', () => {
-    // Não exigimos maiúscula/número/símbolo de propósito: essas regras
-    // empurram para "Senha@123" e penalizam frases, que são melhores.
+    // Sem exigência de símbolos: frases longas são melhores.
     ok('cavalo bateria grampo azul');
     ok('minha oficina fica na esquina');
   });
@@ -34,8 +29,7 @@ describe('erroSenha', () => {
   });
 
   it('recusa senha que contém o próprio e-mail ou nome', () => {
-    // É o primeiro palpite de quem tem a lista de cadastros em mãos — que é
-    // exatamente o que um vazamento de banco entrega.
+    // Não pode repetir nome ou e-mail.
     recusa('lucas12345');
     recusa('senhaDoLucasFerreira');
   });
@@ -46,9 +40,7 @@ describe('erroSenha', () => {
   });
 
   it('recusa acima de 72 BYTES (limite silencioso do bcrypt)', () => {
-    // Sem este teto, duas senhas longas com o mesmo começo seriam a MESMA
-    // senha no login, e ninguém entenderia por quê.
-    // Senha variada, para nao esbarrar na regra de caractere repetido.
+    // O bcrypt ignora o que passa de 72 bytes. Senha variada para não cair na regra de repetição.
     const longa = 'frase-longa-de-senha-para-testar-o-limite-do-bcrypt-aqui-vamos-nos-ok';
     expect(longa.length).toBeLessThanOrEqual(72);
     ok(longa);
@@ -70,8 +62,7 @@ describe('erroSenha', () => {
 });
 
 describe('nome da empresa na senha', () => {
-  // Regra e nao lista: enumerar as variantes exigiria escrever as senhas reais
-  // num arquivo versionado. Ver o comentario de MARCA em validacao.js.
+  // Regra, e não lista (ver MARCA em validacao.js).
   it('recusa qualquer senha construida sobre "fullgas"', () => {
     ['Fullgas2026', 'fullgas123', 'FullGas!2026', 'minhafullgassenha']
       .forEach(p => expect(erroSenha(p)).toBeTruthy());

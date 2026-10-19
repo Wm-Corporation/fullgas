@@ -21,10 +21,7 @@
   function fmtMoney(v) {
     return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   }
-  // Data SEM hora ("2026-10-02", como a API manda a data do defeito) é um dia
-  // do calendário, não um instante: new Date() a lê como meia-noite UTC, e no
-  // fuso do Brasil ela virava 21h do dia ANTERIOR — a tela mostrava 01/10 para
-  // um defeito de 02/10. Aqui ela vira meia-noite local.
+  // Data sem hora ("2026-10-02") = meia-noite local (new Date a leria como UTC, um dia antes no Brasil).
   function dataLocal(iso) {
     var m = typeof iso === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
     return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(iso);
@@ -248,14 +245,7 @@
     { niv: 'VBFGF4503SM399025', modeloId: 'fg450f-2025', cor: 'Vermelho', status: 'Disponível', entrada: daysAgo(9) }
   ];
 
-  // VAZIO DE PROPÓSITO. Aqui existiam três usuários de demonstração com a
-  // SENHA EM TEXTO PURO, herdados da época em que o portal
-  // rodava só no localStorage, antes da API. Hoje o api-adapter.js sobrescreve
-  // FG.login e FG.all, então esses dados nunca são usados — mas o arquivo é
-  // baixado por todo visitante, ou seja, as senhas iam junto. Pior: se o
-  // api-adapter falhasse ao carregar, o login antigo abaixo voltaria a valer e
-  // aceitaria essas credenciais. As contas de teste vivem no
-  // database/fullgas_seeds.sql, que não é aplicado em produção.
+  // Vazio de propósito: usuários de demonstração ficam só no database/fullgas_seeds.sql.
   var USERS = [];
 
   var CLAIMS = [
@@ -398,8 +388,7 @@
     subcategorias: function (catId) {
       return FG.all('categories').filter(function (c) { return c.pai === catId; });
     },
-    // A própria categoria + os códigos das suas subcategorias — usado para
-    // listar, numa categoria de topo, também os produtos das subcategorias.
+    // A categoria e suas subcategorias.
     categoriaEDescendentes: function (catId) {
       var ids = [catId];
       FG.all('categories').forEach(function (c) { if (c.pai === catId) ids.push(c.id); });
@@ -421,16 +410,13 @@
     /* ---- carrinho ---- */
     cart: function () { return read(CART_KEY, []); },
     cartCount: function () { return FG.cart().reduce(function (n, i) { return n + i.qtd; }, 0); },
-    // Produto "Indisponível" = sem estoque E sem previsão de chegada. Não pode
-    // ser comprado (diferente de "Pré-venda", que tem previsão e vai p/ backorder).
+    // Indisponível = sem estoque e sem previsão.
     compravel: function (artigo) {
       var p = FG.product(artigo);
       if (!p) return false;
       return p.estoque > 0 || !!p.previsao;
     },
-    // Quantidade máxima comprável de um produto. Produtos "Em estoque"
-    // (estoque > 0) limitam-se ao estoque disponível; produtos em pré-venda
-    // (sem estoque, com previsão) não têm limite aqui — vão para pré-venda.
+    // Máximo comprável: o estoque; pré-venda não limita.
     limiteCompra: function (artigo) {
       var p = FG.product(artigo);
       return (p && p.estoque > 0) ? p.estoque : Infinity;
@@ -553,8 +539,7 @@
     },
 
     /* ---- util ---- */
-    // Valor que pode ter sido ESCONDIDO pela API (conta sem a área financeiro):
-    // ausente vira "—", não "R$ 0,00" (zero é um valor, e engana).
+    // Valor escondido pela API vira "—".
     fmtMoneyOpt: function (v) { return v == null ? '—' : fmtMoney(v); },
     fmtMoney: fmtMoney, fmtDate: fmtDate, fmtDateTime: fmtDateTime, esc: esc, uid: uid, pad: pad,
 
@@ -589,26 +574,19 @@
     maskIe: function (v) {
       return String(v).toUpperCase().replace(/[^0-9A-Z./ -]/g, '').slice(0, 20);
     },
-    // Selo "Fábrica" — o mesmo desenho em todas as telas (.selo-fabrica no
-    // styles.css). Vai no lugar do nome da concessionária quando o chassi, o
-    // evento ou a conta são da Fábrica.
+    // Selo "Fábrica" (.selo-fabrica).
     seloFabrica: function () {
       return '<span class="selo-fabrica" title="Fullgas — Fábrica">' +
         '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" ' +
         'd="M2 22V11l6 3v-3l6 3V9h2V2h4v20zM5 17h2v2H5zm4 0h2v2H9zm4 0h2v2h-2z"/></svg>' +
         'Fábrica</span>';
     },
-    // Empresa da sessão para os cabeçalhos, já em HTML: administrador é da
-    // Fábrica e aparece com o selo, não com a empresa em que a conta está.
+    // Empresa da sessão em HTML (admin = selo Fábrica).
     empresaDaSessao: function (s) {
       return s && s.papel === 'admin' ? FG.seloFabrica() : esc((s && s.empresa) || '');
     },
-    // Autocomplete PRÓPRIO (visual .ac-wrap/.ac-list — nada de datalist
-    // nativo do navegador). Requer o markup:
-    //   <div class="ac-wrap"><input id="X"><div class="ac-list hidden" id="X-ac"></div></div>
-    // `itens(termo)` devolve (ou resolve) os itens filtrados
-    // [{ id, label, sub? }]; ao escolher, o input recebe data-ac-id com o id
-    // (limpo quando o texto muda) e `aoEscolher(item)` é chamado.
+    // Autocomplete próprio. Markup: <div class="ac-wrap"><input id="X"><div class="ac-list hidden" id="X-ac"></div></div>
+    // itens(termo) → [{ id, label, sub? }]; ao escolher: data-ac-id no input e aoEscolher(item).
     bindAutocomplete: function (inputId, itens, aoEscolher) {
       var el = document.getElementById(inputId);
       var list = document.getElementById(inputId + '-ac');
@@ -645,8 +623,7 @@
       el.addEventListener('blur', function () { setTimeout(fechar, 150); });
     },
 
-    // Liga uma máscara num input; `aoDigitar` (opcional) recebe o valor já
-    // formatado a cada tecla — usado p/ disparar a busca de CEP.
+    // Máscara num input; aoDigitar recebe o valor formatado.
     bindMask: function (id, fn, aoDigitar) {
       var el = document.getElementById(id);
       if (!el) return;
@@ -675,24 +652,15 @@
       setTimeout(function () { el.classList.add('out'); setTimeout(function () { el.remove(); }, 400); }, 2600);
     },
 
-    /* ---- FICHA DO VEÍCULO (06/10/2026) ----
-       A moto com tudo o que se sabe dela: foto do modelo, dados do chassi,
-       concessionária, cliente (se vendida) e o período da garantia. Uma
-       função só para o portal (ações do veículo, venda, reivindicações) e o
-       admin (Chassis, reivindicações), para as telas não desenharem cada uma
-       a sua versão. `v` é o veículo como a API devolve (veiculos.routes.js).
-       Estilos .vf-* / .vficha / .vresumo no styles.css. */
+    /* ---- Ficha do veículo (portal e admin). `v` = veículo da API. Estilos .vf-* / .vficha / .vresumo ---- */
 
-    // Nome do modelo: o da lista de modelos (ativos) ou o que veio junto do
-    // chassi (cobre modelo desativado no Localizador de Peças).
+    // Nome do modelo (lista de ativos ou o que veio com o chassi).
     rotuloModelo: function (v) {
       var m = FG.model(v.modeloId);
       return (m && m.label) || v.modelo || v.modeloId || '—';
     },
 
-    // Foto do modelo. `tam`: 'grande' (ficha), 'media' (resumo) ou 'mini'
-    // (linha de lista). Só a grande baixa a foto original; as outras usam a
-    // miniatura WebP quando ela já existe. Sem foto, a moto desenhada.
+    // Foto do modelo. tam: 'grande' (original) | 'media' | 'mini' (miniatura).
     fotoVeiculo: function (v, tam) {
       tam = tam || 'mini';
       var alt = 'Foto do modelo ' + FG.rotuloModelo(v);
@@ -706,8 +674,7 @@
         '" alt="' + esc(alt) + '" title="Clique para ampliar" loading="lazy">';
     },
 
-    // Situação da garantia: { inicio, fim, dias, classe, texto }. O prazo e o
-    // fim vêm da API (utils/garantia.js); a conta aqui é só para o texto.
+    // Garantia: { inicio, fim, dias, classe, texto }.
     garantiaVeiculo: function (v) {
       var dias = v.garantiaDias || 90;
       if (!v.garantia) {
@@ -730,9 +697,7 @@
         (vendida ? 'Vendida' : (v.status === 'Disponível' ? 'Em estoque' : esc(v.status))) + '</span>';
     },
 
-    // Ficha completa (tela "Ações do veículo" e o detalhe do chassi no admin).
-    // opts.acoes: HTML dos botões, desenhado entre os dados e as duas colunas;
-    // opts.rodape: HTML que fecha a ficha (o histórico do chassi, no portal).
+    // Ficha completa. opts.acoes = botões; opts.rodape = fecho (histórico).
     fichaVeiculo: function (v, opts) {
       opts = opts || {};
       var g = FG.garantiaVeiculo(v);
@@ -788,9 +753,7 @@
         '<p><span class="muted">Venda em:</span> ' + FG.fmtDate(vd.data) + '</p>';
     },
 
-    // Resumo da moto para os pop-ups (registrar venda, transferir, nova
-    // reivindicação e o detalhe de uma reivindicação). opts.ocorrido (data do
-    // defeito) mostra se ela cai dentro do período da garantia.
+    // Resumo para os pop-ups. opts.ocorrido = data do defeito (dentro da garantia?).
     fichaVeiculoResumo: function (v, opts) {
       opts = opts || {};
       var g = FG.garantiaVeiculo(v);
@@ -801,8 +764,7 @@
       var periodo = g.inicio
         ? FG.fmtDate(g.inicio) + ' a ' + FG.fmtDate(g.fim) + ' (' + g.dias + ' dias)'
         : g.dias + ' dias, a partir da venda';
-      // Rótulo e valor em duas colunas; o valor vai num <span> só para não
-      // virar várias células da grade (.vr-linha é display:grid).
+      // Valor num <span> só (.vr-linha é grid).
       function linha(rot, val) { return '<div class="vr-linha"><b>' + rot + '</b><span>' + val + '</span></div>'; }
       var ocorrido = '';
       if (opts.ocorrido && g.inicio) {
@@ -867,8 +829,7 @@
   FG.init();
   global.FG = FG;
 
-  // Clique em qualquer foto de modelo (.vf-foto) amplia em tela cheia. Um
-  // ouvinte só, delegado: cobre telas re-renderizadas e pop-ups criados na hora.
+  // Clique numa foto de modelo (.vf-foto) amplia (listener delegado).
   if (typeof document !== 'undefined') {
     document.addEventListener('click', function (e) {
       var img = e.target.closest && e.target.closest('img.vf-foto[data-foto-grande]');

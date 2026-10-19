@@ -1,36 +1,6 @@
-/* ============================================================================
-   MIGRAÇÃO 033 — Histórico do veículo (linha do tempo do chassi)
-   ----------------------------------------------------------------------------
-   Tudo que acontece com um chassi passa a ficar registrado numa linha só do
-   tempo: cadastro, atribuição e transferências entre concessionárias, venda ao
-   consumidor, ativação de garantia, reivindicações e — o que não existia —
-   recalls, revisões e anotações lançadas à mão pelo administrador.
-
-   Três decisões que valem o comentário:
-
-   • FK só para Veiculo (com CASCADE). Usuario e Empresa entram como ID SEM
-     chave estrangeira, acompanhados de um snapshot do nome. O motivo é que o
-     painel exclui usuários (DELETE /api/usuarios/:id): com FK, a primeira
-     exclusão passaria a falhar por causa de linhas de histórico, e um registro
-     histórico não pode ser o que impede uma operação corriqueira. O snapshot
-     ainda resolve o caso de renomear a empresa: o histórico guarda o nome de
-     quando o evento aconteceu, que é o que interessa numa auditoria.
-
-   • Manual separa o que o sistema registrou sozinho do que uma pessoa lançou.
-     Só o lançamento manual pode ser apagado depois; evento automático é fato
-     consumado — poder apagá-lo esvaziaria o sentido de existir um histórico.
-
-   • DataEvento é separada de CriadoEm porque um recall pode ser lançado hoje
-     referindo-se a uma campanha da semana passada.
-
-   Idempotente: cria a tabela só se ainda não existir, e o backfill dos eventos
-   já conhecidos (entrada em estoque, venda, garantia, reivindicações) roda uma
-   única vez, junto da criação.
-
-   Rodar como administrador (fullgas_app não tem DDL), em UTF-8 por causa dos
-   acentos nos textos semeados:
-     sqlcmd -E -C -f 65001 -S localhost -d FullgasB2B -i 033_veiculo_historico.sql
-   ============================================================================ */
+-- 033 - Historico do veiculo (VeiculoHistorico), com backfill dos eventos conhecidos.
+-- FK so para Veiculo; usuario e empresa como ID + nome (sem FK). So lancamento manual pode ser apagado.
+-- Rodar com: sqlcmd -E -C -f 65001 -S localhost -d FullgasB2B -i 033_veiculo_historico.sql
 
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
@@ -47,8 +17,7 @@ BEGIN
         Tipo          VARCHAR(16)     NOT NULL,
         Titulo        NVARCHAR(160)   NOT NULL,
         Detalhe       NVARCHAR(1000)  NULL,
-        -- Quem provocou o evento e sob qual concessionária. IDs sem FK (ver o
-        -- cabeçalho) + nome gravado no momento do evento.
+        -- Quem e onde: IDs sem FK + nome no momento do evento.
         UsuarioId     INT             NULL,
         UsuarioNome   NVARCHAR(120)   NULL,
         EmpresaId     INT             NULL,
@@ -66,21 +35,12 @@ BEGIN
              'reivindicacao','recall','revisao','nota'))
     );
 
-    -- A leitura é sempre "o histórico deste chassi, do mais recente para o mais
-    -- antigo" — o índice cobre exatamente isso.
+    -- Leitura: historico do chassi, mais recente primeiro.
     CREATE INDEX IX_VeicHist_Veiculo_Data ON dbo.VeiculoHistorico (VeiculoId, DataEvento DESC);
 
     PRINT N'Tabela VeiculoHistorico criada.';
 
-    /* ---------------------------------------------------------------------
-       BACKFILL — o que já aconteceu antes desta migração
-       ---------------------------------------------------------------------
-       Sem isto, todo chassi já cadastrado abriria com um histórico vazio, o que
-       dá a impressão errada de que nada aconteceu com ele. Reconstruímos o que
-       o banco ainda sabe: entrada no estoque, venda, garantia e reivindicações.
-       Não dá para reconstruir transferências passadas (nunca foram gravadas) —
-       daqui para frente, sim.
-       --------------------------------------------------------------------- */
+    -- Backfill: estoque, venda, garantia e reivindicacoes (transferencias antigas nao existem).
 
     -- 1) Entrada no estoque (data de cadastro do chassi).
     INSERT INTO dbo.VeiculoHistorico (VeiculoId, Tipo, Titulo, Detalhe, EmpresaId, EmpresaNome, DataEvento)

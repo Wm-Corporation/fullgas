@@ -1,10 +1,6 @@
 /* =========================================================
    FULLGAS B2B — nova senha pelo link do e-mail (redefinir.html)
-   ---------------------------------------------------------
-   O token chega em ?token=... . Verificamos com o servidor ANTES de pedir a
-   senha (para não fazer o cliente digitar duas vezes um link já vencido) e
-   limpamos a URL na sequência, para o token não ficar no histórico nem vazar
-   pelo Referer se a pessoa clicar em algum link daqui.
+   Confere o token antes de pedir a senha e tira o token da URL.
    ========================================================= */
 (function () {
   'use strict';

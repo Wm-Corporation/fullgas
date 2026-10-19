@@ -1,12 +1,7 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 031 — Foto da categoria.
--- Adiciona Imagem à Categoria: URL relativa (/uploads/categorias/...) da foto
--- enviada pelo painel admin. NULL = sem foto (a loja cai no ícone SVG padrão).
--- Idempotente.
--- ============================================================
+-- 031 - Foto da categoria (URL relativa; NULL = icone padrao). Idempotente.
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO

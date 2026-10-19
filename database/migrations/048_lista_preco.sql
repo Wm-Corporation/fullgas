@@ -1,29 +1,9 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 048 - Listas de preco do Tiny por cliente (02/10/2026).
---
--- O B2B passa a receber mais de um tipo de revendedor. No Tiny, cada tipo
--- e uma "lista de precos" com um % geral (negativo = desconto, positivo =
--- acrescimo). Ao aprovar um cadastro, o admin escolhe a lista da empresa;
--- a loja, o Localizador e o pedido passam a usar o preco da lista.
---
---   dbo.ListaPreco        espelho das listas do Tiny (id do Tiny como PK).
---                         Atualizado pelo cron e pelo botao do painel. Lista
---                         que some do Tiny fica com Ativa = 0 (nao e apagada:
---                         empresas e pedidos antigos continuam apontando).
---   Empresa.ListaPrecoId  lista da empresa. NULL = preco cheio (como era
---                         antes desta migration: nenhum cliente muda de
---                         preco ao aplica-la).
---   Pedido.ListaPrecoId / Pedido.ListaPrecoPercentual
---                         a lista e o % que valiam NA HORA da compra. O
---                         pedido vai ao Tiny so na aprovacao; se a empresa
---                         trocar de lista no meio, o pedido continua com a
---                         lista com que foi precificado.
---
--- Idempotente (roda em todo deploy). ASCII puro.
--- ============================================================
+-- 048 - Listas de preco do Tiny: ListaPreco (espelho; Ativa = 0 se sumir do Tiny),
+-- Empresa.ListaPrecoId (NULL = preco cheio) e Pedido.ListaPrecoId/ListaPrecoPercentual (da hora da compra).
+-- Idempotente. ASCII.
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO

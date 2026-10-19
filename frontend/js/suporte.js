@@ -1,21 +1,7 @@
 /* =========================================================
-   FULLGAS B2B — Pop-up flutuante do Suporte Técnico
-   ---------------------------------------------------------
-   O botãozinho redondo no canto inferior direito (o lugar onde todo mundo já
-   procura ajuda, como no WhatsApp) e o painel que ele abre.
-
-   O QUE ELE É: um atalho para ABRIR CHAMADO de qualquer tela do portal, mais
-   a lista curta dos chamados recentes com o aviso de resposta nova.
-
-   O QUE ELE NÃO É: um chat ao vivo. Ninguém fica esperando do outro lado; a
-   mensagem vira um chamado com número, e a conversa continua na aba "Suporte
-   Técnico" do portal — que é para onde este painel manda ao clicar num
-   chamado. Manter a conversa longa fora daqui é de propósito: o pop-up é
-   pequeno e some quando o revendedor volta ao trabalho.
-
-   Inclua DEPOIS de js/api-adapter.js nas telas do revendedor:
-     <script src="js/api-adapter.js"></script>
-     <script src="js/suporte.js"></script>
+   FULLGAS B2B — Pop-up do Suporte Técnico
+   Abre chamado de qualquer tela e lista os recentes; a conversa fica no portal.
+   Inclua DEPOIS de js/api-adapter.js.
    ========================================================= */
 (function () {
   'use strict';
@@ -23,15 +9,12 @@
   if (!window.FG || !FG.session) return;
 
   var sess = FG.session();
-  // Sem sessão (tela de login) não há suporte a oferecer. E o administrador
-  // atende pelo painel: se ele visse o pop-up, teria um botão que a API recusa
-  // — quem abre chamado é a concessionária.
+  // Sem sessão ou admin (atende pelo painel): sem pop-up.
   if (!sess || sess.papel === 'admin') return;
 
   var esc = FG.esc;
 
-  // Rótulos e cores dos status vivem aqui e no CSS (.sup-st-*). O slug ASCII
-  // evita depender de acento em nome de classe.
+  // Status → slug ASCII para a classe .sup-st-*.
   var STATUS_SLUG = {
     'Aberto': 'aberto',
     'Em atendimento': 'atendimento',
@@ -43,16 +26,13 @@
     return '<span class="sup-st sup-st-' + (STATUS_SLUG[st] || 'aberto') + '">' + esc(st) + '</span>';
   }
 
-  // Detalhe do chamado mora no portal. De outra tela (loja, finder), navega
-  // para lá; já no portal, basta trocar o hash.
+  // Detalhe fica no portal: navega ou troca o hash.
   function irParaChamado(id) {
     var alvo = '#suporte' + (id ? '/' + id : '');
     if (/\/portal(\.html)?$/.test(location.pathname)) {
       var antes = location.hash;
       location.hash = alvo;
-      // Hash igual ao que já estava não dispara hashchange, e a tela ficaria
-      // parada. Só nesse caso forçamos o evento — dispará-lo sempre faria o
-      // portal renderizar duas vezes a cada clique.
+      // Mesmo hash não dispara hashchange: força.
       if (location.hash === antes) window.dispatchEvent(new Event('hashchange'));
     } else {
       location.href = '/portal' + alvo;
@@ -61,8 +41,7 @@
 
   /* ---------- estrutura fixa (criada uma vez) ---------- */
   var raiz = document.createElement('div');
-  // Na loja o carrinho flutuante já ocupa o canto inferior direito. Em vez de
-  // um cobrir o outro, o suporte sobe e os dois ficam empilhados.
+  // Na loja, sobe para não cobrir o carrinho.
   raiz.className = 'sup-widget' + (document.getElementById('cart-fab') ? ' sup-com-carrinho' : '');
   raiz.innerHTML =
     '<div class="sup-panel hidden" id="sup-panel" role="dialog" aria-label="Suporte Técnico" aria-modal="false">' +
@@ -85,16 +64,10 @@
 
   var aberto = false;
   var enviando = false;
-  // 'lista' | 'form' | 'ok' — qual das três telas está no painel. O batimento
-  // só pode redesenhar a LISTA: trocar o formulário embaixo de quem está
-  // digitando um chamado seria perder o texto dele.
+  // 'lista' | 'form' | 'ok'. O batimento só redesenha a lista.
   var tela = 'lista';
 
-  /* ---------- badge de mensagens não lidas ----------
-     Pintar e buscar são coisas separadas de propósito: o batimento
-     (js/ao-vivo.js) já traz o número pronto de 10 em 10 segundos, e mandá-lo
-     buscar de novo seria uma segunda ida ao servidor para saber o que ele
-     acabou de dizer. */
+  /* ---------- badge: pintar (número do batimento) e buscar ficam separados ---------- */
   function pintarBadge(n) {
     n = Number(n) || 0;
     badge.textContent = n > 9 ? '9+' : String(n);
@@ -232,11 +205,7 @@
       }
       renderSucesso(r);
       atualizarBadge();
-      // A aba "Suporte Técnico" pode estar aberta atrás do pop-up: avisa para
-      // ela se redesenhar com o chamado novo em vez de mostrar a lista velha.
-      // Evento próprio, separado do 'fg-suporte-mudou' (que só mexe no badge):
-      // este manda REDESENHAR, e o outro não pode fazer isso — o portal o
-      // dispara ao abrir um chamado, e a lista engoliria a conversa na tela.
+      // Avisa a aba Suporte para redesenhar ('fg-suporte-mudou' só mexe no badge).
       window.dispatchEvent(new Event('fg-suporte-novo'));
     });
   }
@@ -271,8 +240,7 @@
     painel.classList.add('hidden');
     fab.setAttribute('aria-expanded', 'false');
     fab.classList.remove('on');
-    // Voltar da tela de suporte com o badge velho seria mentira: quem abriu um
-    // chamado no painel já marcou mensagens como lidas.
+    // Atualiza o badge ao voltar.
     atualizarBadge();
   }
 
@@ -282,16 +250,10 @@
     if (e.key === 'Escape' && aberto) fechar();
   });
 
-  // Outras telas (a aba Suporte Técnico do portal) avisam quando algo muda,
-  // para o badge não ficar contando resposta que o usuário acabou de ler.
+  // Outras telas avisam quando algo muda.
   window.addEventListener('fg-suporte-mudou', function () { atualizarBadge(); });
 
-  /* O pop-up é o formulário de abertura do portal inteiro.
-     ---------------------------------------------------------------------
-     A aba "Suporte Técnico" NÃO tem um formulário próprio: o botão "Abrir
-     chamado" de lá chama este. São dois motivos: o revendedor aprende um
-     caminho só, e o formulário (categorias, validação, upload) existe em um
-     lugar só — nada de duas telas que precisam ser corrigidas em dupla. */
+  // Formulário único de abertura: a aba Suporte do portal usa este.
   FG.suporteWidget = {
     abrir: abrir,
     abrirFormulario: function () { abrir(); renderForm(); },
@@ -299,24 +261,16 @@
     atualizarBadge: atualizarBadge
   };
 
-  /* ---------- badge: primeira carga e o batimento ----------
-     Antes havia aqui um laço próprio de 3 minutos. Ele saiu: quem confere
-     agora é o batimento compartilhado (js/ao-vivo.js), a cada 10 segundos e
-     em UMA requisição que serve a carta ✉️, este badge e o painel admin
-     juntos. Três laços separados fariam três perguntas para responder a mesma
-     coisa. */
+  /* ---------- badge: primeira carga e batimento (js/ao-vivo.js) ---------- */
   atualizarBadge();
 
   window.addEventListener('fg-pulso', function (e) {
     pintarBadge(e.detail.pulso.suporteNaoLidas);
-    // Painel aberto na lista: a resposta que acabou de chegar entra nela
-    // sozinha. Nas outras telas (formulário, confirmação) não se mexe.
+    // Painel na lista: atualiza.
     if (aberto && tela === 'lista') renderLista();
   });
 
-  // Sem o batimento na página (script não incluído), o badge voltaria a ficar
-  // parado até alguém abrir o pop-up. O laço antigo fica como rede de
-  // segurança — e só neste caso.
+  // Sem o batimento, um laço próprio atualiza o badge.
   if (!FG.aoVivo) {
     setInterval(function () {
       if (document.visibilityState === 'visible' && !aberto) atualizarBadge();

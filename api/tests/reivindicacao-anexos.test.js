@@ -1,9 +1,4 @@
-// Fotos e vídeos da reivindicação: no máximo 5 por envio (16/09/2026).
-//
-// Eram 10. O formulário do portal agora trava em 5 (veículo e varejo), e a API
-// confere o mesmo teto — o formulário é só a primeira barreira.
-//
-// O db.js é substituído por um dublê: estes testes não tocam SQL Server.
+// Fotos e vídeos da reivindicação: no máximo 5 por envio. db.js é um dublê.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';

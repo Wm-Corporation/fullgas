@@ -1,23 +1,7 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 025 — Remove os dados de DEMONSTRAÇÃO de reivindicações.
--- O "quadro de reivindicações" do admin já é dinâmico (vem da API), mas o
--- banco trazia 6 reivindicações de exemplo (do fullgas_seeds.sql) presas a
--- concessionárias "fantasma" — empresas que só existiam para segurar essas
--- reivindicações, sem usuário, pedido, fatura ou veículo real.
---
--- Esta migração:
---   1) apaga as 6 reivindicações de exemplo (por Numero fixo) e seus filhos;
---   2) apaga as 4 concessionárias fantasma (GOX POWERSPORTS, BK OFF ROAD,
---      M4 RACING-PR, ART MOTO RACING) — só se estiverem realmente vazias.
---
--- POWER MOTOS LTDA e SILVA RACING são PRESERVADAS (a 1ª tem login e histórico
--- real; a 2ª foi mantida por escolha do dono). As reivindicações reais criadas
--- pelos clientes (números aleatórios) NÃO são tocadas — o alvo é por Numero.
--- Idempotente: rodar de novo não faz nada.
--- ============================================================
+-- 025 - Remove as 6 reivindicacoes de demonstracao e as 4 concessionarias fantasma (se vazias). Idempotente.
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 SET XACT_ABORT ON;
@@ -41,8 +25,7 @@ DELETE pp
 DELETE FROM dbo.Reivindicacao
  WHERE Numero IN (SELECT Numero FROM @demo);
 
--- 2) Concessionárias fantasma — apaga só se não sobrou nenhum vínculo.
---    (Endereco tem ON DELETE CASCADE; os demais são NO_ACTION, por isso os guards.)
+-- 2) Concessionarias fantasma: so se nao sobrou vinculo.
 DELETE e
   FROM dbo.Empresa e
  WHERE e.RazaoSocial IN (N'GOX POWERSPORTS', N'BK OFF ROAD', N'M4 RACING-PR', N'ART MOTO RACING')

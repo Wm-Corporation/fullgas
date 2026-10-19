@@ -1,32 +1,10 @@
-/* ============================================================================
-   MIGRAÇÃO 018 — Exportação de pedidos ao Tiny ERP (docs/08-integracao-tiny.md)
-   ----------------------------------------------------------------------------
-   O estoque do Tiny é compartilhado com outro e-commerce (Magento); por isso,
-   quando o cliente compra no Fullgas o pedido é criado no Tiny NA HORA e
-   aprovado por lá (a aprovação baixa o estoque no Tiny — configurar a conta
-   do Tiny para "lançar estoque na aprovação").
-
-   Nova tabela TinyPedidoExport: fila/estado da exportação de cada pedido.
-   - Escopo 'normal'   : itens em estoque, exportados na criação do pedido.
-   - Escopo 'backorder': itens de pré-venda, exportados quando o admin libera
-     o envio (vira um SEGUNDO pedido no Tiny). ItensJson guarda o snapshot do
-     que foi liberado naquele momento (pode haver mais de uma liberação).
-   - Status: 'pendente' → 'enviado' (criado E aprovado no Tiny). 'erro' aguarda
-     retry (cron ou botão do admin); 'cancelado' desiste (pedido cancelado).
-   - TinyPedidoId preenchido logo após a inclusão: um pedido NUNCA é incluído
-     duas vezes no Tiny — se a aprovação falhar, o retry só reaprova.
-
-   Idempotente: cada passo verifica antes de alterar. Pode rodar 2x.
-   Rodar como administrador (fullgas_app não tem DDL):
-     sqlcmd -E -S <servidor> -i 018_tiny_pedidos.sql
-   (fullgas_app é db_datareader/db_datawriter: sem GRANT extra para a tabela.)
-   ============================================================================ */
+-- 018 - Exportacao de pedidos ao Tiny: tabela TinyPedidoExport.
+-- Escopo 'normal' | 'backorder'; status 'pendente' -> 'enviado' | 'erro' | 'cancelado'. Idempotente.
 
 USE FullgasB2B;
 GO
 
--- O índice filtrado (abaixo) exige QUOTED_IDENTIFIER ON; o sqlcmd roda OFF
--- por padrão.
+-- Indice filtrado exige QUOTED_IDENTIFIER ON.
 SET QUOTED_IDENTIFIER ON;
 GO
 
@@ -64,9 +42,7 @@ ELSE
     PRINT N'Tabela TinyPedidoExport já existe — nada a fazer.';
 GO
 
-/* Um pedido só gera UMA exportação 'normal' (a da criação). As de 'backorder'
-   podem se repetir (uma por liberação de pré-venda), por isso o índice único
-   é filtrado. */
+-- Uma exportacao 'normal' por pedido; 'backorder' pode repetir.
 IF NOT EXISTS (SELECT 1 FROM sys.indexes
                 WHERE name = N'UX_TinyPedidoExport_Normal'
                   AND object_id = OBJECT_ID(N'dbo.TinyPedidoExport'))

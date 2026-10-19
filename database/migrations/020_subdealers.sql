@@ -1,19 +1,7 @@
 USE FullgasB2B;
 GO
 
-/* ============================================================================
-   020 — Sub-dealers (contas internas da concessionária)
-   ----------------------------------------------------------------------------
-   O cliente "gestor" (a conta que se cadastrou) pode criar contas internas
-   para os funcionários da concessionária e restringir áreas do site
-   (loja, finder, pedidos, financeiro, reivindicações, estoque, ações).
-
-   - Gestor     BIT: 1 = conta principal da empresa (gerencia as internas).
-                 Todas as contas já existentes viram gestoras.
-   - Permissoes VARCHAR(400): JSON array com as ÁREAS PERMITIDAS
-                 (ex.: '["loja","pedidos"]'). NULL = acesso total.
-   Idempotente — pode rodar mais de uma vez.
-   ============================================================================ */
+-- 020 - Sub-dealers: Usuario.Gestor e Usuario.Permissoes (JSON de areas; NULL = acesso total). Idempotente.
 SET QUOTED_IDENTIFIER ON;
 GO
 

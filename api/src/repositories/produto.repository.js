@@ -1,7 +1,4 @@
-// ============================================================
-// Repositório de Produto — ÚNICO lugar com SQL de produto.
-// Devolve linhas cruas do banco; a forma da resposta é do controller.
-// ============================================================
+// Repositório de Produto: único lugar com SQL de produto.
 import { query } from '../db.js';
 
 const SELECT_PROD =
@@ -58,8 +55,7 @@ export function atualizarCompleto({ sku, nome, catId, descricao, preco, estoque,
   );
 }
 
-// Apaga e devolve a ImagemUrl que existia (para remover o arquivo), ou
-// undefined se o produto nem existia — o chamador decide o que fazer.
+// Apaga e devolve a ImagemUrl anterior (undefined se o produto não existia).
 export async function apagar(sku) {
   const r = await query('DELETE FROM dbo.Produto OUTPUT deleted.ImagemUrl WHERE Sku=@sku', { sku });
   return r.length ? r[0].ImagemUrl : undefined;

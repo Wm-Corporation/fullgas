@@ -1,16 +1,4 @@
--- ============================================================
--- Migração 005 — Dados do cliente na venda do veículo
--- ------------------------------------------------------------
--- A venda de um veículo passa a registrar dados detalhados do
--- comprador final, além do nome (VendaCliente, já existente):
---   ClienteCpf       — CPF do comprador
---   ClienteEmail     — e-mail pessoal
---   ClienteTelefone  — telefone de contato
---   ClienteEndereco  — endereço completo
--- Idempotente: seguro para rodar mais de uma vez.
--- Aplicar com admin (fullgas_app não tem DDL):
---   sqlcmd -S localhost -E -C -i database/migrations/005_dados_cliente_veiculo.sql
--- ============================================================
+-- 005 - Dados do comprador na venda do veiculo (CPF, e-mail, telefone, endereco). Idempotente.
 USE FullgasB2B;
 GO
 

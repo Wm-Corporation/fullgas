@@ -1,11 +1,4 @@
-// Parts Finder: código e árvore de seleção saem dos campos do modelo
-// (16/09/2026).
-//
-// Antes, o código era digitado uma vez e nunca mais mudava, e a árvore era um
-// texto livre que não acompanhava as edições. Agora os dois são derivados:
-//   código = nome + ano;  árvore = Marca › Modalidade › Categoria › Nome › Ano.
-//
-// O db.js é substituído por um dublê: estes testes não tocam SQL Server.
+// Parts Finder: código = nome + ano; árvore = Marca › Modalidade › Categoria › Nome › Ano. db.js é um dublê.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';

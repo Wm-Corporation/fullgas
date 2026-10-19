@@ -1,14 +1,5 @@
-// ============================================================
-// Rotas da conta do concessionário (painel "Minha conta")
-//   - GET   /conta                     dados da empresa + contas internas
-//   - PUT   /conta/empresa             gestor atualiza cadastro/endereço
-//   - POST  /conta/subdealers          gestor cria conta interna
-//   - PATCH /conta/subdealers/:id      gestor edita permissões/status/senha
-//
-// "Sub-dealer" = conta interna da concessionária (Gestor = 0), criada pela
-// conta gestora, já aprovada, com acesso restringível por área do site
-// (Permissoes = JSON array de áreas permitidas; NULL = acesso total).
-// ============================================================
+// ---- Conta do concessionário (painel "Minha conta") ----
+// Sub-dealer = conta interna (Gestor = 0), com Permissoes por área (NULL = acesso total).
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, getPool, sql } from '../db.js';
@@ -24,8 +15,7 @@ function requireGestor(req, res, next) {
   res.status(403).json({ erro: 'Apenas a conta gestora da concessionária pode fazer isso.' });
 }
 
-// GET /api/conta — visão da própria empresa: cadastro, endereço principal e
-// (para o gestor) as contas internas. Sub-dealer também acessa (só leitura).
+// GET /api/conta — empresa, endereço e (para o gestor) as contas internas.
 router.get('/conta', requireAuth, async (req, res, next) => {
   try {
     const emp = (await query(
@@ -68,13 +58,8 @@ router.get('/conta', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// PUT /api/conta/empresa — gestor atualiza telefone/e-mail e endereço
-// principal (upsert). Razão social não muda por aqui (identidade da conta).
-//
-// CNPJ TRAVADO para o cliente (decisão de 30/09/2026): ele é a chave do
-// vínculo com o Tiny, e trocá-lo fazia o portal se ligar a OUTRO contato de lá
-// e sobrescrevê-lo. Só a Fullgas muda — o admin, entrando na conta pela
-// alteração de identidade (req.user.imp) —, e mesmo assim com CNPJ válido.
+// PUT /api/conta/empresa — gestor atualiza contato e endereço.
+// CNPJ travado para o cliente (é a chave do Tiny); só o admin em "Entrar na conta" muda.
 router.put('/conta/empresa', requireAuth, requireGestor, async (req, res, next) => {
   try {
     const { telefone, email } = req.body;
@@ -96,10 +81,7 @@ router.put('/conta/empresa', requireAuth, requireGestor, async (req, res, next) 
     if (errEnd) return res.status(400).json({ erro: errEnd });
     const ie = limparIe(req.body.inscricaoEstadual);
 
-    // O e-mail do cadastro é TAMBÉM o e-mail de LOGIN de quem está editando
-    // (o gestor): no cadastro os dois nascem iguais. Ao mudar aqui, o login
-    // acompanha — senão o cadastro mostra o e-mail novo mas o acesso continua
-    // pelo antigo. Exige formato válido quando preenchido.
+    // O e-mail do cadastro também é o login do gestor: mudam juntos.
     const emailTrim = (email || '').trim();
     if (emailTrim && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailTrim))
       return res.status(400).json({ erro: 'E-mail inválido.' });
@@ -123,8 +105,7 @@ router.put('/conta/empresa', requireAuth, requireGestor, async (req, res, next) 
                        AtualizadoEm = SYSUTCDATETIME()
                  WHERE EmpresaId = @eid`);
 
-      // Sincroniza o e-mail de LOGIN do próprio gestor com o do cadastro.
-      // Só o usuário que edita muda (sub-dealers têm o seu próprio login).
+      // Atualiza o login do gestor que está editando.
       if (emailTrim) {
         const colide = (await new sql.Request(tx)
           .input('email', sql.NVarChar(160), emailTrim)
@@ -170,9 +151,7 @@ router.put('/conta/empresa', requireAuth, requireGestor, async (req, res, next) 
       await tx.commit();
     } catch (e) { await tx.rollback(); throw e; }
 
-    // Espelha a edição no contato do Tiny (contato.alterar). Fire-and-forget:
-    // se o Tiny estiver fora, o cron reconcilia na próxima rodada — a resposta
-    // ao usuário nunca trava por causa do Tiny.
+    // Espelha no contato do Tiny sem esperar; o cron reconcilia se falhar.
     atualizarContatoTiny(req.user.empresaId).catch(() => { });
 
     // Devolve o e-mail (agora também de login) para o front atualizar a sessão.
@@ -184,12 +163,8 @@ router.put('/conta/empresa', requireAuth, requireGestor, async (req, res, next) 
   }
 });
 
-// POST /api/conta/subdealers — gestor cria conta interna PENDENTE.
-// { nome, email, senha, permissoes: ['loja', ...] } (lista vazia = nenhum
-// acesso além do portal básico; omitida/null = acesso total).
-// A conta nasce 'pendente': como qualquer concessionário, só entra depois que
-// o administrador Fullgas aprova (aparece na fila de /api/usuarios). O gestor
-// não aprova a própria conta interna — só o admin (ver o PATCH abaixo).
+// POST /api/conta/subdealers — cria conta interna PENDENTE (só o admin aprova).
+// { nome, email, senha, permissoes } — [] = sem áreas; null = acesso total.
 router.post('/conta/subdealers', requireAuth, requireGestor, async (req, res, next) => {
   try {
     const { nome, email, senha } = req.body;
@@ -222,8 +197,7 @@ router.post('/conta/subdealers', requireAuth, requireGestor, async (req, res, ne
   } catch (e) { next(e); }
 });
 
-// PATCH /api/conta/subdealers/:id — gestor edita permissões, bloqueia/
-// desbloqueia ou redefine a senha de uma conta interna DA SUA empresa.
+// PATCH /api/conta/subdealers/:id — permissões, bloqueio ou senha de conta interna da empresa.
 router.patch('/conta/subdealers/:id', requireAuth, requireGestor, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -239,14 +213,11 @@ router.patch('/conta/subdealers/:id', requireAuth, requireGestor, async (req, re
     const { permissoes, status, senha } = req.body;
     if (status && !['aprovado', 'bloqueado'].includes(status))
       return res.status(400).json({ erro: 'Status inválido.' });
-    // O gestor bloqueia/desbloqueia, mas NÃO aprova: uma conta ainda 'pendente'
-    // só o administrador Fullgas libera. Assim a aprovação da conta interna
-    // passa pela mesma porta que a de qualquer concessionário.
+    // O gestor não aprova conta pendente; só o admin.
     if (status === 'aprovado' && alvo.Status === 'pendente')
       return res.status(403).json({ erro: 'A liberação de contas pendentes é feita pelo administrador Fullgas.' });
     if (senha !== undefined) {
-      // `alvo` já veio do banco na checagem de propriedade acima — é dele que
-      // saem o e-mail e o nome para recusar senha que repete o cadastro.
+      // Recusa senha que repete e-mail ou nome.
       const errSenha = erroSenha(senha, { email: alvo.Email, nome: alvo.Nome });
       if (errSenha) return res.status(400).json({ erro: errSenha });
     }
@@ -263,8 +234,7 @@ router.patch('/conta/subdealers/:id', requireAuth, requireGestor, async (req, re
     if (senha !== undefined) {
       const hash = await bcrypt.hash(String(senha), 10);
       sets.push('SenhaHash = @hash'); request.input('hash', sql.VarBinary(256), Buffer.from(hash, 'utf8'));
-      // Trocar a senha de uma conta interna derruba as sessões dela. É o que
-      // o gestor espera ao resetar a senha de um funcionário que saiu.
+      // Senha nova derruba as sessões da conta.
       sets.push('TokenVersion = TokenVersion + 1');
     }
     // Bloquear também expulsa na hora, em vez de valer só no próximo login.
@@ -273,17 +243,13 @@ router.patch('/conta/subdealers/:id', requireAuth, requireGestor, async (req, re
     sets.push('AtualizadoEm = SYSUTCDATETIME()');
 
     await request.query(`UPDATE dbo.Usuario SET ${sets.join(', ')} WHERE UsuarioId = @id`);
-    // Permissões novas (e revogação, quando houve) valem já na próxima
-    // requisição, sem esperar o TTL do cache de sessão.
+    // Vale já na próxima requisição.
     invalidarCacheSessao(id);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
-// DELETE /api/conta/subdealers/:id — gestor exclui uma conta interna DA SUA
-// empresa. Só contas internas (Gestor = 0); nunca a própria conta gestora nem
-// a de outra empresa. Se a conta já tem histórico (pedidos/reivindicações), a
-// FK barra a exclusão — nesse caso oriente a bloquear pelo PATCH de status.
+// DELETE /api/conta/subdealers/:id — exclui conta interna da empresa. Com histórico, a FK barra: bloqueie.
 router.delete('/conta/subdealers/:id', requireAuth, requireGestor, async (req, res, next) => {
   try {
     const id = Number(req.params.id);

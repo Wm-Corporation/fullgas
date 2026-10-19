@@ -1,6 +1,4 @@
-// Testes da camada de sessão: o cookie é a única credencial aceita, e quando
-// a proteção CSRF morde. É lógica de segurança pura — roda sem banco,
-// montando req/res falsos.
+// Sessão: o cookie é a única credencial, e quando o CSRF barra. Sem banco.
 import { describe, it, expect, beforeAll } from 'vitest';
 
 // A auth.js encerra o processo se JWT_SECRET faltar. Definimos antes do import.
@@ -63,9 +61,6 @@ describe('carregarSessao', () => {
   });
 
   it('IGNORA o header Bearer — o cookie e a unica credencial', () => {
-    // O ramo Bearer existiu so durante a migracao. Enquanto ele viveu, um token
-    // roubado do localStorage ainda valia como credencial -- exatamente o que a
-    // mudanca para cookie httpOnly veio impedir.
     const r = req({ headers: { authorization: 'Bearer ' + auth.signToken(USUARIO) } });
     corre(auth.carregarSessao, r, res());
     expect(r.user).toBeUndefined();
@@ -79,8 +74,7 @@ describe('carregarSessao', () => {
   });
 
   it('sessao por cookie SEM X-CSRF-Token nao escapa mais pelo caminho do Bearer', () => {
-    // Se o Bearer ainda fosse aceito, mandar o header Authorization seria um
-    // jeito de contornar a protecao CSRF.
+    // Bearer aceito seria um jeito de contornar o CSRF.
     const resposta = res();
     const r = req({
       cookies: { fg_sess: auth.signToken(USUARIO) },
@@ -149,16 +143,14 @@ describe('csrfProtect', () => {
   });
 
   it('responde 403 (nao quebra) com header de caracteres multibyte', () => {
-    // 32 caracteres acentuados = 64 bytes. Comparar o length da STRING em vez
-    // do numero de BYTES fazia o timingSafeEqual lancar, virando 500.
+    // 32 caracteres acentuados = 64 bytes.
     const resposta = res();
     expect(corre(auth.csrfProtect, comCookie('é'.repeat(32)), resposta)).toBe(false);
     expect(resposta.codigo).toBe(403);
   });
 
   it('deixa sair e entrar mesmo sem o fg_csrf (rotas isentas)', () => {
-    // Sessao valida + fg_csrf apagado: sem a isencao o usuario ficaria preso,
-    // sem conseguir nem deslogar nem logar de novo pela interface.
+    // Sem a isenção, quem perdesse o fg_csrf ficaria preso.
     for (const caminho of ['/api/auth/logout', '/api/auth/login', '/api/auth/senha/redefinir']) {
       const r = req({ caminho, cookies: { fg_sess: auth.signToken(USUARIO) } });
       corre(auth.carregarSessao, r, res());
@@ -175,9 +167,7 @@ describe('csrfProtect', () => {
   });
 
   it('nao aceita cookie fg_csrf plantado — o valor vale e o do JWT', () => {
-    // Este e' o ataque que derruba o double-submit classico: quem consegue
-    // escrever cookie (subdominio, MITM em HTTP) planta as duas metades com o
-    // mesmo valor. Aqui a metade autoritativa esta dentro da assinatura.
+    // Cookie plantado pelo atacante não bate com o claim assinado.
     const r = comCookie('valor-plantado-pelo-atacante');
     r.cookies.fg_csrf = 'valor-plantado-pelo-atacante';
     const resposta = res();
@@ -211,8 +201,7 @@ describe('abrirSessao / fecharSessao', () => {
   });
 
   it('fecharSessao apaga os tres repetindo os atributos', () => {
-    // Atributo diferente do usado ao gravar = navegador ignora a remocao.
-    // E' o motivo numero 1 de "logout que nao desloga".
+    // Atributos diferentes = o navegador ignora a remoção.
     const resposta = res();
     auth.fecharSessao(resposta);
     expect(resposta.apagados.map(a => a.nome).sort()).toEqual(['fg_csrf', 'fg_exp', 'fg_sess']);

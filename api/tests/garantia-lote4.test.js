@@ -1,8 +1,5 @@
-// Lote 4 (30/09/2026) — garantia ligada ao pedido.
-//   • varejo: pedido cancelado não abre; só peça ENVIADA; teto = enviado −
-//     já reclamado em outras reivindicações (fora as recusadas);
-//   • aprovar exige no mínimo 3 fotos/vídeos (qualquer origem);
-//   • tudo vai para o histórico do pedido (historico-pedido.js).
+// Garantia ligada ao pedido: cancelado não abre; teto = enviado − já reclamado;
+// aprovar exige 3 fotos/vídeos; tudo vai para o histórico do pedido.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';

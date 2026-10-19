@@ -1,20 +1,8 @@
--- ============================================================
--- Migração 004 — Envio parcial e pré-venda (backorder) em PedidoItem
--- ------------------------------------------------------------
--- Item 4 do lote 1 + adendo 06 (pré-venda/backorder):
---   QuantidadeEnviada: quanto de cada item já foi efetivamente enviado.
---   EmBackorder: item aceito sem estoque no momento do pedido (pré-venda);
---                decisão tomada na hora da compra, persiste mesmo que o
---                estoque mude depois (não é Quantidade > QuantidadeEnviada).
--- Idempotente: seguro para rodar mais de uma vez.
--- Aplicar com admin (fullgas_app não tem DDL):
---   sqlcmd -S localhost -E -C -i database/migrations/004_envio_parcial_e_backorder.sql
--- ============================================================
+-- 004 - Envio parcial e pre-venda em PedidoItem (QuantidadeEnviada, EmBackorder). Idempotente.
 USE FullgasB2B;
 GO
 
--- Necessário porque PedidoItem tem coluna computada (Subtotal) e os índices
--- abaixo são filtrados — ambos exigem estas opções ligadas para ALTER/CREATE.
+-- Coluna computada e indices filtrados exigem estas opcoes.
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO
@@ -31,10 +19,7 @@ IF COL_LENGTH('dbo.PedidoItem', 'EmBackorder') IS NULL
         CONSTRAINT DF_PedidoItem_Backorder DEFAULT (0);
 GO
 
-/* Obs.: não criamos índice filtrado por "QuantidadeEnviada < Quantidade":
-   o SQL Server não aceita comparação entre duas colunas no predicado de
-   índice filtrado (apenas coluna vs. constante). Os itens a enviar de um
-   pedido são poucos, então o IX_PedidoItem_Pedido já atende. */
+-- (Indice filtrado nao aceita comparar duas colunas; o IX_PedidoItem_Pedido basta.)
 
 /* Índice para achar rápido itens em pré-venda de um pedido */
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PedidoItem_Backorder')

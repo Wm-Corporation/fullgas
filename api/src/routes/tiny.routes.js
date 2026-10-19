@@ -1,17 +1,12 @@
-// ============================================================
-// Rotas da integração Tiny ERP
-// ------------------------------------------------------------
-//   GET  /api/tiny/produtos    lista do Tiny p/ importação (admin)
-//   POST /api/tiny/importar    importa/vincula selecionados (admin)
-//   POST /api/tiny/sync-lote   sincroniza produtos importados (admin)
-//   GET  /api/tiny/contatos    cadastro de cada concessionária no Tiny (admin)
-//   GET  /api/tiny/log         histórico de sincronizações (admin)
-//   GET  /api/tiny/pedidos     exportações de pedido ao Tiny (admin)
-//   POST /api/tiny/pedidos/:id/reexportar   força nova tentativa (admin)
-//
-// A atualização automática não passa por rota: é o agendamento
-// node-cron (tiny-cron.js), que roda o mesmo lote do sync-lote.
-// ============================================================
+// ---- Integração Tiny ERP (admin) ----
+//   GET  /api/tiny/produtos                 lista do Tiny para importar
+//   POST /api/tiny/importar                 importa/vincula
+//   POST /api/tiny/sync-lote                sincroniza importados
+//   GET  /api/tiny/contatos                 cadastro das concessionárias no Tiny
+//   GET  /api/tiny/log                      histórico de sincronização
+//   GET  /api/tiny/pedidos                  exportações de pedido
+//   POST /api/tiny/pedidos/:id/reexportar   nova tentativa
+// O sync automático é o tiny-cron.js.
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
@@ -25,8 +20,7 @@ import { erroSku } from '../validacao.js';
 
 const router = Router();
 
-// Falha da integração (token faltando, Tiny fora do ar, limite da API) vira
-// resposta clara para o admin em vez de "erro interno" genérico.
+// Erro da integração vira mensagem clara para o admin.
 function tratarErro(e, res, next) {
   if (e && e.name === 'TinyError') return res.status(502).json({ erro: e.message });
   next(e);
@@ -42,11 +36,7 @@ function resumo(resultados) {
   };
 }
 
-// GET /api/tiny/produtos?pagina=1&pesquisa=  (admin)
-// Lista do Tiny anotada com a situação local de cada item:
-//   'importado'  já vinculado (TinyId no banco)
-//   'sku-existe' o SKU existe no Fullgas sem vínculo — importar vincula
-//   'novo'       não existe no Fullgas
+// GET /api/tiny/produtos?pagina=1&pesquisa=  — situacao: 'importado' | 'sku-existe' | 'novo'
 router.get('/tiny/produtos', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const pagina = Math.max(1, Number(req.query.pagina) || 1);
@@ -83,10 +73,7 @@ router.get('/tiny/produtos', requireAuth, requireAdmin, async (req, res, next) =
   } catch (e) { tratarErro(e, res, next); }
 });
 
-// POST /api/tiny/importar  (admin) — { tinyIds: [...], categoria: 'pecas' }
-// Para cada id: busca o detalhe no Tiny e cria o produto no Fullgas com
-// TinyAtivo = 1. Se o SKU já existe, vincula em vez de duplicar (e a
-// categoria local é mantida — a do body só vale para produtos novos).
+// POST /api/tiny/importar — { tinyIds: [...], categoria }. SKU existente é vinculado (mantém a categoria).
 router.post('/tiny/importar', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const tinyIds = [...new Set((req.body.tinyIds || []).map(String).filter(Boolean))];
@@ -112,11 +99,7 @@ router.post('/tiny/importar', requireAuth, requireAdmin, async (req, res, next) 
           continue;
         }
 
-        // O SKU do Tiny passa pela MESMA allowlist do cadastro manual. O ERP é
-        // de terceiros e o campo lá é texto livre: sem esta checagem, um código
-        // com aspas ou marcação entraria no catálogo por um caminho que ninguém
-        // revisa, e o front o usa como atributo de HTML. Recusar o produto é
-        // preferível a importar um SKU que a loja não sabe renderizar.
+        // SKU do Tiny passa pela mesma validação do cadastro manual.
         const errSku = erroSku(dados.sku);
         if (errSku) {
           await registrarLog(tinyId, dados.sku, 'importacao', 'erro', errSku);
@@ -161,10 +144,7 @@ router.post('/tiny/importar', requireAuth, requireAdmin, async (req, res, next) 
   } catch (e) { tratarErro(e, res, next); }
 });
 
-// POST /api/tiny/sync-lote  (admin)
-// Body: { produtoIds: [...] } ou { skus: [...] } ou { todos: true }.
-// Sequencial contra a API do Tiny — lotes grandes demoram (≈2 s por produto);
-// o front envia em blocos e mostra o progresso.
+// POST /api/tiny/sync-lote — { produtoIds } | { skus } | { todos: true }. ≈2 s por produto.
 router.post('/tiny/sync-lote', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     let produtoIds = null; // null = todos com TinyAtivo = 1
@@ -190,10 +170,7 @@ router.post('/tiny/sync-lote', requireAuth, requireAdmin, async (req, res, next)
   } catch (e) { tratarErro(e, res, next); }
 });
 
-// GET /api/tiny/log?limite=100&sku=  (admin) — últimos registros de
-// sincronização (evento 'cron' = rodada automática, 'lote' = botão do admin,
-// 'importacao'). Com ?sku=, só os registros daquele produto — é o que o
-// editor de produto do catálogo exibe (o log saiu da tela Tiny ERP).
+// GET /api/tiny/log?limite=100&sku=  — evento 'cron' | 'lote' | 'importacao'.
 router.get('/tiny/log', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const limite = Math.min(500, Math.max(1, Number(req.query.limite) || 100));
@@ -212,19 +189,8 @@ router.get('/tiny/log', requireAuth, requireAdmin, async (req, res, next) => {
   } catch (e) { tratarErro(e, res, next); }
 });
 
-// GET /api/tiny/contatos  (admin) — situação do cadastro de cada
-// concessionária no Tiny: vínculo, edição do portal ainda não entregue e o
-// ÚLTIMO registro de sincronização do contato. Alimenta o card "Cadastros de
-// clientes com problema no Tiny" da aba Tiny ERP. Antes nenhuma tela mostrava
-// esse log, e um contato duplicado no Tiny bloqueou por semanas toda edição do
-// Art Moto Racing sem ninguém saber (achado de 30/09/2026).
-//
-// Só o último registro conta: o log guarda o histórico inteiro (1.287 erros
-// antigos de um defeito de vínculo já resolvido), e um erro que já foi
-// superado por um 'ok' posterior não é problema. E só erro RECENTE: a leitura
-// do cron que dá certo sem mudar nada não grava log, então um erro velho de
-// rede ficaria "por último" para sempre. Problema de verdade se repete a cada
-// rodada (o cron re-tenta a edição pendente a cada 30 min).
+// GET /api/tiny/contatos — vínculo, edição pendente e último log de cada concessionária.
+// Só conta erro recente (o cron re-tenta a cada 30 min).
 const JANELA_ERRO_CONTATO_MS = 2 * 60 * 60 * 1000;
 router.get('/tiny/contatos', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
@@ -262,10 +228,7 @@ router.get('/tiny/contatos', requireAuth, requireAdmin, async (_req, res, next) 
   } catch (e) { tratarErro(e, res, next); }
 });
 
-// GET /api/tiny/pedidos?pedido=<numero>  (admin) — exportações de pedido ao
-// Tiny, mais recentes primeiro. Com ?pedido=, só as daquele pedido — é o que
-// o detalhe da venda no admin exibe. 'enviado' = criado E aprovado no Tiny;
-// 'erro' fica em retry pelo cron (até o limite) ou pelo botão Reexportar.
+// GET /api/tiny/pedidos?pedido=<numero> — 'enviado' = criado e aprovado no Tiny; 'erro' é re-tentado.
 router.get('/tiny/pedidos', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const limite = Math.min(500, Math.max(1, Number(req.query.limite) || 100));
@@ -289,8 +252,7 @@ router.get('/tiny/pedidos', requireAuth, requireAdmin, async (req, res, next) =>
   } catch (e) { tratarErro(e, res, next); }
 });
 
-// POST /api/tiny/pedidos/:id/reexportar  (admin) — zera as tentativas e tenta
-// na hora. Não recria pedido já incluído no Tiny (só reaprova, se faltou).
+// POST /api/tiny/pedidos/:id/reexportar — zera tentativas e tenta já (não duplica pedido).
 router.post('/tiny/pedidos/:id/reexportar', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);

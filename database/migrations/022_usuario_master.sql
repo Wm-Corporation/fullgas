@@ -1,18 +1,7 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 022 — Usuário MASTER + proteção contra exclusão
--- ------------------------------------------------------------
--- Master = conta suprema do sistema (master@fullgas.com.br):
---   * não pode ser apagada por NINGUÉM, em nenhuma hipótese —
---     a API recusa (DELETE /usuarios/:id) e, como última linha
---     de defesa, o trigger TR_Usuario_ProtegeMaster desfaz
---     qualquer DELETE que atinja um Master=1, mesmo vindo de
---     SQL direto no banco;
---   * também não pode ser bloqueada/rebaixada pela API.
--- Idempotente: roda quantas vezes for preciso.
--- ============================================================
+-- 022 - Usuario MASTER protegido contra exclusao (removido pela 023). Idempotente.
 SET QUOTED_IDENTIFIER ON;
 
 IF COL_LENGTH('dbo.Usuario', 'Master') IS NULL
@@ -35,14 +24,7 @@ BEGIN
 END;
 GO
 
--- Cria o usuário master (uma única vez) na empresa FULLGAS MOTOS (matriz).
--- Senha inicial definida pela equipe; trocar depois do primeiro acesso.
---
--- O teste da empresa é obrigatório: em banco NOVO (servidor recém-provisionado,
--- sem os seeds) a subconsulta devolve NULL e o INSERT morre em EmpresaId NOT
--- NULL, abortando a migração. Sem a matriz cadastrada não há onde pendurar o
--- master — e a 023 logo abaixo o remove de qualquer forma —, então o certo é
--- simplesmente pular.
+-- Cria o master na matriz, se ela existir (banco novo nao tem).
 IF EXISTS (SELECT 1 FROM dbo.Empresa WHERE RazaoSocial = 'FULLGAS MOTOS')
 AND NOT EXISTS (SELECT 1 FROM dbo.Usuario WHERE Email = 'master@fullgas.com.br')
   INSERT INTO dbo.Usuario (EmpresaId, Nome, Email, SenhaHash, Papel, Status, Gestor, Master)

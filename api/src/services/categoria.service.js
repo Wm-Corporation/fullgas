@@ -1,8 +1,4 @@
-// ============================================================
-// Serviço de Categoria — REGRA DE NEGÓCIO do catálogo.
-// Não conhece req/res: recebe dados simples, lança AppError quando a regra
-// é violada e fala com o banco só pelo repositório.
-// ============================================================
+// Serviço de Categoria: regras do catálogo (lança AppError).
 import * as repo from '../repositories/categoria.repository.js';
 import { CAT_URL_BASE } from '../middlewares/upload-categoria.js';
 import { apagarUpload } from '../routes/finder.routes.js';
@@ -27,8 +23,7 @@ export async function listar() {
   }));
 }
 
-// Cria categoria de topo ou subcategoria. Máx. 2 níveis: o pai não pode ser,
-// ele mesmo, uma subcategoria. Devolve o Codigo (slug único) gerado.
+// Cria categoria ou subcategoria (máx. 2 níveis). Devolve o Codigo gerado.
 export async function criar({ nome, icone, pai }) {
   const nomeLimpo = String(nome || '').trim();
   const iconeLimpo = String(icone || '').trim() || null;
@@ -76,8 +71,7 @@ export async function excluir(codigo) {
   await repo.apagar(id);
 }
 
-// Sobe/troca a foto. Recebe o arquivo já salvo em disco (nome vem do multer).
-// Se a categoria não existe, remove o arquivo recém-subido e falha.
+// Troca a foto. Categoria inexistente: apaga o arquivo enviado e falha.
 export async function definirImagem(codigo, filename) {
   const rel = CAT_URL_BASE + filename;
   const r = await repo.definirImagem(codigo, rel);

@@ -1,36 +1,14 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 041 - Limpa TODOS os chassis (dbo.Veiculo) ja cadastrados.
---
--- Pedido do dono (18/09/2026): zerar a base de chassis para recomecar o
--- cadastro do zero, agora com o campo Ano (migration 042).
---
--- O que sai junto, e por que:
---   - VeiculoHistorico: a FK e' ON DELETE CASCADE (migration 033), some
---     sozinho com o chassi. A linha do tempo de um chassi que nao existe
---     mais nao teria a quem pertencer.
---   - Reivindicacao presa a um chassi (VeiculoId NOT NULL): apagada junto,
---     por decisao do dono. Seus anexos (001) e pecas (009) sao ON DELETE
---     CASCADE e saem juntos. A FK Reiv->Veiculo e' NO ACTION: sem apagar a
---     reivindicacao, o DELETE do chassi seria RECUSADO pelo banco.
---   - Reivindicacao SEM chassi (VeiculoId NULL) NAO e' tocada.
---
--- ATENCAO - ESTA MIGRATION NAO E' IDEMPOTENTE NO SENTIDO USUAL.
--- O laco do deploy.sh roda TODAS as migrations em TODO deploy. Um DELETE
--- solto aqui apagaria, a cada deploy, os chassis cadastrados depois desta
--- limpeza - o dono perderia o trabalho sem nenhum aviso. Por isso a limpeza
--- roda UMA UNICA VEZ, protegida pela tabela de controle dbo.MigracaoExecutada:
--- na primeira vez ela limpa e assina; nos deploys seguintes ela nao faz nada.
--- ============================================================
+-- 041 - Apaga TODOS os chassis (pedido do dono, 18/09/2026), com historico e reivindicacoes presas a eles.
+-- NAO e idempotente: roda UMA vez, controlada por dbo.MigracaoExecutada (o deploy roda todas as migrations).
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 SET XACT_ABORT ON;
 GO
 
--- Tabela de controle: o registro de quais migrations DE UMA VEZ SO ja rodaram.
--- (As migrations idempotentes normais nao precisam dela.)
+-- Controle das migrations que rodam uma vez so.
 IF OBJECT_ID('dbo.MigracaoExecutada', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.MigracaoExecutada (

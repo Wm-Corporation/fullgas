@@ -1,25 +1,12 @@
-// ============================================================
-// Rastreador de pré-venda (logística, NÃO financeiro).
-// Lista as peças em pré-venda (PedidoItem.EmBackorder=1) que ainda faltam
-// enviar, por cliente, com referência ao pedido de origem. A cobrança é a
-// fatura cheia do pedido — aqui não há valor, só organização de envio.
-// Status por peça:
-//   'Aguardando'  -> produto ainda sem estoque
-//   'Disponivel'  -> produto voltou ao estoque (admin pode marcar "Enviado")
-// Marcar "Enviado" usa PUT /api/pedidos/:numero/itens/:itemId/enviado.
-// ============================================================
+// ---- Rastreador de pré-venda (logística, sem valores) ----
+// Peças em pré-venda ainda não enviadas: 'Aguardando' (sem estoque) ou 'Disponivel'.
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireAreaAny } from '../auth.js';
 
 const router = Router();
 
-// GET /api/prevenda — cliente vê as suas; admin vê todas (para organizar por cliente).
-//
-// Sobre a área exigida: o conteúdo aqui é logística, não dinheiro (ver o
-// cabeçalho do arquivo), mas o portal desenha esta lista DENTRO da tela
-// Financeiro. Por isso 'financeiro' passa — é onde o usuário a encontra — e
-// 'pedidos' também, porque a informação é sobre pedidos dele.
+// GET /api/prevenda — cliente vê as suas; admin vê todas. Aparece na tela Financeiro.
 router.get('/prevenda', requireAuth, requireAreaAny(['financeiro', 'pedidos']), async (req, res, next) => {
   try {
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
@@ -50,8 +37,7 @@ router.get('/prevenda', requireAuth, requireAreaAny(['financeiro', 'pedidos']), 
       empresaId: r.EmpresaId,
       estoque: r.EstoqueAtual == null ? 0 : r.EstoqueAtual,
       previsao: r.PrevisaoChegada || null,
-      // Só fica "Disponível p/ envio" quando o estoque cobre a quantidade
-      // pendente; estoque parcial (abaixo do pendente) continua "Aguardando".
+      // Disponível só quando o estoque cobre o que falta.
       status: (r.EstoqueAtual || 0) >= (r.Quantidade - r.QuantidadeEnviada) ? 'Disponivel' : 'Aguardando'
     })));
   } catch (e) { next(e); }

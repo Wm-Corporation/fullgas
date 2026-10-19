@@ -1,8 +1,4 @@
-// ============================================================
-// Serviço de Produto — REGRA DE NEGÓCIO do catálogo (SKUs).
-// Orquestra repositório de produto + de categoria e a limpeza de arquivos
-// de imagem. Não conhece req/res.
-// ============================================================
+// Serviço de Produto: regras do catálogo (SKUs).
 import * as repo from '../repositories/produto.repository.js';
 import * as catRepo from '../repositories/categoria.repository.js';
 import { PROD_URL_BASE } from '../middlewares/upload-produto.js';
@@ -23,10 +19,7 @@ export async function obter(sku) {
 export async function criar({ artigo, nome, cat, preco, estoque, previsao, descricao }) {
   if (!artigo || !nome || !(preco >= 0)) throw erroValidacao('Dados incompletos.');
 
-  // O SKU vira atributo de HTML no front (data-art=, href=). A allowlist em
-  // validacao.js impede que ele carregue aspas ou marcação — ver o comentário
-  // de RE_SKU lá. Os limites de texto batem com o tamanho das colunas: sem a
-  // checagem, o SQL Server trunca em silêncio.
+  // SKU vira atributo HTML no front: só caracteres seguros. Limites = tamanho das colunas.
   const errSku = erroSku(artigo);
   if (errSku) throw erroValidacao(errSku);
   const errTxt = erroTextoProduto({ nome, descricao, previsao });
@@ -37,8 +30,7 @@ export async function criar({ artigo, nome, cat, preco, estoque, previsao, descr
   await repo.inserir({ sku: artigo, nome, catId, descricao, preco, estoque, previsao });
 }
 
-// Edita. Produto do Tiny (espelho do ERP): nome, preço, estoque, descrição e
-// foto NÃO mudam aqui — só categoria e previsão de chegada. Devolve { tiny }.
+// Edita. Produto do Tiny: só categoria e previsão mudam aqui. Devolve { tiny }.
 export async function atualizar(sku, { nome, cat, preco, estoque, previsao, descricao }) {
   const errTxt = erroTextoProduto({ nome, descricao, previsao });
   if (errTxt) throw erroValidacao(errTxt);
@@ -62,8 +54,7 @@ export async function excluir(sku) {
   if (imagem) apagarUpload(imagem);   // sem 404: apagar o que não existe é no-op
 }
 
-// Sobe/troca a foto. Já recebe o arquivo salvo em disco (nome vem do multer).
-// Se o produto é do Tiny ou não existe, remove o arquivo recém-subido e falha.
+// Troca a foto. Produto do Tiny ou inexistente: apaga o arquivo enviado e falha.
 export async function definirImagem(sku, filename) {
   const rel = PROD_URL_BASE + filename;
   const est = await repo.estado(sku);

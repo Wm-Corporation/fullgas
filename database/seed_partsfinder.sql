@@ -1,25 +1,8 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- Carga do Parts Finder — modelos e seções (estrutura + imagens)
--- ------------------------------------------------------------
--- Gerado a partir do banco de desenvolvimento para levar o Parts
--- Finder ao servidor SEM levar o resto dos dados. Refazer as 37
--- seções à mão (subir imagem + numerar) seria trabalho braçal puro.
---
--- NÃO inclui dbo.PecaSecao (o vínculo seção -> produto): os produtos
--- vêm do Tiny com ProdutoId novo, então o vínculo antigo apontaria
--- para o lugar errado. Remapear é trabalho de tela, no admin.
---
--- Os IDs originais são preservados (IDENTITY_INSERT) para que o
--- ModeloId das seções continue casando.
---
--- AS IMAGENS NÃO ESTÃO AQUI: copie api/uploads/finder/ para o
--- servidor, senão as seções ficam sem diagrama.
---
--- Idempotente: só insere o que ainda não existe.
--- ============================================================
+-- Carga do Parts Finder: modelos e secoes, com os IDs originais. Sem PecaSecao.
+-- As imagens nao estao aqui: copie api/uploads/finder/ para o servidor. Idempotente.
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO

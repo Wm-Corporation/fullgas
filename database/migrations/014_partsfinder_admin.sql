@@ -1,25 +1,4 @@
-/* ============================================================================
-   MIGRAÇÃO 014 — Parts Finder administrável (Frente 1.4 expandida)
-   ----------------------------------------------------------------------------
-   Tudo que o finder mostra passa a ser editável pelo painel admin:
-
-   - ModeloMoto ganha Arvore (caminho hierárquico do seletor de modelos,
-     separado por ' > '), ImagemUrl (foto da moto, botão "Show Image") e
-     DocTecnicaUrl (link da documentação técnica).
-   - Produto ganha ImagemUrl (miniatura da peça nas listas do finder/admin).
-   - SecaoModelo ganha ImagemUrl (diagrama explodido enviado pelo admin).
-   - PecaSecao ganha NumeroImagem (o "Number on Image" — número impresso no
-     diagrama; texto, pode repetir), QuantidadePadrao (quantidade pré-preenchida
-     na tela do cliente), Ordem (posição da linha na lista) e Ativo (Situação
-     "Habilitar" do admin).
-   - Nova tabela SecaoHotspot: áreas clicáveis sobre o diagrama (posição e
-     tamanho em PIXELS da imagem em tamanho natural), com texto opcional e
-     LinkNumero que aponta para o NumeroImagem das peças.
-
-   Idempotente: cada passo verifica antes de alterar. Pode rodar 2x.
-   Rodar como administrador (fullgas_app não tem DDL):
-     sqlcmd -E -S <servidor> -i 014_partsfinder_admin.sql
-   ============================================================================ */
+-- 014 - Parts Finder administravel: imagens, NumeroImagem, ordem, ativo e SecaoHotspot. Idempotente.
 
 USE FullgasB2B;
 GO
@@ -102,10 +81,7 @@ UPDATE dbo.PecaSecao SET NumeroImagem = CAST(Posicao AS VARCHAR(12)) WHERE Numer
 UPDATE dbo.PecaSecao SET Ordem = Posicao WHERE Ordem = 0;
 GO
 
-/* ---- 5) SecaoHotspot: áreas clicáveis do diagrama -------------------------
-   PosX/PosY/Largura/Altura em pixels da imagem em tamanho natural (o front
-   converte para % ao renderizar em qualquer zoom). LinkNumero casa com
-   PecaSecao.NumeroImagem — pode haver várias áreas com o mesmo número.       */
+-- ---- 5) SecaoHotspot: areas clicaveis (pixels da imagem original; LinkNumero = NumeroImagem) ----
 IF OBJECT_ID(N'dbo.SecaoHotspot', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.SecaoHotspot (

@@ -1,8 +1,4 @@
-// ============================================================
-// Controller de Categoria — traduz HTTP ↔ serviço.
-// Lê o corpo/params, chama o serviço e monta a resposta. Erros de regra
-// (AppError) sobem via next() para o tratador central.
-// ============================================================
+// Controller de Categoria: HTTP ↔ serviço.
 import * as service from '../services/categoria.service.js';
 
 export async function listar(_req, res, next) {

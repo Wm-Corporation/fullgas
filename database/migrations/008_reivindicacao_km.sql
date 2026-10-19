@@ -1,12 +1,4 @@
-/* ============================================================================
-   MIGRAÇÃO 008 — Quilometragem na reivindicação
-   ----------------------------------------------------------------------------
-   Complementa a migração 001 (que adicionou DataDefeito e Horimetro). A
-   "duração de operação" da peça pode ser informada em HORAS (Horimetro, já
-   existente) e/ou em QUILÔMETROS (esta coluna). O cliente preenche o que tiver.
-
-   Idempotente: adiciona a coluna só se ainda não existir. Pode rodar 2x.
-   ============================================================================ */
+-- 008 - Quilometragem na reivindicacao. Idempotente.
 
 USE FullgasB2B;
 GO

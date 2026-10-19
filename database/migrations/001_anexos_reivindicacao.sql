@@ -1,14 +1,4 @@
-/* ============================================================================
-   MIGRAÇÃO 001 — Anexos de reivindicação (fotos e documentos)
-   ----------------------------------------------------------------------------
-   O que é uma "migração": cada mudança no banco depois do schema inicial vira
-   um arquivo numerado como este. Você NUNCA edita o schema original; você
-   adiciona migrações. Assim o histórico de mudanças fica rastreável e qualquer
-   pessoa (ou servidor) reconstrói o banco rodando schema + migrações em ordem.
-
-   Esta migração prepara o terreno para o recurso "cliente envia fotos junto
-   à reivindicação". Ela é segura para rodar em um banco que já tem dados.
-   ============================================================================ */
+-- 001 - Anexos de reivindicacao (fotos e documentos). Seguro em banco com dados.
 
 USE FullgasB2B;
 GO
@@ -22,9 +12,7 @@ BEGIN
         NomeArquivo     NVARCHAR(260)   NOT NULL,   -- nome original enviado
         TipoConteudo    VARCHAR(100)    NULL,       -- ex.: 'image/jpeg'
         TamanhoBytes    INT             NULL,
-        -- Guardamos a URL/caminho do arquivo, não o binário. O arquivo em si
-        -- fica em armazenamento de objetos (ex.: Azure Blob, S3) — o banco
-        -- guarda só a referência. É a prática recomendada.
+        -- So a URL; o arquivo fica fora do banco.
         Url             NVARCHAR(1000)  NOT NULL,
         EnviadoPor      INT             NULL,       -- usuário que anexou
         CriadoEm        DATETIME2(0)    NOT NULL CONSTRAINT DF_ReivAnexo_CriadoEm DEFAULT (SYSUTCDATETIME()),
@@ -43,10 +31,7 @@ ELSE
     PRINT N'Tabela ReivindicacaoAnexo já existe — nada a fazer.';
 GO
 
-/* ----------------------------------------------------------------------------
-   Campos extras na Reivindicação para a versão "expandida" que você mencionou.
-   Adicionamos apenas se ainda não existirem.
-   ---------------------------------------------------------------------------- */
+-- Campos extras da reivindicacao (so se ainda nao existirem).
 IF COL_LENGTH('dbo.Reivindicacao', 'NumeroPeca') IS NULL
     ALTER TABLE dbo.Reivindicacao ADD NumeroPeca VARCHAR(40) NULL;     -- SKU relacionado ao defeito
 GO

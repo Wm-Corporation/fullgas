@@ -1,14 +1,4 @@
-/* ============================================================================
-   MIGRAÇÃO 010 — Devolução ao revendedor + fim do status "Esboço" no banco
-   ----------------------------------------------------------------------------
-   - "Esboço" deixa de ser status do banco: rascunhos passam a viver no navegador
-     do cliente (localStorage). Convertemos qualquer 'Esboço' existente para
-     'Em processo' e apertamos o CHECK de Status.
-   - Novo campo FaltaInformacao: o admin descreve o que falta ao DEVOLVER a
-     reivindicação (Devolvido=1) para o revendedor completar e reenviar.
-
-   Idempotente: pode rodar 2x.
-   ============================================================================ */
+-- 010 - Devolucao ao revendedor (FaltaInformacao) e fim do status 'Esboco' no banco. Idempotente.
 
 USE FullgasB2B;
 GO

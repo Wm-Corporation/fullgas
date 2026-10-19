@@ -1,24 +1,9 @@
-/* ============================================================================
-   MIGRAÇÃO 015 — Integração com o Tiny ERP (docs/08-integracao-tiny.md)
-   ----------------------------------------------------------------------------
-   O Tiny é a única fonte de verdade dos produtos importados dele: estoque,
-   preço, nome, descrição e foto são sempre espelho do Tiny (webhook + lote).
-
-   - Produto ganha TinyId (id do produto no Tiny), TinyAtivo (1 = espelhado,
-     campos ficam somente leitura no admin) e TinySincronizadoEm.
-   - Nova tabela TinySyncLog: histórico de sincronizações (webhook, importação
-     e lote) para o admin conferir e para depurar falhas.
-
-   Idempotente: cada passo verifica antes de alterar. Pode rodar 2x.
-   Rodar como administrador (fullgas_app não tem DDL):
-     sqlcmd -E -S <servidor> -i 015_tiny_integracao.sql
-   ============================================================================ */
+-- 015 - Integracao Tiny: TinyId/TinyAtivo no Produto e tabela TinySyncLog. Idempotente.
 
 USE FullgasB2B;
 GO
 
--- O índice filtrado (passo 1) exige QUOTED_IDENTIFIER ON; o sqlcmd roda OFF
--- por padrão.
+-- Indice filtrado exige QUOTED_IDENTIFIER ON.
 SET QUOTED_IDENTIFIER ON;
 GO
 
@@ -41,8 +26,7 @@ BEGIN
 END
 GO
 
-/* Um produto do Tiny só pode estar vinculado a um produto do Fullgas.
-   Índice único filtrado: NULL (produtos manuais) não conta. */
+-- Um produto do Tiny so pode estar vinculado a um produto local (NULL nao conta).
 IF NOT EXISTS (SELECT 1 FROM sys.indexes
                 WHERE name = N'UX_Produto_TinyId' AND object_id = OBJECT_ID(N'dbo.Produto'))
 BEGIN

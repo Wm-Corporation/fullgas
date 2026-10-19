@@ -14,12 +14,7 @@
   // se já existe sessão, vai direto para o portal
   if (FG.session()) { location.href = '/portal'; return; }
 
-  // Cookie de sessão válido, mas sem o perfil no localStorage. Acontece quando
-  // o perfil se perde e o cookie sobrevive — por exemplo, um logout cujo POST
-  // não chegou ao servidor, ou uma limpeza de localStorage sem limpar cookies.
-  // A sessão EXISTE; só o cache local da tela sumiu. O adaptador já refaz o
-  // perfil pelo GET /auth/sessao no carregamento, então basta esperar e seguir
-  // em frente, em vez de exigir uma senha de quem já está autenticado.
+  // Cookie válido sem perfil local: o adaptador refaz o perfil; segue para o portal.
   FG.pronto.then(function () { if (FG.session()) location.href = '/portal'; });
 
   function showMsg(texto, tipo) {
@@ -38,8 +33,7 @@
     history.replaceState(null, '', location.pathname);
   })();
 
-  // 'login' | 'cad' | 'esq'. "Esqueci minha senha" não tem aba própria: a
-  // aba Entrar segue marcada, porque é para lá que o fluxo volta.
+  // 'login' | 'cad' | 'esq'. "Esqueci" mantém a aba Entrar marcada.
   function switchTab(qual) {
     tabLogin.classList.toggle('on', qual !== 'cad');
     tabCad.classList.toggle('on', qual === 'cad');
@@ -75,26 +69,9 @@
   document.getElementById('btn-esq').addEventListener('click', doEsqueci);
   formEsq.addEventListener('keydown', function (e) { if (e.key === 'Enter') doEsqueci(); });
 
-  /* ---------- verificação anti-robô ----------
-     Três detalhes que decidem se isto funciona ou vira suporte:
-
-     1. O script do provedor só é BAIXADO se houver chave configurada no NOSSO
-        servidor. Sem chave, nenhuma requisição sai para fora e o bloco nem
-        aparece — o desenvolvimento local segue sem depender de rede.
-
-     2. Renderização EXPLÍCITA (render=explicit + turnstile.render), e não a
-        automática por atributo `class="cf-turnstile"` no HTML. O motivo é o
-        mesmo de antes: nada de configuração pendurada em atributo de
-        marcação, para a CSP estrita continuar viável.
-
-     3. O token vale UMA VEZ SÓ e expira. Por isso o widget é REINICIADO a
-        cada tentativa que falha — sem isso, o segundo clique em "Entrar"
-        reenviaria um token já queimado e o usuário ficaria preso num erro
-        que não tem como entender. É o erro clássico desta integração.
-
-     4. São DOIS widgets — um no login, outro no cadastro. Um token do
-        Turnstile é de uso único, então não dá para desenhar um só e mandar o
-        mesmo valor nas duas rotas. Cada formulário tem o seu, com o seu id. */
+  /* ---------- verificação anti-robô (Turnstile) ----------
+     Só carrega com chave no servidor. Renderização explícita (CSP).
+     Token de uso único: reinicia o widget a cada falha. Um widget no login, outro no cadastro. */
   var captchaId = null;      // widget do login, ou null se não há captcha
   var captchaIdCad = null;   // widget do cadastro, idem
 
@@ -110,8 +87,7 @@
         sitekey: siteKey,
         language: 'pt-br',
         theme: 'dark',   // a tela de acesso é preta (css/acesso.css)
-        // Expirou sozinho na tela parada: renova em silêncio, para o usuário
-        // não descobrir só ao clicar em Entrar.
+        // Expirou parado: renova em silêncio.
         'expired-callback': function () { turnstile.reset(captchaId); }
       });
       bloco.classList.remove('hidden');
@@ -124,8 +100,7 @@
       });
       blocoCad.classList.remove('hidden');
     };
-    // Provedor fora do ar ou bloqueado na rede do cliente: os blocos ficam
-    // escondidos e login/cadastro continuam. O servidor também libera nesse caso.
+    // Provedor fora do ar: esconde os blocos (o servidor também libera).
     s.onerror = function () {
       bloco.classList.add('hidden');
       blocoCad.classList.add('hidden');
@@ -167,10 +142,7 @@
   FG.bindMask('cd-numero', FG.maskNumero);     // só dígitos
   FG.bindMask('cd-cidade', FG.maskCidade);     // sem números/caracteres especiais
 
-  /* ---------- CEP: busca automática (ViaCEP) ----------
-     Ao completar os 8 dígitos, preenche logradouro, bairro, cidade e UF —
-     sobra só número e complemento para o cliente digitar. Os campos seguem
-     editáveis (nem todo CEP devolve logradouro, ex.: cidades com CEP único). */
+  /* ---------- CEP: preenche o endereço pelo ViaCEP (campos seguem editáveis) ---------- */
   var cepBuscado = '';
   function buscarCep(valor) {
     var dig = valor.replace(/\D/g, '');
@@ -229,9 +201,7 @@
     if (!/^\d+$/.test(e.numero)) { showMsg('Número do endereço deve conter apenas dígitos.'); return; }
     if (/[^A-Za-zÀ-ÖØ-öø-ÿ'. -]/.test(e.cidade)) { showMsg('Cidade não pode conter números ou caracteres especiais.'); return; }
 
-    // Anti-robô, no fim das validações: só faz sentido queimar o token depois
-    // que o formulário está bom, senão o usuário perde a verificação a cada
-    // campo errado.
+    // Token por último, depois das validações.
     dados.captcha = captchaIdCad !== null ? turnstile.getResponse(captchaIdCad) : '';
     if (captchaIdCad !== null && !dados.captcha) { showMsg('Confirme que você não é um robô.'); return; }
 

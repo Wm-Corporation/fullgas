@@ -1,49 +1,9 @@
-// ============================================================
-// Exportação de PEDIDOS para o Tiny ERP (sentido Fullgas → Tiny)
-// ------------------------------------------------------------
-// O estoque do Tiny é compartilhado com outro e-commerce (Magento).
-// Cada peça vendida vira um pedido 'aprovado' no Tiny (a aprovação
-// baixa o estoque lá — a conta precisa estar com "lançar estoque na
-// aprovação do pedido" ligado) — mas só DEPOIS que alguém conferiu a
-// prateleira: o estoque do Tiny não bate com o físico em algumas peças.
-//
-// Fluxo:
-//   REMESSA (escopo 'remessa'): o admin decide o que vai nesta saída
-//   (quantidade encontrada/enviada de cada peça) e clica em "Confirmar
-//   envio" — só então as peças daquela remessa viram um pedido no Tiny.
-//   Um pedido enviado em partes gera uma remessa por saída; o Tiny
-//   recebe exatamente o que saiu. Se o Tiny estiver fora, a linha fica
-//   'erro' e o cron (tiny-cron.js) tenta de novo; enquanto isso o
-//   espelho de estoque desconta a reserva (tiny.js → reservaPendente).
-//   Aprovar o pedido (sair de 'Pendente') NÃO exporta nada.
-//
-//   HISTÓRICO: o escopo 'normal' (pedido inteiro exportado na
-//   APROVAÇÃO) valeu até 17/09/2026 e de novo de 30/09 a 05/10/2026.
-//   As linhas antigas continuam sendo lidas; só a garantia ainda cria
-//   'normal' (vai ao Tiny inteira, uma vez, quando a reivindicação é
-//   aprovada).
-//
-//   Pré-venda: quando o admin libera o envio do backorder, cada
-//   liberação gera um pedido próprio no Tiny (escopo 'backorder')
-//   com o snapshot dos itens liberados naquele momento (ItensJson).
-//
-//   Cancelamento local → se nenhuma peça saiu, os pedidos já criados no
-//   Tiny são cancelados lá (devolve o estoque). Se alguma peça já saiu,
-//   as remessas ficam (são peças que saíram); um pedido que foi inteiro
-//   ao Tiny ganha um aviso para ajuste manual (só o que não saiu deve
-//   voltar ao estoque).
-//
-//   Tiny → Fullgas: pedido cancelado ou excluído no Tiny vira aviso na
-//   linha de exportação (aparece na aba Tiny ERP do painel); o pedido do
-//   Fullgas não é cancelado sozinho, porque isso anularia a fatura.
-//
-// Idempotência: TinyPedidoId é gravado logo após a inclusão — um
-// pedido NUNCA é incluído duas vezes; se só a aprovação falhar, o
-// retry reaprova sem recriar.
-//
-// Liga/desliga: TINY_EXPORTAR_PEDIDOS=1 no .env (além do TINY_TOKEN).
-// Desligado, o site vende normalmente só com o estoque local.
-// ============================================================
+// Exportação de pedidos para o Tiny (o estoque lá é compartilhado com o Magento).
+//   remessa   "Confirmar envio": as peças que saíram viram um pedido aprovado no Tiny (-R2, -R3…).
+//   backorder cada liberação de pré-venda vira pedido próprio (-PV).
+//   normal    pedido inteiro de uma vez (hoje só garantia).
+// Cancelamento local cancela no Tiny o que não saiu. Cancelado no Tiny vira só aviso.
+// TinyPedidoId gravado logo após incluir: nunca duplica. Liga com TINY_EXPORTAR_PEDIDOS=1.
 import 'dotenv/config';
 import { query, sql } from './db.js';
 import {
@@ -53,8 +13,7 @@ import {
 import { atualizarContatoTiny, clientesLigado } from './tiny-contatos.js';
 import { registrarEventoPedido } from './historico-pedido.js';
 
-// Depois disso o cron para de insistir; o admin pode reexportar pelo painel
-// (o botão zera as tentativas).
+// Depois disso, só o botão Reexportar.
 const MAX_TENTATIVAS = 5;
 
 export function exportacaoLigada() {
@@ -67,11 +26,7 @@ function fmtData(d) {
 
 /* ---------------- checagem de estoque em tempo real ---------------- */
 
-// Chamada pelo checkout ANTES de baixar o estoque local: consulta o saldo
-// atual no Tiny para cada item da cesta e atualiza o espelho local. Se o
-// Magento acabou de vender a peça, o cliente descobre agora — e não depois
-// de "comprar" algo que já não existe. Falha do Tiny NÃO bloqueia a venda:
-// segue com o estoque local (o cron corrige depois).
+// Checkout: atualiza o estoque da cesta com o saldo real do Tiny. Falha do Tiny não bloqueia.
 export async function atualizarEstoqueCesta(skus) {
   if (!exportacaoLigada() || !skus.length) return;
   const params = {};
@@ -99,9 +54,7 @@ export async function atualizarEstoqueCesta(skus) {
 
 /* ---------------- criação das exportações (dentro da transação do pedido) -- */
 
-// Insere a linha de exportação NA MESMA transação que grava o pedido: ou o
-// pedido nasce com a exportação agendada, ou nada. `itens` (só no escopo
-// 'backorder') é o snapshot [{ sku, nome, preco, qtd }] liberado agora.
+// Agenda a exportação na mesma transação do pedido. `itens` = snapshot [{ sku, nome, preco, qtd }].
 export async function inserirExportacao(tx, pedidoId, escopo, itens = null) {
   await new sql.Request(tx)
     .input('pid', sql.Int, pedidoId)
@@ -112,10 +65,7 @@ export async function inserirExportacao(tx, pedidoId, escopo, itens = null) {
 
 /* ---------------- montagem do payload da API v2 ---------------- */
 
-// Formato de pedido.incluir.php. Cliente = a concessionária (Empresa) + o
-// endereço de entrega cadastrado; itens = snapshot do PedidoItem (escopo
-// 'normal') ou o ItensJson gravado na liberação (escopo 'backorder').
-// Exportada só para depuração/teste (monta sem enviar).
+// Payload de pedido.incluir.php: cliente = a concessionária; itens do pedido ou do ItensJson.
 export async function montarPayload(exp) {
   const ped = (await query(
     `SELECT p.PedidoId, p.NumeroPedido, p.DataPedido, p.EmpresaId, p.Tipo,
@@ -156,11 +106,7 @@ export async function montarPayload(exp) {
   const backorder = exp.Escopo === 'backorder';
   const remessa = exp.Escopo === 'remessa';
 
-  // Ordem desta remessa no pedido: a 1ª leva o número do pedido Fullgas (o
-  // caso comum, pedido que sai inteiro de uma vez); as seguintes ganham -R2,
-  // -R3... porque o número do pedido de e-commerce precisa ser único no Tiny.
-  // Exportações 'normal' (regra antiga) contam na ordem: se um pedido já foi
-  // ao Tiny inteiro, uma remessa posterior nunca reusa aquele número.
+  // 1ª remessa usa o número do pedido; as seguintes ganham -R2, -R3… (número único no Tiny).
   let ordem = 1;
   if (remessa) {
     ordem = (await query(
@@ -170,8 +116,7 @@ export async function montarPayload(exp) {
       { pid: exp.PedidoId, eid: exp.ExportId }
     ))[0].n || 1;
   }
-  // Ainda falta peça neste pedido? Entra na observação, para quem abrir o
-  // pedido no Tiny saber que o restante vem em outra remessa.
+  // Ainda falta peça? Vai na observação.
   const faltam = remessa ? (await query(
     `SELECT SUM(Quantidade - QuantidadeEnviada) AS n FROM dbo.PedidoItem
       WHERE PedidoId = @pid AND Quantidade > QuantidadeEnviada`,
@@ -210,8 +155,7 @@ export async function montarPayload(exp) {
         valor_unitario: Number(i.preco).toFixed(2)
       }
     })),
-    // Sufixo -PV nas liberações de pré-venda: cada uma é um pedido próprio no
-    // Tiny e o número do e-commerce precisa distingui-las.
+    // -PV nas liberações de pré-venda.
     numero_pedido_ecommerce: backorder
       ? `${ped.NumeroPedido}-PV${exp.ExportId}`
       : (remessa && ordem > 1 ? `${ped.NumeroPedido}-R${ordem}` : ped.NumeroPedido),
@@ -224,19 +168,14 @@ export async function montarPayload(exp) {
             (faltam ? `; faltam ${faltam} peça(s), que virão em remessa seguinte` : ' (envio concluído)')
           : `Pedido Fullgas ${ped.NumeroPedido}`) + ` — usuário ${ped.UsuarioEmail}.`
   };
-  // Lista de preço com que o pedido foi precificado (migration 048). Só
-  // IDENTIFICA a lista no Tiny: o valor_unitario de cada item (obrigatório
-  // na API) já sai com o % aplicado. Lista que sumiu do Tiny não vai —
-  // um id inexistente faria o Tiny recusar o pedido inteiro.
+  // Só identifica a lista (o preço já vai com o %). Lista inativa não vai, senão o Tiny recusa.
   if (ped.ListaPrecoId && ped.ListaAtiva) payload.id_lista_preco = ped.ListaPrecoId;
   return payload;
 }
 
 /* ---------------- processamento da fila ---------------- */
 
-// Exporta UMA linha: inclui o pedido no Tiny (se ainda não foi) e o aprova.
-// Os dois passos são separados de propósito — se a aprovação falhar, o retry
-// NÃO recria o pedido (TinyPedidoId já gravado), só reaprova.
+// Exporta uma linha: inclui (se ainda não) e aprova. Se só a aprovação falhar, o retry não recria.
 export async function exportarPedido(exportId) {
   const exp = (await query(
     'SELECT * FROM dbo.TinyPedidoExport WHERE ExportId = @id', { id: exportId }
@@ -275,12 +214,7 @@ export async function exportarPedido(exportId) {
       detalhe: 'O estoque do Tiny foi descontado.'
     });
 
-    // O pedido.incluir casa o cliente pelo CNPJ POR CONTA PRÓPRIA e, se não
-    // achar, CRIA um contato — sem avisar e sem respeitar o nosso vínculo.
-    // Foi assim que nasceram contatos duplicados presos ao cadastro antigo.
-    // Reconcilia logo depois: confere quem detém o CNPJ, re-aponta o vínculo
-    // se mudou e empurra o cadastro atual. Nunca derruba a exportação — o
-    // pedido já está no Tiny; isto é só o cadastro acompanhando.
+    // O Tiny pode criar contato duplicado sozinho: reconcilia o cadastro (nunca derruba a exportação).
     if (clientesLigado()) {
       const emp = (await query(
         'SELECT EmpresaId FROM dbo.Pedido WHERE PedidoId = @pid', { pid: exp.PedidoId }
@@ -296,8 +230,7 @@ export async function exportarPedido(exportId) {
       { msg: String(e.message).slice(0, 500), id: exportId }
     ).catch(err => console.error('TinyPedidoExport não atualizou:', err.message));
     console.error(`✗ Exportação Tiny #${exportId} falhou: ${e.message}`);
-    // Só a PRIMEIRA falha entra no histórico — o cron re-tenta a cada rodada e
-    // cada tentativa viraria uma linha igual.
+    // Só a primeira falha vai para o histórico.
     if (!exp.Tentativas) {
       await registrarEventoPedido({
         pedidoId: exp.PedidoId, tipo: 'aviso', titulo: 'Falha ao enviar ao Tiny — o sistema vai tentar de novo',
@@ -308,9 +241,7 @@ export async function exportarPedido(exportId) {
   }
 }
 
-// Processa tudo que está aguardando ('pendente' e 'erro' dentro do limite de
-// tentativas). Chamada logo após criar um pedido (fire-and-forget) e pelo
-// cron, como retry. Trava de sobreposição igual à do tiny-cron.
+// Processa a fila ('pendente' e 'erro' dentro do limite). Uma execução por vez.
 let processando = false;
 export async function processarExportacoes() {
   if (!exportacaoLigada() || processando) return;
@@ -330,15 +261,10 @@ export async function processarExportacoes() {
 
 /* ---------------- status Tiny → Fullgas ---------------- */
 
-// Situações do Tiny que REFLETIMOS no status local do pedido. Só interessa ao
-// negócio saber quando o Tiny marcou como enviado ou entregue; as demais
-// (aprovado, preparando envio, FATURADO, pronto p/ envio...) são ignoradas.
+// Situações do Tiny refletidas no pedido local.
 const MAPA_SITUACAO_TINY = { enviado: 'Enviado', entregue: 'Entregue' };
 
-// Pedido que alguém cancelou ou EXCLUIU direto no Tiny. Não cancelamos o pedido
-// do Fullgas sozinhos (isso anularia a fatura do cliente sem ninguém decidir):
-// a linha de exportação ganha um aviso, que aparece na aba Tiny ERP do painel.
-// Grava uma vez só (UltimoErro IS NULL) — o cron passa aqui a cada rodada.
+// Cancelado/excluído no Tiny vira aviso na exportação (não cancela o pedido daqui).
 export const AVISO_CANCELADO_NO_TINY = 'Cancelado no Tiny';
 export const AVISO_EXCLUIDO_NO_TINY = 'Excluído do Tiny';
 async function avisarMudancaNoTiny(r, aviso) {
@@ -356,11 +282,7 @@ async function avisarMudancaNoTiny(r, aviso) {
 }
 const RE_NAO_LOCALIZADO = /n[ãa]o\s+(foi\s+)?(localizad|encontrad)/i;
 
-// Puxa do Tiny a situação dos pedidos já exportados que ainda não foram
-// finalizados aqui e reflete 'Enviado'/'Entregue' no status local. Nunca
-// regride (Entregue não volta a Enviado) nem toca pedidos já terminais.
-// Cancelado/excluído no Tiny vira aviso (ver avisarMudancaNoTiny).
-// Chamada pelo cron, depois de reprocessar a fila de exportação.
+// Reflete Enviado/Entregue do Tiny no status local. Nunca regride nem mexe em pedido final.
 export async function sincronizarSituacaoPedidos() {
   if (!exportacaoLigada()) return;
   const rows = await query(
@@ -382,12 +304,10 @@ export async function sincronizarSituacaoPedidos() {
         throw e;
       }
       if (sit === 'cancelado') { await avisarMudancaNoTiny(r, AVISO_CANCELADO_NO_TINY); continue; }
-      // Tiny marcou enviado/entregue, mas aqui ainda falta peça sair: não
-      // fecha o pedido — o envio de verdade é o registrado no painel.
+      // Ainda falta peça sair aqui: não fecha.
       if (r.TemPendente) continue;
       const alvo = sit ? MAPA_SITUACAO_TINY[sit] : null;
-      // Ignora situações não mapeadas (faturado, aprovado...) e o que já bate;
-      // nunca volta de Entregue para Enviado.
+      // Ignora situação não mapeada e o que já bate.
       if (!alvo || alvo === r.Status) continue;
       if (r.Status === 'Entregue' && alvo === 'Enviado') continue;
       await query(
@@ -403,20 +323,9 @@ export async function sincronizarSituacaoPedidos() {
 
 /* ---------------- cancelamento ---------------- */
 
-// Pedido cancelado no Fullgas → cancela também no Tiny (devolve o estoque lá).
-// As linhas são marcadas 'cancelado' ANTES da chamada ao Tiny para a fila não
-// aprovar um pedido cancelado no meio do caminho; se a chamada falhar, o
-// UltimoErro avisa que precisa cancelar manualmente no Tiny.
-//
-// `pecasEnviadas` > 0: parte do pedido já saiu da prateleira. Cancelar no Tiny
-// devolveria ao estoque de lá também as peças que já foram embora — então o
-// Tiny NÃO é mexido: a linha fica com um aviso para ajuste manual (só o que
-// não saiu deve voltar). Decisão de 30/09/2026.
-//
-// Remessa e liberação de pré-venda levam SÓ peças que saíram de verdade: o
-// Tiny já está certo, então essas linhas ficam como estão (e, se ainda não
-// chegaram lá, a fila segue exportando). O aviso manual sobra só para pedido
-// que foi INTEIRO ao Tiny (escopo 'normal').
+// Cancelamento local → cancela no Tiny (linhas marcadas 'cancelado' antes da chamada).
+// Remessa e pré-venda ficam como estão (só levam o que saiu).
+// Pedido inteiro ('normal') com peça já enviada: só aviso de ajuste manual.
 const SO_O_QUE_SAIU = ['remessa', 'backorder'];
 export async function cancelarExportacoesDoPedido(pedidoId, { pecasEnviadas = 0 } = {}) {
   const rows = await query(

@@ -1,11 +1,10 @@
-// Lote 2 da varredura de 30/09/2026 — segurança.
+// Segurança:
 //   F1  garantia de moto só no chassi da própria concessionária
 //   E6  cadastro público não entra em empresa que já tem usuário
 //   E4  CNPJ travado para o cliente em "Minha conta"
 //   E7  CNPJ com dígito verificador e formato único
 //   G2  comprador de moto transferida não aparece para a nova concessionária
-//
-// O db.js é um dublê em memória: estes testes não tocam SQL Server.
+// db.js é um dublê.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';

@@ -1,15 +1,8 @@
-// ============================================================
-// Rotas de usuários (gestão de clientes e administradores no painel admin)
-//   - GET    /usuarios       lista todos (com empresa, CNPJ e endereço)
-//   - POST   /usuarios       cria um ADMINISTRADOR (equipe Fullgas)
-//   - PATCH  /usuarios/:id   aprova / bloqueia / muda papel
-//   - DELETE /usuarios/:id   remove cliente indesejado/bloqueado
-// Só administradores.
-//
-// O painel separa as duas populações que convivem nesta tabela: quem compra
-// (Papel = 'cliente', pertence a uma concessionária) e quem opera o sistema
-// (Papel = 'admin', equipe Fullgas). A lista é a mesma; a divisão é por papel.
-// ============================================================
+// ---- Usuários (painel admin) ----
+//   GET    /usuarios       lista (com empresa, CNPJ e endereço)
+//   POST   /usuarios       cria ADMINISTRADOR
+//   PATCH  /usuarios/:id   aprova / bloqueia / muda papel
+//   DELETE /usuarios/:id   remove
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, getPool, sql } from '../db.js';
@@ -21,8 +14,7 @@ import { resolverListaEscolhida, rotuloLista } from '../lista-preco.js';
 
 const router = Router();
 
-// Mapeia a linha do banco para o formato que o front (store.js) espera:
-// { id, nome, email, papel, status, empresa, empresaId, cnpj, telefone, endereco }
+// Linha do banco → formato do front.
 function toUsuario(r) {
   return {
     id: r.UsuarioId,
@@ -30,16 +22,15 @@ function toUsuario(r) {
     email: r.Email,
     papel: r.Papel,
     status: r.Status,
-    gestor: !!r.Gestor,       // false = conta interna criada pelo gestor (sub-dealer)
+    gestor: !!r.Gestor,       // false = conta interna (sub-dealer)
     empresa: r.Empresa || '',
     empresaId: r.EmpresaId,
-    fabrica: !!r.Fabrica,     // a empresa é a Fábrica (tem administrador) — ver fabrica.js
+    fabrica: !!r.Fabrica,     // ver fabrica.js
     cnpj: r.Cnpj || '',
     inscricaoEstadual: r.InscricaoEstadual || '',
     telefone: r.Telefone || '',
     tinyContatoId: r.TinyContatoId || null,   // contato do Tiny atrelado ao CNPJ
-    // Lista de preço da EMPRESA (migration 048); null = preço cheio.
-    // origem 'tiny' = veio do contato no Tiny; 'manual' = escolhida no painel.
+    // Lista de preço da empresa; null = preço cheio. origem: 'tiny' | 'manual'.
     listaPreco: r.ListaPrecoId ? {
       id: r.ListaPrecoId, descricao: r.ListaDescricao,
       percentual: Number(r.ListaPercentual), ativa: !!r.ListaAtiva,
@@ -80,20 +71,8 @@ router.get('/usuarios', requireAuth, requireAdmin, async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// POST /api/usuarios — cria um ADMINISTRADOR pelo próprio painel.
-//   { nome, email, senha }
-//
-// Três decisões que valem o comentário:
-//
-// • A conta nasce 'aprovado'. A fila de aprovação existe para quem se cadastra
-//   sozinho pela tela pública; aqui quem cria já é administrador, então pedir
-//   que outro admin aprove seria uma cerimônia sem ganho.
-// • EmpresaId é o do admin que está criando — a casa (Fullgas). Usuario.EmpresaId
-//   é NOT NULL e todo admin precisa de uma empresa; herdar a de quem cria mantém
-//   a equipe interna sob o mesmo CNPJ, sem inventar empresa nova a cada convite.
-// • Senha mínima de 8, contra os 6 do cadastro de cliente. É a conta que enxerga
-//   pedidos, faturas e cadastros de todas as concessionárias — o piso mais alto
-//   é proporcional ao estrago de perdê-la.
+// POST /api/usuarios — cria ADMINISTRADOR: { nome, email, senha }.
+// Nasce aprovado, na empresa de quem cria, com senha mínima de 8.
 const SENHA_MINIMA_ADMIN = 8;
 router.post('/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
   try {
@@ -111,8 +90,7 @@ router.post('/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
     const existe = await query('SELECT 1 FROM dbo.Usuario WHERE Email = @email', { email });
     if (existe.length) return res.status(409).json({ erro: 'Já existe um usuário com este e-mail.' });
 
-    // Hash gravado como BYTES da string do bcrypt — a coluna é VARBINARY e é
-    // assim que login e recuperação de senha esperam encontrar (auth.routes.js).
+    // Hash gravado como bytes (VARBINARY).
     const hash = await bcrypt.hash(senha, 10);
     const ins = await (await getPool()).request()
       .input('eid', sql.Int, req.user.empresaId)
@@ -129,9 +107,7 @@ router.post('/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
       alvoId: id, alvoEmail: email, alvoEmpresaId: req.user.empresaId,
       detalhe: { nome: nome.toUpperCase() }
     });
-    // O e-mail saiu do log: ele agora vive na trilha, que é consultável e tem
-    // dono. Log de servidor é lido por quem tem acesso ao servidor, e não
-    // precisa carregar PII para ser útil.
+    // Sem e-mail no log (fica na trilha de auditoria).
     console.log(`+ Administrador criado: #${id} por admin #${req.user.id}.`);
 
     const rows = await query(SELECT_USUARIO + ' WHERE u.UsuarioId = @id', { id });
@@ -143,11 +119,8 @@ router.post('/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
   }
 });
 
-// PATCH /api/usuarios/:id — altera status e/ou papel.
-// APROVAR um cliente pendente exige que a EMPRESA saia com lista de preço:
-//   - lista vinda do contato no Tiny (origem 'tiny'): aprova direto;
-//   - sem lista: `listaPrecoId` no corpo, uma das listas do Tiny, gravada
-//     como 'manual' junto com o status, na mesma transação.
+// PATCH /api/usuarios/:id — status e/ou papel.
+// Aprovar cliente exige lista de preço: a do Tiny, ou `listaPrecoId` escolhida (origem 'manual').
 const PAPEIS = ['admin', 'cliente'];
 const STATUS = ['pendente', 'aprovado', 'bloqueado'];
 router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) => {
@@ -173,8 +146,7 @@ router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) 
       atual.ListaPrecoId = emp.ListaPrecoId;
       const temListaDoTiny = emp.ListaPrecoId && emp.ListaPrecoOrigem === 'tiny';
       if (atual.Status === 'pendente' && atual.Papel === 'cliente' && papel !== 'admin' && !temListaDoTiny) {
-        // Sem lista do Tiny: a escolha manual é obrigatória — exceto se a
-        // empresa já tem uma manual (outra conta dela aprovada antes).
+        // Sem lista do Tiny: escolha obrigatória, salvo se a empresa já tem uma manual.
         if (req.body.listaPrecoId != null || !atual.ListaPrecoId) {
           const { lista, erro } = await resolverListaEscolhida(req.body.listaPrecoId);
           if (erro) return res.status(400).json({
@@ -190,17 +162,7 @@ router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) 
     if (status) { sets.push('Status = @status'); request.input('status', sql.VarChar(12), status); }
     if (papel) { sets.push('Papel = @papel'); request.input('papel', sql.VarChar(10), papel); }
 
-    /* REVOGAÇÃO (migration 037). Mudar status ou papel precisa valer AGORA,
-       não no próximo login:
-
-         • bloquear alguém que continua com um token válido não bloqueia nada;
-         • rebaixar um admin a cliente deixava o token antigo — que carrega
-           `papel: 'admin'` — passando pelo requireAdmin até expirar.
-
-       O revalidarSessao já sobrescreve papel/permissões a cada requisição, o
-       que resolve o rebaixamento sozinho; o TokenVersion aqui é o que fecha o
-       caso do bloqueio e serve de rede para qualquer rota que venha a ler o
-       papel direto do token. */
+    // Bloqueio ou mudança de papel derruba as sessões na hora (migration 037).
     if (status === 'bloqueado' || papel) sets.push('TokenVersion = TokenVersion + 1');
     sets.push('AtualizadoEm = SYSUTCDATETIME()');
 
@@ -219,8 +181,7 @@ router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) 
     if (!r.rowsAffected[r.rowsAffected.length - 1]) return res.status(404).json({ erro: 'Usuário não encontrado.' });
     invalidarCacheSessao(id);
 
-    // Promover alguém a admin e bloquear uma conta são as duas mudanças de
-    // privilégio que mais interessam numa investigação. Ficam na trilha.
+    // Mudanças de privilégio vão para a trilha.
     if (papel) auditar({ req, acao: ACOES.PAPEL_ALTERADO, alvoId: id, detalhe: { papel } });
     if (status) auditar({ req, acao: ACOES.STATUS_ALTERADO, alvoId: id, detalhe: { status } });
     if (aprovacao) auditar({
@@ -232,9 +193,7 @@ router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) 
   } catch (e) { next(e); }
 });
 
-// DELETE /api/usuarios/:id — remove um cliente indesejado e/ou bloqueado.
-// O admin não exclui a si mesmo. Usuário com histórico (pedidos,
-// reivindicações...) é protegido pelas FKs — a orientação é bloquear.
+// DELETE /api/usuarios/:id — remove. Não exclui a si mesmo; com histórico, a FK barra (bloqueie).
 router.delete('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -254,40 +213,22 @@ router.delete('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next)
         });
       throw e;
     }
-    // A linha sumiu do banco, então o revalidarSessao já derrubaria a sessão
-    // sozinho — mas só depois de o cache expirar. Limpar aqui torna a
-    // exclusão imediata.
+    // Derruba a sessão já, sem esperar o cache.
     invalidarCacheSessao(id);
-    // O nome vai no detalhe porque a linha do usuário deixou de existir: sem
-    // isto a trilha guardaria um id que não resolve para nada.
+    // Nome no detalhe, porque o usuário deixou de existir.
     auditar({ req, acao: ACOES.USUARIO_EXCLUIDO, alvoId: id, detalhe: { nome: alvo.Nome } });
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
-// POST /api/usuarios/:id/identidade — ALTERAÇÃO DE IDENTIDADE (só admin).
-// ------------------------------------------------------------
-// Devolve um token do usuário-alvo para o admin entrar na conta dele e ver o
-// portal exatamente como o cliente vê (útil para suporte). Serve tanto para a
-// conta gestora quanto para as contas internas (sub-dealers).
-//
-// Cuidados de propósito:
-//   • o token sai marcado com `imp` = id do admin que assumiu — dá para
-//     auditar depois e o front usa isso para mostrar a tarja de aviso;
-//   • validade curta (1 h), independente do JWT_EXPIRES normal;
-//   • ninguém assume a própria identidade nem a de outro admin (não teria
-//     ganho de suporte e só serviria para confundir a trilha de auditoria).
+// POST /api/usuarios/:id/identidade — admin entra na conta do cliente ("Entrar na conta").
+// Token marcado com `imp`, validade de 1 h. Não vale para si mesmo nem para outro admin.
 router.post('/usuarios/:id/identidade', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!id) return res.status(400).json({ erro: 'ID inválido.' });
     if (id === req.user.id) return res.status(400).json({ erro: 'Você já está na sua própria conta.' });
-    // Encadear identidades embaralharia a trilha de auditoria: o `imp` guarda
-    // um id só, então a volta cairia no admin errado.
-    // Na prática o requireAdmin acima já barra (durante a impersonação o papel
-    // é o do alvo, não 'admin'). Esta checagem fica como rede de proteção: se
-    // um dia a regra "não assumir a identidade de outro admin" for afrouxada,
-    // o encadeamento continua bloqueado.
+    // Sem identidade encadeada (o `imp` guarda um id só).
     if (req.user.imp)
       return res.status(400).json({ erro: 'Você já está em outra identidade. Volte para a sua conta primeiro.' });
 
@@ -301,9 +242,7 @@ router.post('/usuarios/:id/identidade', requireAuth, requireAdmin, async (req, r
     if (alvo.Papel === 'admin')
       return res.status(400).json({ erro: 'Não é possível assumir a identidade de outro administrador.' });
 
-    // Trilha PERSISTENTE (migration 038). Daqui em diante tudo o que este
-    // admin fizer será gravado no banco com o UsuarioId do CLIENTE — esta
-    // linha é a única coisa que liga aquelas ações a quem realmente as fez.
+    // Trilha: liga as ações seguintes a este admin.
     auditar({
       req, acao: ACOES.IMPERSONAR_INICIO,
       alvoId: alvo.UsuarioId, alvoEmail: alvo.Email, alvoEmpresaId: alvo.EmpresaId,
@@ -311,14 +250,11 @@ router.post('/usuarios/:id/identidade', requireAuth, requireAdmin, async (req, r
     });
     console.log(`↪ Identidade assumida: admin #${req.user.id} → #${alvo.UsuarioId} (empresa "${alvo.Empresa}").`);
 
-    // Sobrescreve os cookies de sessão com a identidade assumida. O token do
-    // admin não é guardado em lugar nenhum: a volta reemite a partir do claim
-    // `imp` (POST /api/auth/identidade/voltar).
+    // Troca os cookies; a volta é pelo claim `imp` (POST /api/auth/identidade/voltar).
     abrirSessao(res, signToken(alvo, { imp: req.user.id, expiresIn: '1h' }));
 
     res.json({
-      // Quem assumiu. O front usa para desenhar a tarja de aviso já na
-      // primeira renderização, sem esperar o GET /auth/sessao.
+      // Para o front desenhar a tarja de aviso já na primeira tela.
       imp: req.user.id,
       usuario: {
         id: alvo.UsuarioId, nome: alvo.Nome, email: alvo.Email,

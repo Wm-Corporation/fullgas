@@ -1,20 +1,5 @@
--- ============================================================
--- Migração 006 — Fatura de pré-venda (standby → ativação)
--- ------------------------------------------------------------
--- Pedidos com itens em pré-venda (PedidoItem.EmBackorder = 1) passam a abrir
--- uma Fatura própria, separada das normais, com ciclo de vida:
---   Tipo  = 'PreVenda'
---   Status= 'Standby'  -> aguardando reposição (fora da lista normal)
---           'Ativa'    -> produto voltou ao estoque (aparece junto das demais)
--- Acumulada por empresa+mês (Competencia 'YYYY-MM'); cada peça referencia o
--- pedido de origem via PedidoItem.PreVendaFaturaId (+ PedidoId já existente).
--- AtualizadoEm permite ordenar as recém-ativadas no topo.
---
--- Idempotente: seguro rodar mais de uma vez.
--- Aplicar com admin (fullgas_app não tem DDL) e codepage UTF-8 por causa do
--- acento em 'Nota de crédito':
---   sqlcmd -S localhost -E -C -f 65001 -i database/migrations/006_fatura_pre_venda.sql
--- ============================================================
+-- 006 - Fatura de pre-venda (revertida pela 007). Idempotente.
+-- Rodar com: sqlcmd -S localhost -E -C -f 65001 -i database/migrations/006_fatura_pre_venda.sql
 USE FullgasB2B;
 GO
 
@@ -51,8 +36,7 @@ IF OBJECT_ID('dbo.FK_PedidoItem_PreVendaFatura', 'F') IS NULL
         FOREIGN KEY (PreVendaFaturaId) REFERENCES dbo.Fatura(FaturaId);
 GO
 
--- ---- Índice para a varredura de ativação por produto ----
--- Índice filtrado exige QUOTED_IDENTIFIER/ANSI_NULLS ON na criação.
+-- ---- Indice filtrado (exige QUOTED_IDENTIFIER/ANSI_NULLS ON) ----
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO

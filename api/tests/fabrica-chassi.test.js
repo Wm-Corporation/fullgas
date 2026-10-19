@@ -1,12 +1,5 @@
-// Chassi e Fábrica (16/09/2026).
-//
-// Até aqui a empresa em que as contas de administrador ficam penduradas era
-// tratada como mais uma concessionária: aparecia na lista de destino dos
-// chassis e podia "receber" moto. A regra agora é: empresa com administrador é
-// a Fábrica, e chassi sem concessionária está na Fábrica.
-//
-// O db.js é substituído por um dublê: estes testes não tocam SQL Server. Cada
-// teste diz o que o "banco" responde para cada consulta.
+// Chassi e Fábrica: empresa com administrador é a Fábrica; chassi sem concessionária está nela.
+// db.js é um dublê.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
@@ -111,9 +104,7 @@ describe('POST /api/veiculos', () => {
     expect(ev[0].params.detalhe).toBe('FG 125 2025 · Ano 2025');  // nome do modelo, não o código
   });
 
-  // O ano é digitado a cada chassi (migration 042). Sem ele o cadastro para
-  // aqui: gravar um chassi sem ano deixaria a moto sem o dado que vale na nota
-  // e na contagem de garantia.
+  // Ano obrigatório no cadastro (migration 042).
   it.each([
     ['sem ano', {}],
     ['ano vazio', { ano: '' }],
@@ -232,8 +223,7 @@ describe('PUT /api/veiculos/:niv/transferir', () => {
     expect(eventos()[0].params).toMatchObject({ tipo: 'transferencia', detalhe: 'Concessionária anterior: MOTO SUL' });
   });
 
-  // A entrada no estoque conta desde a chegada NAQUELA conta (migration 043):
-  // quem recebe a moto hoje não a vê "em estoque desde" o cadastro na Fábrica.
+  // Entrada no estoque conta desde a chegada na conta (migration 043).
   it('mudar de dono reinicia a entrada no estoque', async () => {
     responder = (s) => {
       if (/FROM dbo\.Empresa e WHERE e\.Ativo = 1 AND e\.EmpresaId/.test(s))

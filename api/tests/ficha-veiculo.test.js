@@ -1,8 +1,4 @@
-// Ficha do veículo (06/10/2026): cada chassi chega ao front com a foto do
-// modelo, os dados da concessionária e o período da garantia — é o que o
-// portal mostra em "Ações do veículo", no estoque e nas reivindicações.
-//
-// O db.js é um dublê: estes testes não tocam SQL Server.
+// Ficha do veículo: foto do modelo, concessionária e período da garantia. db.js é um dublê.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';

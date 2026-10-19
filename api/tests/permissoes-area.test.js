@@ -1,12 +1,4 @@
-// Testes do gate de ÁREA das contas internas (sub-dealers).
-//
-// Por que este arquivo existe: até 2026-08-27 o requireArea estava escrito mas
-// montado numa única rota, e o portal escondia as abas no navegador. Uma conta
-// marcada como "só loja" continuava lendo pedidos, reivindicações e veículos
-// chamando a API direto. O gate agora é do servidor, e estes testes existem
-// para que ele não volte a ser decorativo.
-//
-// É lógica pura — req/res falsos, sem banco, como em auth-sessao.test.js.
+// Gate de área das contas internas (sub-dealers), no servidor. Sem banco.
 import { describe, it, expect, beforeAll } from 'vitest';
 
 // A auth.js encerra o processo se JWT_SECRET faltar. Definimos antes do import.
@@ -53,8 +45,7 @@ describe('requireArea', () => {
     expect(resposta.corpo.erro).toMatch(/nao tem acesso|não tem acesso/i);
   });
 
-  // Os tres casos de acesso total. Sao a razao de o gate nunca ter atrapalhado
-  // o uso normal do portal: quase toda conta cai num deles.
+  // Os três casos de acesso total.
   it('admin passa em qualquer area, mesmo fora da propria lista', () => {
     expect(corre(auth.requireArea('financeiro'), ADMIN).passou).toBe(true);
   });

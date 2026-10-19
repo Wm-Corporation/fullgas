@@ -1,9 +1,5 @@
 /* =========================================================
-   FULLGAS B2B — Spare Parts Finder (finder.html)
-   ---------------------------------------------------------
-   100% alimentado pela API (/api/finder/*): modelos com árvore,
-   seções por lado, peças com quantidade padrão e diagrama com
-   hotspots clicáveis — tudo editável no painel do administrador.
+   FULLGAS B2B — Spare Parts Finder (finder.html), alimentado por /api/finder/*
    ========================================================= */
 (function () {
   'use strict';
@@ -26,8 +22,7 @@
 
   document.getElementById('fd-who').innerHTML = FG.esc(sess.email) + ' - ' + FG.empresaDaSessao(sess);
 
-  /* carrinho da loja no topo — o finder envia peças à mesma cesta da loja,
-     então o contador acompanha cada "ADD ITEM(S) TO BASKET" */
+  /* contador da cesta da loja no topo */
   function refreshCart() {
     var el = document.getElementById('fd-cart-n');
     if (el) el.textContent = FG.cartCount();
@@ -55,11 +50,7 @@
     return function (e) { FG.toast((e && e.message) || msg || 'Falha ao carregar.', 'erro'); };
   }
 
-  /* Modelo e seção desenham quando a resposta chega. Clicando rápido em NEXT
-     CATEGORY (ou nas setas), as respostas podem voltar fora de ordem: a tela
-     mostrava a seção 2 com o endereço já na 3, e o próximo clique apontava
-     para a própria 3 — nada acontecia, como se a página tivesse travado. Cada
-     troca de tela ganha um número; resposta de tela antiga é descartada. */
+  // Cada troca de tela ganha um número; resposta de tela antiga é descartada.
   var telaSeq = 0;
   function telaVigente() {
     var minha = telaSeq;
@@ -87,12 +78,7 @@
     spToggle.textContent = '▾ Buscar';
   });
 
-  /* ---------- árvore de seleção (filtro em cascata) ---------------------
-     Marca › Modalidade › Categoria › Modelo › Ano — os mesmos níveis que a
-     API devolve em `arvore`, lidos direto dos campos do modelo; editar um
-     modelo no painel já muda a árvore. Cilindrada e tipo de motor não
-     entram. O último nível lista os anos do modelo escolhido e resolve o
-     código para navegar — respeitando o lado (Frame/Engine) escolhido. */
+  /* ---------- árvore de seleção: Marca › Modalidade › Categoria › Modelo › Ano ---------- */
   var CASC = [
     { id: 'mc-marca',      campo: 'marca',      ph: 'Marca' },
     { id: 'mc-modalidade', campo: 'modalidade', ph: 'Modalidade' },
@@ -155,9 +141,7 @@
       el.value = ''; el.disabled = true; sel[k] = null;
     }
   }
-  // Se um nível tem exatamente uma opção real (fora o placeholder), seleciona-a
-  // e segue — evita passos vazios quando o atributo é único ou ausente. Nunca
-  // escolhe o modelo (nível final) sozinho.
+  // Nível com uma única opção é selecionado sozinho (nunca o modelo).
   function autoAvancar(i) {
     if (i >= FINAL) return;
     var el = elNivel(i);
@@ -198,8 +182,7 @@
     atual.modelo = null;
     autoAvancar(0);
   }
-  // Reflete um modelo já resolvido (via VIN, usage list ou rota direta) nos
-  // seletores, para o usuário ver onde está na cascata.
+  // Mostra nos seletores um modelo já resolvido (VIN, usage list ou rota).
   function sincronizarCascade(m) {
     if (!m) return;
     for (var i = 0; i < CASC.length; i++) {
@@ -228,9 +211,7 @@
     FG.toast('Informe um NIV, número de motor ou selecione um modelo.');
   });
 
-  /* ---------- usage list ----------
-     Agora abre uma PÁGINA própria (finder-uso.html): o cliente busca uma peça
-     pelo SKU/descrição e vê todas as seções que a utilizam. */
+  /* ---------- usage list (página própria) ---------- */
   document.getElementById('btn-usage').addEventListener('click', function () {
     location.href = '/finder-uso';
   });
@@ -242,7 +223,7 @@
   }
 
   /* =========================================================
-     TELA: visão geral do modelo (lista de seções + miniaturas)
+     TELA: modelo (seções + miniaturas)
      ========================================================= */
   function renderModelo(codigo, lado) {
     fdView.innerHTML = '<p class="muted">Carregando…</p>';
@@ -307,7 +288,7 @@
   }
 
   /* =========================================================
-     TELA: seção (tabela de peças + diagrama com hotspots e zoom)
+     TELA: seção (peças + diagrama com hotspots e zoom)
      ========================================================= */
   function renderSecao(secaoId) {
     fdView.innerHTML = '<p class="muted">Carregando…</p>';
@@ -319,14 +300,8 @@
       sincronizarCascade(modeloPorCodigo(s.modelo.id));
       var outro = s.lado === 'chassi' ? 'engine' : 'chassi';
 
-      // Não há mais cabeçalho de colunas: cada peça virou um card, e dentro
-      // dele cada dado já se identifica sozinho (nome em destaque, código
-      // abaixo, preço à direita, status com bolinha colorida). Uma legenda
-      // de colunas só faz sentido quando os dados estão alinhados em grade.
 
-      // Status de compra da peça — mesmo princípio de cores da loja:
-      // verde = em estoque, amarelo = pré-venda (com previsão), vermelho =
-      // indisponível (não pode ser comprada; o campo de quantidade trava).
+      // Verde = em estoque, amarelo = pré-venda, vermelho = indisponível (quantidade trava).
       function statusPeca(p) {
         if (p.estoque > 0) return '<span class="pt-status ok">● Em estoque</span>';
         if (p.previsao) return '<span class="pt-status pre">● Pré-venda · ' + esc(p.previsao) + '</span>';
@@ -334,23 +309,17 @@
       }
 
       var linhas = s.pecas.map(function (p, i) {
-        // O número da linha é o "nº na imagem" definido pelo admin — o mesmo que
-        // liga a peça à área clicável do diagrama. NÃO é a posição na tela: uma
-        // contagem sequencial faria a lista parecer fora de ordem para o cliente.
-        // Sem número cadastrado, mostra "—" (a peça não tem área no diagrama).
+        // Número = "nº na imagem" do admin (liga a peça ao diagrama); "—" se não houver.
         var num = (p.numeroImagem === null || p.numeroImagem === undefined || p.numeroImagem === '')
           ? '—' : String(p.numeroImagem);
         var marcada = p.quantidadePadrao > 0;
         var indisp = !(p.estoque > 0) && !p.previsao;
-        // Em estoque: quantidade limitada ao saldo (mesma regra do carrinho
-        // da loja). Pré-venda não limita aqui — vai para o backorder.
+        // Em estoque: limitado ao saldo. Pré-venda não limita.
         var max = p.estoque > 0 ? p.estoque : null;
         var vIni = indisp ? 0 : (max ? Math.min(p.quantidadePadrao, max) : p.quantidadePadrao);
         // Ver a peça na loja abre em NOVA aba: o cliente não perde o finder.
         var link = '/loja#/produto/' + encodeURIComponent(p.sku);
-        // Texto que a busca varre: nº na imagem + código + nome, tudo junto e
-        // em minúsculas. Fica pronto aqui, uma vez, em vez de ser remontado a
-        // cada tecla digitada no filtro.
+        // Texto da busca, montado uma vez.
         var busca = esc((num + ' ' + p.sku + ' ' + p.nome).toLowerCase());
         return '<div class="part-row' + (marcada ? ' sel' : '') + '" data-row="' + i + '"' +
           ' data-busca="' + busca + '" data-num="' + esc(p.numeroImagem) + '">' +
@@ -364,9 +333,7 @@
           '</div>' +
           '<div class="pr-bot">' +
             '<span class="pr-info">' +
-              // Quantidade que o diagrama pede desta peça no conjunto — é
-              // referência de montagem, não o que vai à cesta (esse é o campo
-              // editável ao lado).
+              // Referência de montagem (não é a quantidade da cesta).
               '<span class="pr-ref">Qtd. no conjunto: <b>' + p.quantidade + '</b></span>' +
               statusPeca(p) +
             '</span>' +
@@ -426,8 +393,7 @@
         if (s.vizinhos.proxima) location.hash = '#/secao/' + s.vizinhos.proxima;
       });
 
-      // Destaca no diagrama os hotspots das linhas selecionadas (no-op sem
-      // diagrama — o canvas só existe quando a seção tem imagem).
+      // Destaca no diagrama os hotspots das peças marcadas.
       function sincronizarHotspots() {
         var cv = document.getElementById('dg-canvas');
         if (!cv) return;
@@ -459,8 +425,7 @@
         });
       });
 
-      /* adicionar selecionados à cesta da loja — mesma regra do carrinho:
-         nunca passa do estoque disponível (contando o que JÁ está na cesta) */
+      /* adiciona as marcadas à cesta, sem passar do estoque (conta o que já está na cesta) */
       document.getElementById('fa-cart').addEventListener('click', function () {
         var add = 0, recusadas = 0, ajustadas = 0;
         Array.prototype.forEach.call(fdView.querySelectorAll('.part-row.sel .qn'), function (qn) {
@@ -484,16 +449,9 @@
         refreshCart();
       });
 
-      /* ---------- busca dentro da lista de peças ----------
-         Filtra só a EXIBIÇÃO. As peças marcadas continuam marcadas mesmo
-         escondidas, e o botão de enviar à cesta continua levando todas elas:
-         a busca é uma lente para achar a peça, não uma seleção. Se ela
-         apagasse o que está fora do filtro, o cliente perderia sem aviso o
-         que já tinha escolhido em outra busca.
-
-         Fica ANTES do bloco do diagrama de propósito: aquele trecho começa
-         com um `return` para as seções sem imagem, e a lista de peças (com a
-         busca) existe nessas seções também. */
+      /* ---------- busca na lista de peças ----------
+         Só esconde: as marcadas continuam marcadas e vão para a cesta.
+         Fica antes do diagrama, que dá `return` em seção sem imagem. */
       var campoBusca = document.getElementById('pt-busca');
       var botaoLimpa = document.getElementById('pt-limpa');
       var avisoVazio = document.getElementById('pt-vazio');
@@ -525,40 +483,18 @@
       var natW = 0, natH = 0;
       var zoom = 1;             // fator atual sobre o tamanho natural da imagem
       var posX = 0, posY = 0;   // canto superior esquerdo do desenho, no quadro
-      // Teto de 1 = 100% do tamanho original. Passar disso não revela nenhum
-      // detalhe novo: só amplia os pixels que o admin enviou, e o desenho
-      // aparece borrado como se a foto fosse de má qualidade.
+      // Máximo 100% (além disso só borra).
       var Z_MAX = 1;
-      // Piso = o zoom em que a imagem cabe inteira no quadro (calculado quando
-      // ela carrega). Afastar além disso só produziria um desenho pequeno
-      // boiando num quadro vazio — não há nada a mais para ver.
+      // Mínimo = imagem inteira no quadro (calculado no carregamento).
       var zMin = 0.1;
 
-      /* POR QUE A IMAGEM NÃO USA MAIS ROLAGEM (overflow: auto)
-         ------------------------------------------------------------------
-         O quadro rolava, e a posição do desenho era o scroll. Isso tem um
-         defeito que aparece justo no uso mais comum: enquanto a imagem CABE
-         no quadro — que é o estado inicial, o "ajustar à tela" —, não há o
-         que rolar, o scroll fica preso em zero e o desenho não sai do lugar.
-         Resultado: arrastar não funcionava, e o zoom com a roda não tinha
-         como manter o ponto sob o cursor, porque o único jeito de deslocar a
-         imagem estava travado.
-
-         Agora o desenho é posicionado à mão (posX/posY, em pixels dentro do
-         quadro). Some o travamento: ele se move sempre, ampliado ou não, e a
-         âncora do zoom vira uma conta direta de subtração. */
+      // Posição do desenho em pixels (posX/posY), sem rolagem: move sempre e ancora o zoom no cursor.
       function aplicarPos() {
         canvas.style.left = Math.round(posX) + 'px';
         canvas.style.top  = Math.round(posY) + 'px';
       }
 
-      // O desenho nunca sai do quadro. Em cada eixo, só há dois casos:
-      //   • cabe no quadro  → fica CENTRADO e não se move (o zoom mínimo é
-      //     exatamente esse ponto, então é o estado de repouso da tela);
-      //   • maior que o quadro → desliza, mas as bordas param nas bordas do
-      //     quadro. Nunca aparece faixa branca ao lado do desenho.
-      // Sem isto o cliente arrasta a imagem para fora e fica olhando um quadro
-      // vazio, sem entender que o diagrama continua ali, só que deslocado.
+      // Mantém o desenho no quadro: se cabe, centraliza; se não, as bordas param nas bordas.
       function limitarPos() {
         var w = natW * zoom, h = natH * zoom;
         var vw = viewport.clientWidth, vh = viewport.clientHeight;
@@ -568,9 +504,7 @@
         viewport.classList.toggle('movel', w > vw || h > vh);
       }
 
-      // Zoom mantendo FIXO o ponto do desenho que está sob (ancoraX, ancoraY),
-      // coordenadas relativas ao canto do quadro. Sem âncora, usa o centro do
-      // quadro — é o que os botões + e − fazem.
+      // Zoom mantendo fixo o ponto sob (ancoraX, ancoraY). Sem âncora, o centro.
       function aplicarZoom(z, ancoraX, ancoraY) {
         if (!natW) return;
         z = Math.max(zMin, Math.min(Z_MAX, z));
@@ -591,30 +525,19 @@
         aplicarPos();
       }
 
-      // Zoom em que a imagem INTEIRA cabe no quadro (largura E altura),
-      // qualquer que seja o tamanho enviado pelo admin — o padrão dos diagramas
-      // é 750×1080 (retrato), que sem o limite de altura estouraria o quadro.
-      // É também o PISO do zoom, e o teto de 100% vale aqui: um diagrama menor
-      // que o quadro aparece no tamanho real, e não esticado.
+      // Zoom em que a imagem inteira cabe (também o mínimo), até 100%.
       function zoomAjuste() {
         if (!natW) return 1;
         var fit = Math.min((viewport.clientWidth - 16) / natW,
                            (viewport.clientHeight - 16) / natH);
         return Math.min(Z_MAX, Math.max(0.02, fit));
       }
-      // Encaixa e centraliza — estado inicial e o que o botão ⟳ devolve.
-      //
-      // A tela abre no encaixe exato, sem passo extra de aproximação. O passo
-      // extra existia porque o quadro era deitado: o desenho é retrato, então
-      // ele encaixava pela altura e ficava pequeno no meio de duas faixas
-      // brancas. Com o quadro em pé, na proporção do próprio desenho, o
-      // encaixe JÁ preenche o quadro — aproximar além disso agora só cortaria
-      // parte do diagrama logo na abertura.
+      // Encaixa e centraliza (estado inicial e botão ⟳).
       function ajustarNaTela() {
         zMin = zoomAjuste();
         zoom = zMin;
         canvas.style.width = Math.max(1, natW * zoom) + 'px';
-        limitarPos();   // no piso a imagem cabe inteira, então isto a centraliza
+        limitarPos();   // no mínimo, centraliza
         aplicarPos();
       }
 
@@ -623,18 +546,14 @@
           var el = document.createElement('button');
           el.className = 'hotspot';
           el.type = 'button';
-          // data-num continua no elemento (usado para casar com as peças e para
-          // o realce ao passar o mouse), mas o NÚMERO não é exibido: é um dado
-          // interno do administrador — o cliente vê só a área clicável.
+          // data-num liga à peça; o número não é exibido ao cliente.
           el.setAttribute('data-num', h.linkNumero || '');
           el.title = h.texto || 'Selecionar peça(s) desta área';
           el.style.left = (h.x / natW * 100) + '%';
           el.style.top = (h.y / natH * 100) + '%';
           el.style.width = (h.w / natW * 100) + '%';
           el.style.height = (h.h / natH * 100) + '%';
-          // Clicar no quadrado marca a(s) peça(s) daquele número na lista.
-          // Compara como String: o data-num do row é string e o linkNumero
-          // pode vir número da API (evita "1" === 1 dar falso).
+          // Marca as peças daquele número (compara como String).
           el.addEventListener('click', function () {
             var num = h.linkNumero != null ? String(h.linkNumero) : '';
             if (!num) { if (h.texto) FG.toast(h.texto); return; }
@@ -650,9 +569,7 @@
               }
             });
             if (alvo) {
-              // A peça pode estar escondida por uma busca em aberto. Sem
-              // limpar o filtro, o clique no diagrama marcaria a peça e não
-              // rolaria para lugar nenhum — parece que nada aconteceu.
+              // Peça escondida pela busca: limpa o filtro.
               if (alvo.classList.contains('oculta')) { campoBusca.value = ''; filtrarPecas(); }
               alvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
@@ -674,12 +591,7 @@
         viewport.innerHTML = '<p class="muted" style="padding:20px;">Não foi possível carregar o diagrama.</p>';
       }); }
 
-      /* ---- roda do mouse: aproxima/afasta no ponto sob o cursor ----
-         preventDefault exige passive:false — sem isso o navegador ignora o
-         pedido e a PÁGINA rola junto com o zoom. E a normalização do deltaY é
-         obrigatória: o mesmo giro de roda chega como ~100 (pixels), ~3
-         (linhas, Firefox) ou ~1 (páginas), então usar o valor cru daria um
-         salto absurdo num navegador e quase nada em outro. */
+      /* ---- roda do mouse: zoom no ponto do cursor (passive:false e deltaY normalizado) ---- */
       viewport.addEventListener('wheel', function (e) {
         e.preventDefault();
         var d = e.deltaY;
@@ -689,11 +601,7 @@
         aplicarZoom(zoom * Math.pow(1.0016, -d), e.clientX - r.left, e.clientY - r.top);
       }, { passive: false });
 
-      /* ---- arrastar o desenho livremente, ampliado ou não ----
-         Vale para mouse e para o toque: o quadro não rola mais, então sem isto
-         não haveria como mover a imagem no celular.
-         Nada é iniciado quando o clique começa em cima de um hotspot — senão o
-         arrasto engoliria o clique que seleciona a peça. */
+      /* ---- arrastar o desenho (mouse e toque); não começa em cima de hotspot ---- */
       var arrastando = false, xIni = 0, yIni = 0, pxIni = 0, pyIni = 0;
       viewport.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
@@ -749,15 +657,14 @@
      ROUTER
      ========================================================= */
   function route() {
-    telaSeq++;   // respostas pendentes da tela anterior não desenham mais
+    telaSeq++;   // respostas da tela anterior não desenham mais
     var h = (location.hash || '').slice(1);
     if (h[0] === '/') h = h.slice(1);
     var p = h.split('/');
     if (p[0] === 'modelo' && p[1]) renderModelo(decodeURIComponent(p[1]), p[2] === 'engine' ? 'engine' : 'chassi');
     else if (p[0] === 'secao' && p[1]) renderSecao(Number(p[1]));
     else {
-      // Tela inicial: limpa o resultado e reabre o painel de busca — é o que
-      // o VOLTAR encontra ao sair de um modelo/seção.
+      // Tela inicial: limpa e reabre a busca.
       fdView.innerHTML = '';
       spBody.classList.remove('hidden');
       spToggle.textContent = '▾ Buscar';
@@ -765,8 +672,7 @@
     window.scrollTo(0, 0);
   }
 
-  // Botão VOLTAR único do finder: dentro de um modelo/seção volta um passo na
-  // navegação; já na tela de busca, sai para o portal.
+  // VOLTAR: um passo atrás; na busca, sai para o portal.
   document.getElementById('fd-voltar').addEventListener('click', function () {
     if ((location.hash || '').replace('#', '') && history.length > 1) history.back();
     else location.href = '/portal';
