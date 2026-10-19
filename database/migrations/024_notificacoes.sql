@@ -1,48 +1,22 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 024 — Notificações do admin para as concessionárias
--- ------------------------------------------------------------
--- Notificacao       mensagem enviada pelo admin. EmpresaId NULL =
---                   todas as concessionárias; preenchido = só uma.
---                   Anexo opcional (imagem/vídeo/arquivo) gravado
---                   em /uploads/notificacoes (o banco guarda a URL
---                   relativa, como no finder).
--- NotificacaoLida   estado de leitura POR USUÁRIO (a mesma
---                   notificação pode estar lida p/ um usuário da
---                   concessionária e não lida p/ outro).
--- Idempotente: roda quantas vezes for preciso.
---
--- OBS: o schema INICIAL do banco tinha uma dbo.Notificacao antiga
--- (UsuarioId + Lida inline + DataEnvio) que NUNCA foi usada pela
--- API — só continha linhas de seed demo. Ela é PRESERVADA com o
--- nome NotificacaoLegado (detecção: falta a coluna CriadoEm) e a
--- nova é criada no formato atual.
--- ============================================================
+-- 024 - Notificacoes do admin (Notificacao, EmpresaId NULL = todas) e leitura por usuario (NotificacaoLida).
+-- A tabela antiga e preservada como NotificacaoLegado. Idempotente.
 SET QUOTED_IDENTIFIER ON;
 
 IF OBJECT_ID('dbo.Notificacao', 'U') IS NOT NULL
    AND COL_LENGTH('dbo.Notificacao', 'CriadoEm') IS NULL
 BEGIN
-  -- NotificacaoLida desta própria migração (vazia), apontando p/ a tabela
-  -- antiga: sai para ser recriada contra a nova.
-  --
-  -- O SELECT vai dentro de EXEC de propósito. O SQL Server compila o LOTE
-  -- INTEIRO antes de executar, então uma referência direta a
-  -- dbo.NotificacaoLida derruba o lote com "nome de objeto inválido" quando a
-  -- tabela ainda não existe — mesmo protegida pelo IF, que nunca chega a ser
-  -- avaliado. Em banco novo (servidor recém-provisionado) era exatamente esse
-  -- o caso, e a migração morria aqui: as tabelas de notificação nunca eram
-  -- criadas. Dentro do EXEC o texto só é compilado se a linha rodar.
+  -- Recria a NotificacaoLida contra a tabela nova. O SELECT vai em EXEC porque o lote
+  -- e compilado inteiro e a tabela pode nao existir.
   IF OBJECT_ID('dbo.NotificacaoLida', 'U') IS NOT NULL
     EXEC('IF NOT EXISTS (SELECT 1 FROM dbo.NotificacaoLida) DROP TABLE dbo.NotificacaoLida;');
   EXEC sp_rename 'dbo.Notificacao', 'NotificacaoLegado';
 END
 GO
 
--- O rename NÃO renomeia as constraints — os nomes antigos liberariam
--- conflito com os da tabela nova.
+-- O rename nao renomeia constraints: renomeia aqui para nao conflitar.
 IF OBJECT_ID('dbo.NotificacaoLegado', 'U') IS NOT NULL
    AND OBJECT_ID('dbo.PK_Notificacao') IS NOT NULL
    AND OBJECT_ID('dbo.Notificacao', 'U') IS NULL

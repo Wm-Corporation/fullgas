@@ -1,12 +1,6 @@
-// ============================================================
-// Validações de cadastro compartilhadas entre as rotas
-// (auth.routes.js — registro público; conta.routes.js — painel
-// "Minha conta" do gestor). O front aplica as mesmas regras nas
-// máscaras, mas a API é quem garante.
-// ============================================================
+// Validações de cadastro (registro público e "Minha conta").
 
-// Cidade: só letras (com acento), espaço, apóstrofo, ponto e hífen —
-// cobre "Mogi-Mirim", "Santa Bárbara d'Oeste"... Sem dígitos/símbolos.
+// Letras, espaço, apóstrofo, ponto e hífen ("Santa Bárbara d'Oeste").
 const RE_CIDADE = /^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'. -]*$/;
 
 // Valida o endereço do cadastro. Devolve a mensagem de erro ou null se ok.
@@ -24,23 +18,14 @@ export function erroEndereco(end) {
   return null;
 }
 
-// Inscrição estadual (opcional): normaliza para maiúsculas e mantém só
-// dígitos, letras, ponto, hífen, barra e espaço (formatos variam por UF;
-// "ISENTO" também é aceito). Devolve null quando vazia/só lixo.
+// IE opcional: maiúsculas, só caracteres válidos ("ISENTO" aceito). null se vazia.
 export function limparIe(v) {
   const ie = String(v || '').toUpperCase().replace(/[^0-9A-Z./ -]/g, '').trim().slice(0, 20);
   return ie || null;
 }
 
-/* ============================================================
-   CNPJ
-   ------------------------------------------------------------
-   O CNPJ é a chave do vínculo com o Tiny: é por ele que o cadastro acha (e,
-   na edição, SOBRESCREVE) o contato de lá. Por isso a API confere os dígitos
-   verificadores e grava sempre no mesmo formato ("12.345.678/0001-90") —
-   antes aceitava qualquer texto, e "12345678000190" e "12.345.678/0001-90"
-   viravam duas empresas diferentes.
-   ============================================================ */
+// ---- CNPJ ----
+// Chave do Tiny: confere os dígitos e grava sempre como "12.345.678/0001-90".
 export function soDigitosCnpj(v) {
   return String(v || '').replace(/\D/g, '');
 }
@@ -85,22 +70,8 @@ export function erroCnpj(v) {
   return null;
 }
 
-/* ============================================================
-   CATÁLOGO — número do artigo (SKU)
-   ------------------------------------------------------------
-   O SKU não é só um dado: ele vira ATRIBUTO DE HTML no front
-   (data-art="...", href="#/produto/..."). O escape do lado do
-   navegador já foi corrigido, mas uma allowlist aqui fecha a
-   porta antes: um SKU que não pode CONTER aspas nem sinal de
-   menor não tem como virar marcação, em qualquer tela, hoje ou
-   numa escrita nova que esqueça o esc().
-
-   A lista permitida cobre o que a Fullgas realmente usa
-   (A590C161Y401000, BORR-EMB-21, OLEOF-250450, 50180007S) com
-   folga: letras, dígitos, ponto, hífen, barra e sublinhado.
-   O teto de 40 é o da coluna Produto.Sku no banco — passar disso
-   seria truncado em silêncio pelo SQL Server.
-   ============================================================ */
+// ---- SKU ----
+// Vira atributo HTML no front: só letras, dígitos, . _ / -. Máx. 40 (coluna Produto.Sku).
 const RE_SKU = /^[A-Za-z0-9._/-]{1,40}$/;
 
 export function skuValido(sku) {
@@ -117,10 +88,7 @@ export function erroSku(sku) {
   return null;
 }
 
-// Limites de texto do catálogo, iguais aos das colunas do banco
-// (Produto.Nome NVARCHAR(200), Descricao NVARCHAR(1000),
-// PrevisaoChegada VARCHAR(20)). Sem isto, um texto maior que a
-// coluna é cortado pelo driver sem erro nenhum.
+// Limites iguais aos das colunas (o driver corta sem erro).
 export function erroTextoProduto({ nome, descricao, previsao }) {
   if (nome != null && String(nome).length > 200)
     return 'Nome do produto muito longo (máximo de 200 caracteres).';
@@ -131,59 +99,27 @@ export function erroTextoProduto({ nome, descricao, previsao }) {
   return null;
 }
 
-/* ============================================================
-   SENHA
-   ------------------------------------------------------------
-   Regra única para TODO ponto que define senha: cadastro público, redefinição
-   por e-mail, criação de admin e as contas internas que o gestor cria ou
-   reseta. Antes cada um desses cinco lugares repetia o próprio
-   `if (senha.length < 6)`, e o de admin usava 8 — divergência que ninguém
-   percebia porque estava espalhada.
-
-   O mínimo subiu de 6 para 8. Seis caracteres é curto o bastante para força
-   bruta offline caso o banco vaze, e a conta de admin já exigia 8 — não havia
-   razão para o revendedor valer menos. Isto NÃO invalida senha existente:
-   quem já tem uma de 6 continua entrando normalmente, porque a checagem só
-   roda quando se DEFINE uma senha. O efeito aparece na próxima troca.
-
-   O que NÃO fazemos aqui, de propósito:
-   • exigir maiúscula/número/símbolo. A pesquisa moderna (e o NIST SP 800-63B)
-     mostra que essas regras empurram para "Senha@123" — previsível — enquanto
-     penalizam frases longas, que são melhores. Comprimento é o que vale.
-   • consultar lista de vazamentos (HaveIBeenPwned). Vale a pena, mas mete uma
-     chamada de rede no caminho do cadastro; fica para depois.
-   ============================================================ */
+// ---- Senha ----
+// Regra única: mínimo 8, máximo 72 bytes, sem senhas triviais nem repetir e-mail/nome.
+// Sem exigência de símbolos (NIST SP 800-63B: comprimento é o que vale).
 export const SENHA_MINIMA = 8;
 
-// As que aparecem em toda lista de senha vazada, mais as "de casa" que este
-// projeto já teve (os seeds de demonstração). Comparação em minúsculas e sem
-// espaços nas pontas.
+// Senhas comuns (comparação em minúsculas).
 const SENHAS_TRIVIAIS = new Set([
   '12345678', '123456789', '1234567890', 'senha123', 'password', 'password1',
   'qwertyui', 'abcd1234', '11111111', '00000000', 'admin123', 'cliente123',
   'mudar123', 'trocar123'
 ]);
 
-// Senha construída sobre o nome da casa ("fullgas" + qualquer coisa) é o
-// primeiro palpite de quem sabe onde está entrando, e foi o padrão real de
-// mais de uma senha deste projeto.
-//
-// É uma REGRA, não uma lista, de propósito: enumerar as variantes exigiria
-// escrever aqui as senhas de verdade — num arquivo versionado, lido por
-// qualquer pessoa com acesso ao repositório. Uma lista de senhas proibidas
-// que contém as senhas em uso é uma lista de senhas em uso.
+// Recusa senha baseada no nome da casa (regra, para não versionar senhas reais).
 const MARCA = 'fullgas';
 
-// Valida uma senha nova. Devolve a mensagem de erro, ou null se estiver boa.
-// `email` e `nome` são opcionais e servem só para recusar a senha que repete
-// o próprio cadastro — a primeira coisa que alguém tenta ao invadir uma conta.
+// Valida senha nova: mensagem de erro ou null.
 export function erroSenha(senha, { email = '', nome = '', min = SENHA_MINIMA } = {}) {
   const s = String(senha ?? '');
 
   if (s.length < min) return `A senha precisa de ao menos ${min} caracteres.`;
-  // Teto: o bcrypt ignora tudo além de 72 BYTES, silenciosamente. Sem este
-  // limite, duas senhas longas com o mesmo começo seriam a mesma senha para
-  // o login — e ninguém entenderia por quê.
+  // O bcrypt ignora o que passa de 72 bytes.
   if (Buffer.byteLength(s, 'utf8') > 72) return 'A senha é longa demais (máximo de 72 caracteres).';
 
   const baixa = s.toLowerCase().trim();
@@ -195,8 +131,7 @@ export function erroSenha(senha, { email = '', nome = '', min = SENHA_MINIMA } =
   if ('abcdefghijklmnopqrstuvwxyz'.includes(baixa) || '01234567890'.includes(baixa))
     return 'Essa senha é fácil demais de adivinhar. Escolha outra.';
 
-  // Repetir o próprio e-mail/nome é o primeiro palpite de quem tem a lista de
-  // cadastros — que é exatamente o que um vazamento entrega.
+  // Não pode repetir e-mail nem nome.
   const local = String(email || '').toLowerCase().split('@')[0];
   if (local && local.length >= 3 && baixa.includes(local))
     return 'A senha não pode conter o seu e-mail.';

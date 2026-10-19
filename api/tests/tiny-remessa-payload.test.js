@@ -1,5 +1,4 @@
-// O que cada remessa leva ao Tiny: número único e observação que liga a
-// remessa ao pedido original (17/09/2026). Ver src/tiny-pedidos.js.
+// Payload da remessa: número único e observação que liga ao pedido original.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 let ordemNoPedido, faltam;

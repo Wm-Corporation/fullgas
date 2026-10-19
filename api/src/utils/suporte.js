@@ -1,22 +1,6 @@
-// ============================================================
-// Regras do Suporte Técnico (helpdesk) que não dependem do banco.
-// ------------------------------------------------------------
-// Ficam separadas da rota por dois motivos: são as regras que mais mudam
-// (categoria nova, fluxo de status) e são as únicas testáveis sem SQL Server —
-// ver api/tests/suporte.test.js.
-// ============================================================
+// Regras do Suporte Técnico que não dependem do banco (testadas em api/tests/suporte.test.js).
 
-/* ------------------------------------------------------------------
-   CATEGORIAS DE AJUDA
-   ------------------------------------------------------------------
-   Espelham as ÁREAS DO PORTAL, que é como o revendedor enxerga o site: ele não
-   pensa "erro 500 na rota de faturas", pensa "problema na minha conta
-   financeira". Ao acrescentar uma área ao portal, acrescente a categoria aqui —
-   o banco guarda só o `codigo`, então nada de migração para isso.
-
-   `descricao` é a linha de ajuda que aparece embaixo do seletor no pop-up
-   flutuante, para o revendedor escolher certo sem adivinhar.
-   ------------------------------------------------------------------ */
+// Categorias de ajuda = áreas do portal. O banco guarda só o `codigo`.
 export const CATEGORIAS = [
   {
     codigo: 'pedidos',
@@ -71,8 +55,7 @@ export function categoriaValida(codigo) {
   return CODIGOS.has(String(codigo || ''));
 }
 
-// Nome legível de uma categoria — inclusive de uma que tenha saído da lista
-// (chamado antigo continua exibindo o código, nunca uma linha em branco).
+// Nome da categoria (código, se saiu da lista).
 export function nomeCategoria(codigo) {
   const c = CATEGORIAS.find(x => x.codigo === codigo);
   return c ? c.nome : String(codigo || 'Outro assunto');
@@ -84,53 +67,34 @@ export function prioridadeValida(p) {
   return PRIORIDADES.includes(String(p || ''));
 }
 
-/* ------------------------------------------------------------------
-   CICLO DE VIDA DO CHAMADO
-   ------------------------------------------------------------------
-     Aberto              recém-criado, ninguém respondeu ainda.
-     Em atendimento      o suporte assumiu / o revendedor devolveu a bola.
-     Aguardando cliente  o suporte respondeu e espera o revendedor.
-     Resolvido           o suporte considera encerrado, mas ainda aceita
-                         réplica — responder REABRE o chamado.
-     Fechado             fim de linha. Não aceita mais mensagem.
-   ------------------------------------------------------------------ */
+// Ciclo do chamado: Aberto → Em atendimento ⇄ Aguardando cliente → Resolvido (resposta reabre) → Fechado.
 export const STATUS = ['Aberto', 'Em atendimento', 'Aguardando cliente', 'Resolvido', 'Fechado'];
 
 export function statusValido(s) {
   return STATUS.includes(String(s || ''));
 }
 
-// Um chamado fechado não recebe mais mensagem — para voltar a conversar é
-// preciso reabri-lo (ou abrir um novo).
+// Fechado não recebe mensagem.
 export function podeReceberMensagem(status) {
   return status !== 'Fechado';
 }
 
-// Para onde o chamado vai depois de uma resposta.
-//
-// A regra é a de qualquer helpdesk: a bola fica com quem NÃO falou por último.
-// O caso que exige atenção é o 'Resolvido' — o revendedor que responde ali está
-// dizendo "não resolveu", e o chamado precisa voltar para a fila em vez de
-// morrer como resolvido com uma pergunta pendente dentro.
+// Status após uma resposta: a vez fica com quem não falou por último. Resposta em Resolvido reabre.
 export function statusAposResposta(statusAtual, autor) {
   if (autor === 'admin') return 'Aguardando cliente';
-  // Cliente respondendo em chamado que ninguém tocou ainda: continua na fila
-  // como novo, sem fingir que já tem atendente.
+  // Ninguém atendeu ainda: continua Aberto.
   if (statusAtual === 'Aberto') return 'Aberto';
   return 'Em atendimento';
 }
 
-// O revendedor não manda o chamado para qualquer estado: ele encerra o que
-// já está resolvido (ou desiste) e reabre o que voltou a incomodar. Mover para
-// 'Em atendimento' / 'Aguardando cliente' é decisão de quem atende.
+// O revendedor só fecha ou reabre.
 const STATUS_DO_CLIENTE = new Set(['Fechado', 'Aberto']);
 
 export function clientePodeMudarStatus(destino) {
   return STATUS_DO_CLIENTE.has(String(destino || ''));
 }
 
-// Número mostrado ao usuário. O ChamadoId cru ("47") não parece protocolo e não
-// dá para ditar por telefone sem soar estranho; "CH-000047" sim.
+// 47 → "CH-000047"
 export function numeroChamado(id) {
   const n = Number(id);
   if (!Number.isInteger(n) || n < 1) return '';

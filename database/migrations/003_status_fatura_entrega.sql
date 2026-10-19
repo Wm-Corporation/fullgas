@@ -1,13 +1,4 @@
--- ============================================================
--- Migração 003 — Status em Fatura e Entrega (para estorno/anulação)
--- ------------------------------------------------------------
--- Permite marcar fatura e entrega como 'Anulada' quando o pedido
--- de origem é cancelado (regra de negócio: cancelar um pedido já
--- "Enviado" estorna a fatura e a entrega geradas).
--- Idempotente: seguro para rodar mais de uma vez.
--- Aplicar com admin (fullgas_app não tem DDL):
---   sqlcmd -S localhost -E -C -i database/migrations/003_status_fatura_entrega.sql
--- ============================================================
+-- 003 - Status em Fatura e Entrega ('Anulada' quando o pedido e cancelado). Idempotente.
 USE FullgasB2B;
 GO
 

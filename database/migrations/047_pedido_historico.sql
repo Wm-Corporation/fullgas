@@ -1,18 +1,7 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 047 - Historico do pedido (dbo.PedidoHistorico).
---
--- Decisao de 30/09/2026: as garantias ficam associadas aos pedidos, e o dono
--- precisa ver tudo o que aconteceu com cada pedido num lugar so - compra,
--- aprovacao e ida ao Tiny, cada envio, entrega, cancelamento, avisos do Tiny
--- e cada passo das reivindicacoes. Mesmo molde do historico do chassi
--- (VeiculoHistorico, migration 033).
---
--- Idempotente (roda em todo deploy). ASCII puro: textos com acento sao
--- montados com NCHAR (o sqlcmd do deploy nao le UTF-8).
--- ============================================================
+-- 047 - Historico do pedido (PedidoHistorico), no molde do VeiculoHistorico. Idempotente. ASCII (NCHAR).
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO
@@ -43,8 +32,7 @@ ELSE
 GO
 
 /* ---- 2. Historico retroativo (so na primeira vez: tabela vazia) ---------- */
--- O que da para reconstruir do banco: a compra, a ida ao Tiny, o cancelamento
--- e as reivindicacoes. Envios antigos nao tem data registrada e ficam de fora.
+-- Backfill: compra, Tiny, cancelamento e reivindicacoes.
 IF NOT EXISTS (SELECT 1 FROM dbo.PedidoHistorico)
 BEGIN
     DECLARE @reiv NVARCHAR(20) = N'Reivindica' + NCHAR(231) + NCHAR(227) + N'o';   -- Reivindicacao

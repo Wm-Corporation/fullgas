@@ -1,12 +1,7 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 029 — Data de aprovação da reivindicação.
--- Grava quando a reivindicação foi aprovada (controle no painel admin).
--- Backfill: aprovadas antigas usam AtualizadoEm como melhor aproximação.
--- Idempotente.
--- ============================================================
+-- 029 - Data de aprovacao da reivindicacao (antigas usam AtualizadoEm). Idempotente.
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO

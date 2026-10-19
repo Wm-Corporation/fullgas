@@ -1,29 +1,14 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 044 - "Em separacao" vira "Aprovado", e aprovar = ir ao Tiny.
---
--- Decisao de 30/09/2026: aprovar o pedido no B2B significa que o estoque
--- pode ser descontado no Tiny tambem. Na aprovacao o pedido vai ao Tiny
--- ja 'aprovado' (baixa o estoque la). O nome do status passa a ser o mesmo
--- do Tiny, para o estoquista acompanhar o B2B sem traduzir.
---
--- As remessas (040) continuam existindo como controle interno de envio
--- (Parcial/Enviado), mas nao exportam mais nada. As linhas antigas de
--- escopo 'remessa' continuam sendo lidas.
---
--- Idempotente (roda em todo deploy). ASCII puro: "Em separacao" (com
--- cedilha e til) e montado com NCHAR, como nas migrations 028 e 040.
--- ============================================================
+-- 044 - "Em separacao" vira "Aprovado". Idempotente. ASCII (NCHAR para acentos).
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 SET XACT_ABORT ON;
 GO
 
 /* ---- 1. CHECK aceita 'Aprovado' ----------------------------------------- */
--- 'Processando' e "Em separacao" seguem aceitos como legado: um deploy que
--- rode a 028/040 antes desta nao pode falhar por causa de linha antiga.
+-- 'Processando' e "Em separacao" seguem aceitos como legado.
 DECLARE @sep NVARCHAR(20) = N'Em separa' + NCHAR(231) + NCHAR(227) + N'o';
 
 IF EXISTS (SELECT 1 FROM sys.check_constraints
@@ -46,9 +31,7 @@ GO
 /* ---- Conferencia (o deploy nao para em erro de SQL) --------------------- */
 SELECT CONVERT(VARCHAR(20), COUNT(*)) + ' pedidos em Aprovado'
   FROM dbo.Pedido WHERE Status = N'Aprovado';
--- Pedidos ativos com pecas que ainda nao foram ao Tiny. Desde 05/10/2026 as
--- remessas voltaram (aprovar nao exporta; o "Confirmar envio" exporta), entao
--- um numero acima de 0 e normal: pecas aguardando conferencia/remessa.
+-- Pedidos com pecas aguardando remessa (acima de 0 e normal).
 SELECT CONVERT(VARCHAR(20), COUNT(DISTINCT p.PedidoId)) +
        ' pedidos aprovados/parciais com pecas aguardando remessa ao Tiny'
   FROM dbo.Pedido p

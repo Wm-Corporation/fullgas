@@ -1,6 +1,4 @@
-// ============================================================
-// Rotas de autenticação: login e cadastro
-// ============================================================
+// ---- Rotas de autenticação ----
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
@@ -15,16 +13,12 @@ import { limiteLogin, limiteSenha, limiteCadastro, limiteVerificacaoSenha } from
 
 const router = Router();
 
-// Validade do link de recuperação e janela mínima entre dois pedidos seguidos
-// para o mesmo e-mail (evita usar a rota como metralhadora de spam).
+// Validade do link de recuperação e intervalo mínimo entre pedidos.
 const RESET_MINUTOS = 60;
 const RESET_ESPERA_MS = 60 * 1000;
 const ultimoPedidoReset = new Map();   // email -> timestamp
 
-// GET /api/auth/captcha/config
-// Entrega a site key ao front, para o widget se AUTO-OCULTAR quando não há
-// configuração — em vez de renderizar uma caixa quebrada. A site key é
-// pública: ela aparece no HTML de qualquer site que use o widget.
+// GET /api/auth/captcha/config — site key pública para o widget.
 router.get('/captcha/config', (_req, res) => {
   res.json({ siteKey: captchaSiteKey() });
 });
@@ -35,9 +29,7 @@ router.post('/login', limiteLogin, async (req, res, next) => {
     const { email, senha, captcha } = req.body;
     if (!email || !senha) return res.status(400).json({ erro: 'Informe e-mail e senha.' });
 
-    // ANTES de tocar no banco: é o ponto de a verificação anti-robô valer a
-    // pena, poupando uma consulta e uma comparação de bcrypt (que é cara de
-    // propósito) em cada tentativa automatizada.
+    // Captcha antes do banco (poupa consulta e bcrypt).
     const cap = await verificarCaptcha(captcha, req.ip);
     if (!cap.ok) return res.status(400).json({ erro: cap.erro });
 
@@ -52,11 +44,8 @@ router.post('/login', limiteLogin, async (req, res, next) => {
     const u = rows[0];
     if (!u) return res.status(401).json({ erro: 'Credenciais inválidas.' });
 
-    // A SENHA É CONFERIDA ANTES DO STATUS, de propósito. Antes era o
-    // contrário: quem digitasse um e-mail qualquer descobria, sem provar nada,
-    // se aquela conta existia e em que estado estava ("aguardando aprovação",
-    // "bloqueado"). Isso entrega ao atacante uma lista de alvos válidos.
-    // SenhaHash é VARBINARY no banco; o bcrypt gera string -> guardamos os bytes da string.
+    // Senha antes do status, para não revelar se a conta existe.
+    // SenhaHash é VARBINARY: guarda os bytes da string do bcrypt.
     const hashStr = u.SenhaHash ? Buffer.from(u.SenhaHash).toString('utf8') : '';
     const ok = hashStr && await bcrypt.compare(senha, hashStr);
     if (!ok) return res.status(401).json({ erro: 'Credenciais inválidas.' });
@@ -67,9 +56,7 @@ router.post('/login', limiteLogin, async (req, res, next) => {
     if (u.Status === 'bloqueado')
       return res.status(403).json({ erro: 'Usuário bloqueado. Procure o administrador.' });
 
-    // A sessão sai daqui SÓ pelo Set-Cookie. O token não volta mais no corpo:
-    // devolvê-lo era o que permitia ao front antigo guardá-lo no localStorage,
-    // e um valor que o JavaScript nunca vê é um valor que um XSS não rouba.
+    // A sessão sai só pelo cookie, nunca no corpo.
     abrirSessao(res, signToken(u));
     res.json({
       usuario: {
@@ -85,11 +72,7 @@ router.post('/login', limiteLogin, async (req, res, next) => {
 // POST /api/auth/register
 //   { nome, empresa, email, senha, cnpj, inscricaoEstadual?, telefone,
 //     endereco: { cep, logradouro, numero, complemento, bairro, cidade, uf } }
-//
-// O CNPJ e o endereço principal já entram no cadastro da EMPRESA — assim o
-// pedido exportado ao Tiny sai com os dados do cliente e o admin vê tudo.
-// Após o commit, o CNPJ é atrelado a um contato no Tiny (tiny-contatos.js):
-// existente → vincula; inexistente → cria lá com os dados do cadastro.
+// Depois do commit, o CNPJ é vinculado (ou criado) como contato no Tiny.
 router.post('/register', limiteCadastro, async (req, res, next) => {
   try {
     const { nome, empresa, email, senha, telefone } = req.body;
@@ -97,10 +80,7 @@ router.post('/register', limiteCadastro, async (req, res, next) => {
     if (!nome || !empresa || !email || !senha)
       return res.status(400).json({ erro: 'Preencha nome, empresa, e-mail e senha.' });
 
-    // Anti-robô, como no login. Esta rota é pública e cara: cria empresa +
-    // usuário numa transação e ainda chama o Tiny. O limiteCadastro (5/h por
-    // IP) segura o volume; o captcha segura a automação. Sem chave
-    // configurada a verificação é pulada — ver api/src/captcha.js.
+    // Anti-robô, como no login.
     const cap = await verificarCaptcha(req.body?.captcha, req.ip);
     if (!cap.ok) return res.status(400).json({ erro: cap.erro });
     const errSenha = erroSenha(senha, { email, nome });
@@ -126,16 +106,8 @@ router.post('/register', limiteCadastro, async (req, res, next) => {
     try {
       await tx.begin();
 
-      // Identifica a empresa SÓ pelo CNPJ (identidade fiscal), comparando os
-      // dígitos — com ou sem máscara é o mesmo CNPJ. Se não existir, cria.
-      //
-      // Empresa que JÁ TEM usuário no portal não aceita cadastro público
-      // (achado de 30/09/2026): o CNPJ é público, e antes quem o digitasse
-      // entrava na empresa como GESTOR — aprovado por descuido, ganhava
-      // financeiro, pedidos e a troca de e-mail/CNPJ de um estranho. Quem
-      // trabalha na concessionária recebe acesso pelo gestor (Subdealers).
-      // A busca pela razão social também saiu: mesmo nome com outro CNPJ é
-      // outra empresa (uma filial, por exemplo), não a mesma.
+      // Empresa pelo CNPJ (só dígitos); se não existir, cria.
+      // Empresa que já tem usuário não aceita cadastro público: o acesso vem pelo gestor.
       let empRow = (await new sql.Request(tx)
         .input('dig', sql.VarChar(14), soDigitosCnpj(cnpj))
         .query(`SELECT e.EmpresaId,
@@ -197,9 +169,7 @@ router.post('/register', limiteCadastro, async (req, res, next) => {
                   VALUES (@id, 'Entrega', @log, @num, @comp, @bairro, @cidade, @uf, @cep, 1)`);
       }
 
-      // Usuário (hash gravado como bytes — coluna VARBINARY). Quem se
-      // cadastra é a conta GESTORA da empresa: gerencia as contas internas
-      // (sub-dealers) criadas depois no painel "Minha conta".
+      // Quem se cadastra é o GESTOR da empresa. Hash gravado como bytes (VARBINARY).
       await new sql.Request(tx)
         .input('empresaId', sql.Int, empresaId)
         .input('nome', sql.NVarChar(120), nomeUp)
@@ -214,25 +184,15 @@ router.post('/register', limiteCadastro, async (req, res, next) => {
       throw e;
     }
 
-    // Atrela o CNPJ a um contato no Tiny (existente → vincula; não existe →
-    // cria). Fire-and-forget: se o Tiny estiver fora, a empresa fica com
-    // TinyContatoPendente = 1 e o cron re-tenta — o cadastro nunca trava.
+    // Vincula ao Tiny sem esperar; se falhar, o cron tenta de novo.
     vincularContatoTiny(empresaId).catch(() => { });
 
     res.status(201).json({ ok: true, msg: 'Cadastro enviado. Aguarde aprovação do administrador.' });
   } catch (e) { next(e); }
 });
 
-/* ============================================================
-   RECUPERAÇÃO DE SENHA ("esqueci minha senha")
-   ------------------------------------------------------------
-   Fluxo: /senha/esqueci gera um token aleatório, guarda só o HASH dele e
-   manda o token cru por e-mail. /senha/verificar diz se o link ainda vale
-   (para a tela não pedir a senha duas vezes à toa) e /senha/redefinir troca
-   a senha e queima o token.
-
-   Nenhuma das rotas revela se o e-mail existe: a resposta é sempre a mesma.
-   ============================================================ */
+// ---- Recuperação de senha ----
+// esqueci: gera token (guarda só o hash) e manda por e-mail · verificar: link ainda vale? · redefinir: troca e queima o token.
 
 // Guardamos o SHA-256 do token — quem lê o banco não reconstrói o link.
 function hashToken(t) {
@@ -246,8 +206,7 @@ function mascararEmail(e) {
   return (u.length <= 2 ? u[0] + '***' : u.slice(0, 2) + '***') + '@' + d;
 }
 
-// Localiza um token válido (existe, não usado, não expirado). Devolve a linha
-// com os dados do usuário ou null.
+// Token válido (existe, não usado, não expirado) com os dados do usuário, ou null.
 async function tokenValido(tokenCru) {
   if (!tokenCru || typeof tokenCru !== 'string') return null;
   const rows = await query(
@@ -261,11 +220,7 @@ async function tokenValido(tokenCru) {
 }
 
 // POST /api/auth/senha/esqueci  { email }
-// A pedido do dono, a rota DIZ quando o e-mail não existe ("Esse e-mail não
-// possui cadastro") em vez da resposta genérica. É uma troca consciente: fica
-// possível descobrir quais e-mails têm conta aqui. Aceitável neste portal
-// fechado (concessionárias cadastradas e aprovadas a dedo) e a janela mínima
-// entre pedidos evita varredura em massa pela mesma origem.
+// Avisa quando o e-mail não tem cadastro (decisão do dono do portal).
 router.post('/senha/esqueci', limiteSenha, async (req, res, next) => {
   const enviado = {
     ok: true,
@@ -285,8 +240,7 @@ router.post('/senha/esqueci', limiteSenha, async (req, res, next) => {
     if (u.Status === 'bloqueado')
       return res.status(403).json({ erro: 'Usuário bloqueado. Procure o administrador.' });
 
-    // Janela mínima entre pedidos do mesmo e-mail — só depois de saber que a
-    // conta existe, senão o "não possui cadastro" ficaria engolido pela trava.
+    // Intervalo mínimo entre pedidos do mesmo e-mail.
     const agora = Date.now();
     if (agora - (ultimoPedidoReset.get(email) || 0) < RESET_ESPERA_MS)
       return res.status(429).json({ erro: 'Já enviamos um link agora há pouco. Espere um minuto e confira sua caixa de entrada.' });
@@ -302,8 +256,7 @@ router.post('/senha/esqueci', limiteSenha, async (req, res, next) => {
       { uid: u.UsuarioId, h: hashToken(tokenCru), min: RESET_MINUTOS }
     );
 
-    // appUrl(req): sem APP_URL no .env, o link nasce com a MESMA origem de onde
-    // o portal foi aberto — assim funciona no celular/rede local sem configurar.
+    // Sem APP_URL, o link usa a origem de onde o portal foi aberto.
     const link = `${appUrl(req)}/redefinir?token=${tokenCru}`;
     const corpo = emailRecuperacaoSenha(u.Nome, link, RESET_MINUTOS);
     try {
@@ -312,8 +265,7 @@ router.post('/senha/esqueci', limiteSenha, async (req, res, next) => {
         texto: corpo.texto, html: corpo.html
       });
     } catch (e) {
-      // Agora que a rota confirma o cadastro, falha de SMTP também pode ser
-      // dita na cara: o cliente precisa saber que o e-mail NÃO saiu.
+    // Falha de SMTP é informada ao cliente.
       console.error('ERRO ao enviar e-mail de recuperação:', e.message);
       ultimoPedidoReset.delete(email);   // deixa tentar de novo na hora
       return res.status(502).json({ erro: 'Não conseguimos enviar o e-mail agora. Tente de novo em instantes.' });
@@ -332,12 +284,7 @@ router.post('/senha/verificar', limiteVerificacaoSenha, async (req, res, next) =
 });
 
 // POST /api/auth/senha/trocar  { atual, nova }  (logado)
-// Troca a própria senha dentro do portal (30/09/2026): antes o único caminho
-// era o "esqueci minha senha" por e-mail. Exige a senha ATUAL (sessão
-// esquecida aberta num computador de balcão não basta para trocar), derruba
-// as outras sessões (TokenVersion + 1) e reemite a desta aba, para quem
-// trocou continuar logado. Não vale em identidade assumida: a Fullgas não
-// troca a senha do cliente por ele.
+// Exige a senha atual, derruba as outras sessões e mantém esta. Não vale em identidade assumida.
 router.post('/senha/trocar', requireAuth, limiteVerificacaoSenha, async (req, res, next) => {
   try {
     if (req.user.imp)
@@ -376,9 +323,7 @@ router.post('/senha/redefinir', limiteVerificacaoSenha, async (req, res, next) =
   try {
     const senha = String(req.body?.senha || '');
 
-    // O token é validado ANTES da senha porque a mensagem de erro da senha
-    // ("não pode conter o seu e-mail") precisa saber de quem é a conta — e
-    // porque não faz sentido criticar a senha de um link já expirado.
+    // Token antes da senha: a validação da senha precisa saber de quem é a conta.
     const r = await tokenValido(req.body?.token);
     if (!r) return res.status(400).json({ erro: 'Link inválido ou expirado. Peça um novo.' });
 
@@ -396,12 +341,7 @@ router.post('/senha/redefinir', limiteVerificacaoSenha, async (req, res, next) =
       await new sql.Request(tx)
         .input('uid', sql.Int, r.UsuarioId)
         .input('hash', sql.VarBinary(256), Buffer.from(hash, 'utf8'))
-        // TokenVersion + 1 DERRUBA todas as sessões vivas deste usuário, em
-        // qualquer dispositivo (migration 037). É o ponto mais importante de
-        // toda esta rota: quem redefine a senha normalmente o faz porque
-        // suspeita de invasão — e, sem esta linha, o invasor com um token
-        // válido continuaria dentro por horas, agora sem a vítima conseguir
-        // sequer descobrir como.
+        // TokenVersion + 1 derruba todas as sessões do usuário (migration 037).
         .query(`UPDATE dbo.Usuario
                    SET SenhaHash = @hash,
                        TokenVersion = TokenVersion + 1,
@@ -417,34 +357,22 @@ router.post('/senha/redefinir', limiteVerificacaoSenha, async (req, res, next) =
       throw e;
     }
 
-    // O revalidarSessao guarda o estado por alguns segundos; sem isto a
-    // revogação só valeria ao fim do TTL.
+    // Revogação imediata, sem esperar o cache da sessão.
     invalidarCacheSessao(r.UsuarioId);
 
     res.json({ ok: true, msg: 'Senha alterada! Faça login com a nova senha.' });
   } catch (e) { next(e); }
 });
 
-// ============================================================
-// Sessão: encerrar, consultar e voltar de identidade assumida
-// ============================================================
+// ---- Sessão: sair, consultar e voltar de identidade assumida ----
 
-// POST /api/auth/logout
-// Sem requireAuth de propósito: sair tem de funcionar mesmo com o token já
-// vencido ou corrompido — senão o usuário fica preso numa sessão quebrada.
-// É POST, não GET: um logout em GET seria disparado por prefetch de link e
-// por qualquer <img> apontando para ele.
+// POST /api/auth/logout — sem requireAuth: precisa funcionar com token vencido.
 router.post('/logout', (_req, res) => {
   fecharSessao(res);
   res.json({ ok: true });
 });
 
-// GET /api/auth/sessao
-// Fonte da verdade sobre a sessão. Relê o perfil DO BANCO em vez de repetir o
-// que está no token — assim uma mudança de papel, status ou permissão feita
-// pelo admin vale na hora. Antes, o cliente carregava o papel gravado no
-// login até deslogar: um usuário rebaixado continuava vendo a tela de admin
-// (as rotas já barravam, mas a interface mentia).
+// GET /api/auth/sessao — perfil relido do banco.
 router.get('/sessao', requireAuth, async (req, res, next) => {
   try {
     const rows = await query(
@@ -473,21 +401,13 @@ router.get('/sessao', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// POST /api/auth/identidade/voltar
-// Devolve o admin à própria conta depois de assumir a identidade de um
-// cliente. Antes o front guardava o token do admin no localStorage e o
-// restaurava; agora reemitimos a partir do claim `imp`, o que é mais seguro
-// em dois pontos: o token antigo não fica largado num lugar que o JavaScript
-// lê, e o admin é REVALIDADO no banco — o desenho anterior restauraria
-// alegremente a sessão de um admin rebaixado ou bloqueado no meio-tempo.
+// POST /api/auth/identidade/voltar — devolve o admin à própria conta (claim `imp`), revalidado no banco.
 router.post('/identidade/voltar', requireAuth, async (req, res, next) => {
   try {
     if (!req.user.imp) {
       return res.status(400).json({ erro: 'Você não está em outra identidade.' });
     }
-    // u.TokenVersion é OBRIGATÓRIO aqui: sem ele o signToken assina tv = 0 e o
-    // revalidarSessao derruba a sessão recém-criada na requisição seguinte —
-    // o admin voltava para a própria conta e perdia o acesso a tudo.
+    // TokenVersion obrigatório, senão a nova sessão cai na próxima requisição.
     const rows = await query(
       `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.EmpresaId,
               u.Gestor, u.Permissoes, u.TokenVersion, e.RazaoSocial AS Empresa
@@ -503,13 +423,7 @@ router.post('/identidade/voltar', requireAuth, async (req, res, next) => {
         erro: 'Sua conta de administrador não está mais ativa. Faça login de novo.'
       });
     }
-    // Fecha o par com o impersonar_inicio: junto com ele, a trilha delimita a
-    // JANELA em que as ações gravadas no nome do cliente foram, na verdade,
-    // deste admin. Um sem o outro deixaria a janela em aberto.
-    //
-    // Cuidado: aqui req.user ainda é o ALVO (a sessão só troca no abrirSessao
-    // acima), e o auditar() resolve o autor pelo req.user.imp justamente por
-    // isso — ver o comentário em auditoria.js.
+    // Fecha a janela aberta pelo impersonar_inicio. req.user ainda é o alvo; o autor sai do `imp`.
     auditar({
       req, acao: ACOES.IMPERSONAR_FIM,
       alvoId: req.user.id, alvoEmpresaId: req.user.empresaId

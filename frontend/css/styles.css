@@ -2,12 +2,7 @@
    FULLGAS B2B — estilos (auth + portal + loja + finder)
    ========================================================= */
 :root {
-  /* Cores da MARCA (amarelo Fullgas — ver docs/referencias). Os nomes
-     "--red*" são históricos, da época em que o tema era vermelho: --red é o
-     amarelo de fundos/bordas/destaques; --red-dark é o dourado escuro usado
-     em TEXTOS (amarelo puro sobre branco não tem contraste) e hovers;
-     --red-soft é o fundo suave. Vermelho de verdade ficou só nos estados
-     semânticos (erro/crítico/bloqueado), hardcoded onde é usado. */
+  /* Cores da marca. "--red*" é nome histórico: --red = amarelo, --red-dark = dourado para texto. */
   --red: #e5b100;
   --red-dark: #c69a00;
   --red-soft: #fdf3d3;
@@ -20,19 +15,13 @@
   --yellow: #e0b400;
   --shadow: 0 2px 10px rgba(0, 0, 0, .12);
   --font: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  /* Escala da interface (ver `body` logo abaixo). Fica numa variável porque o
-     zoom também AMPLIA as unidades vh: dentro do body, 100vh mede 115% da
-     janela. Quem precisa da altura real da tela divide por ela —
-     calc(100vh / var(--zoom-ui)). */
+  /* Zoom da interface. Dentro do body 100vh = 115% da janela: use calc(100vh / var(--zoom-ui)). */
   --zoom-ui: 1.15;
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-/* Escala geral da interface — deixa fontes, espaçamentos e ícones ~15% maiores
-   de forma proporcional (o layout é quase todo em px, então `zoom` é o jeito
-   confiável de ampliar tudo de uma vez no Chrome/Edge). A impressão e a geração
-   de PDF resetam para 1 (ver @media print e baixarFaturaPDF). */
+/* Zoom geral de 15%. Impressão e PDF voltam para 1. */
 body { font-family: var(--font); font-size: 14px; color: var(--ink); background: var(--bg); zoom: var(--zoom-ui); }
 a { color: var(--red); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -44,8 +33,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .hidden { display: none !important; }
 .muted { color: var(--gray); }
 
-/* Botão "Voltar" padrão da aplicação — sempre visível, no início da trilha
-   de navegação (loja, portal e finder usam o mesmo estilo). */
+/* Botão "Voltar" padrão (loja, portal e finder). */
 .btn-voltar {
   display: inline-flex; align-items: center; gap: 6px;
   background: var(--ink); color: #fff; border: none; border-radius: 18px;
@@ -170,14 +158,12 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .toast-item.toast-erro { background: #b91c1c; border-left-color: #7f1010; }
 @keyframes tin { from { transform: translateY(8px); opacity: 0; } }
 
-/* Aviso do modo pré-entrega no formulário de reivindicação. Não é um erro nem
-   uma escolha: é o formulário explicando por que mudou sozinho. */
+/* Aviso do modo pré-entrega no formulário de reivindicação. */
 .pre-entrega-aviso {
   background: #eef6ff; border: 1px solid #c9e0fb; border-left: 4px solid #1d4ed8;
   color: #1e3a5f; padding: 11px 14px; border-radius: 4px; margin: 0 0 14px; font-size: 12.5px;
 }
-/* Só o TÍTULO vira bloco. A regra não pode mirar `b` solto: o texto tem
-   negritos no meio das frases, e cada um deles quebraria numa linha própria. */
+/* Só o título vira bloco (o texto tem outros negritos). */
 .pre-entrega-aviso .pe-titulo { display: block; margin-bottom: 3px; font-size: 13px; }
 .pre-entrega-aviso > span { display: block; line-height: 1.5; }
 
@@ -186,10 +172,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .backorder-aviso ul { margin: 6px 0 0; padding-left: 18px; }
 .backorder-aviso li { margin: 2px 0; }
 
-/* ---------- selo "Fábrica" (compartilhado: admin, portal e finder) ----------
-   Marca o que é da Fullgas e não de uma concessionária: chassi que ainda não
-   saiu da fábrica, evento do histórico que aconteceu lá e as contas de
-   administrador. Gerado por FG.seloFabrica() (store.js) — um desenho só. */
+/* ---------- selo "Fábrica" (FG.seloFabrica, store.js) ---------- */
 .selo-fabrica {
   display: inline-flex; align-items: center; gap: 5px; vertical-align: middle;
   padding: 2px 9px 2px 6px; border-radius: 3px; border: 1px solid var(--red);
@@ -203,12 +186,9 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 2px; background: #eee; color: #555; text-transform: uppercase; }
 .pill-status.Pendente { background: #fff3cd; color: #8a6d00; }
 .pill-status.Processando { background: #dbeafe; color: #1d4ed8; }
-/* Pedido aprovado (já foi ao Tiny). Mesmo azul do antigo "Em separação" —
-   não o verde de .aprovado, que é o status de CONTA de usuário. */
+/* Pedido aprovado: azul (o verde .aprovado é de conta de usuário). */
 .pill-status.Aprovado { background: #dbeafe; color: #1d4ed8; }
-/* "Em separação": o status tem espaço/acento, então o nome vira classes soltas.
-   O seletor por atributo pega tanto o slug do admin (ps-Em-separacao) quanto o
-   texto cru "Em separação" usado na loja/portal. */
+/* "Em separação" (status antigo): pega o slug e o texto cru. */
 .pill-status[class*="separa"] { background: #dbeafe; color: #1d4ed8; }
 .pill-status.Enviado { background: #ede9fe; color: #6d28d9; }
 .pill-status.Entregue { background: #dcfce7; color: #15803d; }
@@ -225,9 +205,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status.Aguardando { background: #e2e8f0; color: #475569; }
 .pill-status.Disponivel { background: #ccfbf1; color: #0f766e; }
 .pill-status.Tiny { background: #cffafe; color: #0e7490; }
-/* Chassis — esquema de cores pedido: Disponível = amarelo da marca, Vendido =
-   verde. Miram a classe slug (ps-<slug>), que é só do status do veículo: a
-   .Disponivel sem prefixo é a peça de pré-venda "disponível p/ envio". */
+/* Chassis: Disponível = amarelo, Vendido = verde (classe ps-<slug>). */
 .pill-status.ps-Disponivel { background: var(--red); color: var(--ink); }
 .pill-status.ps-Vendido { background: #15803d; color: #fff; }
 
@@ -262,12 +240,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .dot-legenda > span { display: inline-flex; align-items: center; gap: 6px; }
 
 /* ---------- modal ----------
-   Centralizado e SEMPRE dentro da tela, cresça o conteúdo o quanto crescer.
-   Antes o limite era `max-height: 85vh` com `padding: 6vh`, e o zoom do body
-   amplia vh: o pop-up passava da borda de baixo e o botão de enviar sumia
-   (bastava anexar algumas fotos na reivindicação). Agora não há vh aqui: o
-   fundo ocupa a janela pelo `inset: 0` e o modal usa no máximo 100% dele.
-   O conteúdo rola por dentro; cabeçalho e rodapé (com os botões) ficam presos. */
+   Sempre dentro da tela (sem vh por causa do zoom). Conteúdo rola; cabeçalho e rodapé fixos. */
 .modal-back {
   position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 90;
   display: flex; align-items: center; justify-content: center; padding: 20px 16px;
@@ -313,9 +286,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .auth-msg.err { display: block; background: #fbe3dc; color: #a50d14; } /* erro: vermelho semântico */
 .auth-msg.ok { display: block; background: #e6f5ea; color: #1d6b32; }
 /* =========================================================
-   Tarja de identidade assumida (admin usando a conta do cliente).
-   Injetada pelo api-adapter.js em qualquer página. Fica grudada no topo
-   justamente para ser impossível esquecer que se está agindo pelo cliente.
+   Tarja de identidade assumida (admin na conta do cliente), injetada pelo api-adapter.js
    ========================================================= */
 .imp-bar {
   position: sticky; top: 0; z-index: 200;
@@ -367,12 +338,7 @@ img.logo { display: block; height: 38px; width: auto; }
   background: var(--red); color: var(--ink); border: 1px solid var(--ink);
   border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px;
 }
-/* Chegou algo AGORA, sem recarregar a página. O número sozinho mudando de 2
-   para 3 no canto do ✉️ passa despercebido — quem estava olhando outra parte
-   da tela não vê. Estes 6 segundos de destaque são o "símbolo de notificação"
-   que anuncia a novidade; depois o badge volta ao normal e para de incomodar.
-   A classe é posta e retirada por portal.js quando o batimento (js/ao-vivo.js)
-   diz que o contador SUBIU. */
+/* Destaque de 6 s quando o contador sobe (classe posta pelo portal.js). */
 .icon-btn .pill.novo { animation: notif-chegou 1.2s ease-in-out 5; }
 @keyframes notif-chegou {
   0%, 100% { transform: scale(1); box-shadow: none; }
@@ -407,8 +373,7 @@ img.logo { display: block; height: 38px; width: auto; }
 .tabs .drop.open .menu { display: block; }
 .tabs .drop .menu a { display: block; background: none; padding: 9px 16px; color: var(--ink); font-size: 13px; }
 .tabs .drop .menu a:hover { background: #f4f4f4; }
-/* Quebra de linha dentro das abas: o que vem depois cai numa faixa própria,
-   separada por um filete, no fim da barra ("Subdealers" e "Minha conta"). */
+/* Quebra nas abas: o resto vai para uma faixa própria. */
 .tabs-quebra {
   flex-basis: 100%; height: 0; margin-top: 10px;
   border-top: 1px solid var(--line);
@@ -469,8 +434,7 @@ main.portal { padding: 0 22px 60px; }
 .toolbar .tool.red { color: var(--red-dark); }
 .toolbar .tool:hover { text-decoration: underline; }
 
-/* Ações em linha dentro de tabelas (ex.: contas internas em "Minha conta"):
-   botões-link discretos; .danger em vermelho semântico (excluir). */
+/* Ações em linha nas tabelas; .danger em vermelho. */
 .table .tool { background: none; border: none; cursor: pointer; font-size: 12px; color: var(--ink); padding: 2px 4px; }
 .table .tool:hover { text-decoration: underline; }
 .table .tool.danger { color: #b91c1c; }
@@ -503,9 +467,7 @@ main.portal { padding: 0 22px 60px; }
 .veh-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px 22px; margin: 12px 0 18px; }
 .veh-grid b { display: block; font-size: 12px; color: var(--gray); font-weight: 600; }
 
-/* FICHA DO VEÍCULO (06/10/2026) — foto do modelo + chassi + concessionária +
-   cliente + garantia. Desenhada por FG.fichaVeiculo / FG.fichaVeiculoResumo
-   (store.js); vale para o portal e para o admin. */
+/* Ficha do veículo (FG.fichaVeiculo / FG.fichaVeiculoResumo, store.js) */
 .vficha { border: 1px solid var(--line); background: #fff; box-shadow: var(--shadow); padding: 20px 22px; max-width: 1040px; }
 .vf-topo { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 26px; align-items: start; }
 .vf-midia { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; flex: none; }
@@ -563,8 +525,7 @@ img.vf-foto { cursor: zoom-in; }
 .modal.modal-ficha { width: 1000px; }
 .modal-ficha .vficha { border: none; box-shadow: none; padding: 0; max-width: none; }
 
-/* lista de estoque com a foto do modelo na primeira coluna: texto centrado
-   na altura da foto */
+/* Estoque com foto: texto centrado na altura da foto */
 .table.tbl-veic td { vertical-align: middle; }
 .table td.td-foto { width: 92px; padding: 4px 8px; }
 
@@ -597,8 +558,7 @@ img.vf-foto { cursor: zoom-in; }
 .hist-x:hover { color: var(--red); }
 .hist-x:disabled { opacity: .4; cursor: default; }
 
-/* A cor do ícone diz o peso do evento sem precisar ler: recall chama atenção,
-   garantia e venda são marcos, o resto é rotina. */
+/* Cor do ícone pelo tipo de evento. */
 .hist-recall .hist-ico { background: #fee2e2; }
 /* Histórico do PEDIDO (30/09/2026): mesmas cores de leitura do chassi. */
 .hist-cancelado .hist-ico, .hist-aviso .hist-ico { background: #fee2e2; }
@@ -622,8 +582,7 @@ img.vf-foto { cursor: zoom-in; }
 .shop-head .sh-user { font-size: 11px; opacity: .95; }
 .shop-head a { color: #fff; }
 .shop-head .menu-btn { background: none; border: none; color: var(--ink); font-weight: 700; cursor: pointer; font-size: 14px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
-/* A busca ocupa o meio do cabeçalho: cresce até 560px e encolhe até 260px
-   antes de o cabeçalho quebrar linha. */
+/* Busca no meio do cabeçalho (260 a 560px). */
 .shop-head .sh-search { display: flex; align-items: center; border-bottom: 1px solid var(--ink); flex: 1 1 260px; max-width: 560px; }
 .shop-head .sh-search input { background: transparent; border: none; color: var(--ink); padding: 7px 4px; width: 100%; min-width: 0; font-size: 14px; }
 .shop-head .sh-search input::placeholder { color: rgba(28, 28, 28, .55); }
@@ -631,14 +590,12 @@ img.vf-foto { cursor: zoom-in; }
 /* Bloco da direita (Localizador + ícones), empurrado para a ponta. */
 .shop-head .sh-direita { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 12px 20px; margin-left: auto; }
 .shop-head .sh-icons { display: flex; align-items: center; gap: 12px; }
-/* Localizador: botão de contorno escuro. Em texto branco sobre o amarelo
-   ele mal aparecia. */
+/* Localizador: botão de contorno escuro. */
 .shop-head .pf-link {
   color: var(--ink); border: 1.5px solid var(--ink); border-radius: 19px;
   padding: 8px 14px; font-size: 11.5px; letter-spacing: .3px; white-space: nowrap; line-height: 1;
 }
-/* Ícones do cabeçalho em CÍRCULOS PRETOS — sobre o amarelo eles sumiam;
-   o que era preto/escuro dentro do círculo vira branco. */
+/* Ícones do cabeçalho em círculos pretos. */
 .shop-head .sh-icons a, .shop-head .sh-icons button {
   background: var(--ink); border: none; color: #fff; cursor: pointer; font-size: 16px;
   position: relative; width: 38px; height: 38px; border-radius: 50%;
@@ -688,17 +645,13 @@ main.shop { padding: 0 18px 70px; }
 .cat-tile .cat-name { margin-top: 16px; font-size: 13px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--ink); }
 .cat-ico { stroke: #9a9a9a; fill: none; stroke-width: 2.4; }
 .cat-ico .acc { stroke: var(--red); }
-/* Na grade de categorias o ícone ganha CÍRCULO PRETO para destacar (os
-   traços cinza sumiam no fundo branco): dentro do círculo o traço é branco
-   e o acento fica amarelo. Os placeholders de produto (mesma classe, fora
-   do tile) continuam discretos. */
+/* Ícone da grade de categorias em círculo preto. */
 .cat-tile .cat-ico {
   stroke: #fff; background: var(--ink); border-radius: 50%; padding: 22px;
   width: 120px; height: 120px; box-sizing: border-box;
   transition: transform .12s;
 }
-/* foto real da categoria (quando o admin envia uma) — mesmo enquadramento
-   circular do ícone padrão. */
+/* Foto da categoria, no mesmo círculo do ícone. */
 .cat-tile .cat-photo {
   width: 120px; height: 120px; border-radius: 50%; object-fit: cover;
   box-sizing: border-box; background: #eee; transition: transform .12s;
@@ -738,13 +691,11 @@ main.shop { padding: 0 18px 70px; }
 .prod-row { display: grid; grid-template-columns: 200px 1fr; gap: 26px; padding: 26px 0; border-bottom: 1px solid #eee; }
 @media (max-width: 700px) { .prod-row { grid-template-columns: 1fr; } }
 .prod-img { background: #fafafa; border: 1px solid #eee; height: 170px; display: flex; align-items: center; justify-content: center; }
-/* foto real do produto (upload/Tiny) dentro dos quadros da loja —
-   o clique abre a foto ampliada num modal (ver shop.js) */
+/* Foto do produto; o clique amplia (shop.js) */
 .prod-img img, .prod-page .big-img img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
 .prod-name { color: var(--red); font-size: 18px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; }
 .prod-name a { color: var(--red); }
-/* white-space: pre-line preserva as quebras de linha da descrição (listas do
-   Tiny viram uma linha por item, com marcador "• " já embutido no texto) */
+/* pre-line mantém as quebras da descrição */
 .prod-desc { margin: 8px 0 16px; color: #333; font-size: 13px; white-space: pre-line; }
 .prod-desc li { margin-bottom: 3px; }
 .prod-desc-full { font-size: 14px; line-height: 1.5; }
@@ -767,8 +718,7 @@ main.shop { padding: 0 18px 70px; }
 /* carrinho */
 .cart-line { display: grid; grid-template-columns: 110px 1fr 120px 110px 120px 36px; gap: 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid #eee; }
 @media (max-width: 800px) { .cart-line { grid-template-columns: 1fr 1fr; } }
-/* Foto do item contida na célula (sem isso, a foto real do Tiny transborda a
-   coluna de 110px e "engole" o nome/link do produto ao lado). */
+/* Foto do item contida na célula. */
 .cart-line .cart-img { background: #fafafa; border: 1px solid #eee; width: 110px; height: 74px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .cart-line .cart-img img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
 .cart-tot { display: flex; justify-content: flex-end; gap: 40px; align-items: center; padding: 20px 0; font-size: 16px; }
@@ -848,8 +798,7 @@ main.finder { padding: 8px 28px 70px; }
 
 .finder-model-name { color: var(--red); font-weight: 600; margin: 6px 0 10px; }
 .finder-links { display: flex; gap: 28px; margin-bottom: 20px; font-size: 13px; flex-wrap: wrap; align-items: center; }
-/* :not(.btn-voltar): o botão VOLTAR tem estilo próprio (pílula preta) e não
-   pode herdar o visual de link destas regras. */
+/* O botão Voltar tem estilo próprio. */
 .finder-links a:not(.btn-voltar), .finder-links button:not(.btn-voltar) { color: var(--red); background: none; border: none; cursor: pointer; font-size: 13px; padding: 0; }
 .finder-links a:not(.btn-voltar):hover, .finder-links button:not(.btn-voltar):hover { text-decoration: underline; }
 
@@ -867,24 +816,12 @@ main.finder { padding: 8px 28px 70px; }
 .thumb .tn { position: absolute; top: 6px; right: 10px; color: var(--red); font-weight: 800; font-size: 13px; }
 .thumb .thumb-bg { background: #e9e9e9; padding: 6px 14px; }
 
-/* Metade da largura para as peças, metade para o diagrama — e o quadro do
-   diagrama EM PÉ, na proporção dos desenhos que o admin envia (750×1080).
-   Deitado, o encaixe da imagem era limitado pela altura e sobrava faixa
-   branca dos dois lados, deixando o desenho pequeno no meio do quadro.
-   A rolagem fica só dentro da lista (.part-list); pôr overflow também aqui
-   criaria uma segunda barra colada na primeira. */
+/* Peças e diagrama meio a meio; diagrama em pé (750×1080). Só a lista rola. */
 .part-layout {
   display: grid; gap: 36px; align-items: start; width: 100%;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
-/* A altura das duas colunas NASCE da largura delas, e não de um valor fixo.
-   É o que mantém o quadro em pé: com altura fixa, metade de uma tela larga
-   passa a ser mais comprida que alta, e o quadro voltava a deitar.
-   Como as duas colunas têm a MESMA largura (1fr e 1fr), a mesma proporção lhes
-   dá a mesma altura — é assim que a lista de peças termina exatamente na linha
-   em que o diagrama termina, sem precisar sincronizar dois números à mão.
-   O teto em vh impede que um monitor muito largo gere um quadro mais alto que
-   a janela, obrigando a rolar a página para ver o pé do desenho. */
+/* Altura pela largura (aspect-ratio): as duas colunas terminam na mesma linha. Teto em vh. */
 .part-layout > * {
   aspect-ratio: 0.72;                    /* proporção dos diagramas (750×1080) */
   max-height: calc(100vh - 150px);
@@ -892,33 +829,15 @@ main.finder { padding: 8px 28px 70px; }
 }
 @media (max-width: 1020px) {
   .part-layout { grid-template-columns: 1fr; }
-  /* Em coluna única a proporção é abandonada: empilhadas, as duas metades
-     ficariam altas demais e a página viraria uma rolagem sem fim. */
+  /* Coluna única: sem proporção. */
   .part-layout > * { aspect-ratio: auto; height: calc(100vh - 200px); }
 }
-/* A coluna das peças é uma pilha: barra, busca e a lista, que fica com toda a
-   altura que sobrar e rola dentro de si mesma. */
+/* Coluna das peças: barra, busca e lista (que rola). */
 .part-col { display: flex; flex-direction: column; min-height: 0; }
 
-/* ---- lista de peças: um CARD por peça ----------------------------------
-   Cada peça é um bloco fechado, e não uma linha de tabela. Numa tabela o
-   olho precisa cruzar a linha inteira para juntar nome, código, status e
-   quantidade; no card esses quatro dados ficam agrupados dentro da mesma
-   moldura, na ordem em que o cliente decide (o que é › quanto custa ›
-   posso comprar › quantos levo).
-
-   As classes .part-row, .pr-chk, .qn e o data-num continuam com os mesmos
-   nomes de antes de propósito: o diagrama sincroniza os hotspots por esses
-   seletores (ver finder.js). Renomear qualquer um deles quebra o realce ao
-   clicar num número da imagem, sem erro nenhum no console. */
-/* A lista rola dentro de si mesma, com a mesma altura do quadro do diagrama
-   (.diag-viewport, 560px). Assim a imagem não sai da tela quando a seção tem
-   muitas peças: o cliente clica num número do diagrama e a lista rola até a
-   peça sem que o diagrama suma do campo de visão.
-   O padding à direita evita que a barra de rolagem encoste na borda dos cards. */
-/* flex:1 + min-height:0 é o par obrigatório para a lista rolar dentro da
-   coluna: sem o min-height:0, um item flex se recusa a encolher abaixo do
-   próprio conteúdo e a lista estoura a altura da coluna em vez de rolar. */
+/* ---- lista de peças: um card por peça ----
+   .part-row, .pr-chk, .qn e data-num são usados pelo finder.js: não renomeie. */
+/* flex:1 + min-height:0: a lista rola dentro da coluna. */
 .part-list {
   display: flex; flex-direction: column; gap: 12px;
   flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 2px 10px 2px 2px;
@@ -939,9 +858,7 @@ main.finder { padding: 8px 28px 70px; }
   transition: border-color .15s, box-shadow .15s;
 }
 .part-row:hover { border-color: #bdbdbd; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
-/* Selecionada: moldura na cor da marca + leve tom de fundo. NÃO preenche o
-   card inteiro de amarelo — com blocos grandes isso vira uma mancha que
-   apaga o contraste do texto e do status. */
+/* Selecionada: moldura amarela e fundo leve. */
 .part-row.sel { border-color: var(--red); border-width: 2px; padding: 13px 15px; background: #fffdf2; }
 
 /* linha de cima: nº · nome/SKU · preço */
@@ -982,8 +899,6 @@ main.finder { padding: 8px 28px 70px; }
 .pt-status.ok { color: var(--green); }
 .pt-status.pre { color: #b45309; }
 .pt-status.out { color: #b91c1c; } /* indisponível: vermelho semântico */
-/* O card selecionado mantém fundo claro, então o status conserva a própria
-   cor — era branco quando a seleção pintava a linha inteira de amarelo. */
 /* position:relative é a âncora dos botões de zoom, que flutuam sobre a imagem */
 .diagram-box { position: relative; border: 1px solid #ccc; min-height: 460px; display: flex; flex-direction: column; gap: 0; padding: 0; }
 .diagram-box .cap { font-size: 11px; color: var(--gray); }
@@ -1002,12 +917,8 @@ main.finder { padding: 8px 28px 70px; }
 /* miniaturas das seções: usa o diagrama enviado pelo admin quando existir */
 .thumb img { max-width: 100%; max-height: 96px; object-fit: contain; }
 
-/* ---- diagrama com zoom + hotspots (tela da seção) ----
-   Não há mais barra de zoom: o zoom é dado com a roda do mouse sobre a
-   própria imagem, ancorado no ponto sob o cursor (ver finder.js). Os botões
-   flutuam SOBRE o desenho, em vez de ocupar uma faixa acima dele — numa tela
-   em que o conteúdo é uma imagem grande, cada pixel de altura gasto com
-   controles sai do desenho. */
+/* ---- diagrama com zoom + hotspots ----
+   Zoom pela roda do mouse (finder.js); botões flutuam sobre o desenho. */
 .diag-fab {
   position: absolute; z-index: 3; display: flex; flex-direction: column;
   background: #fff; border: 1px solid #d5d5d5; border-radius: 6px;
@@ -1025,20 +936,12 @@ main.finder { padding: 8px 28px 70px; }
 .diag-fab .dg-btn:hover:not(:disabled) { background: #fdf6dc; color: var(--red); }
 .diag-fab .dg-btn:disabled { opacity: .35; cursor: default; }
 
-/* O quadro NÃO rola: é uma área livre onde o desenho é posicionado à mão pelo
-   finder.js (left/top). Com rolagem, a imagem ficava presa enquanto coubesse
-   no quadro — não havia o que rolar —, e era justamente aí que arrastar e o
-   zoom no cursor precisavam funcionar.
-   touch-action:none entrega os gestos ao nosso arrasto; sem isso o navegador
-   os interpreta como rolagem da página e o desenho não se mexe no celular. */
+/* O quadro não rola: o finder.js posiciona o desenho. touch-action:none libera o arrasto no celular. */
 .diag-viewport {
   position: relative; overflow: hidden;
   background: #fff; flex: 1 1 0; min-height: 0; touch-action: none;
 }
-/* A mãozinha só aparece quando o desenho está ampliado além do quadro — que é
-   a única situação em que arrastar move alguma coisa. No zoom mínimo a imagem
-   cabe inteira e fica fixa no centro; oferecer o cursor de arrasto ali seria
-   prometer um gesto que não faz nada. */
+/* Mãozinha só quando ampliado. */
 .diag-viewport.movel { cursor: grab; }
 .diag-viewport.movel.arrastando { cursor: grabbing; }
 .diag-canvas { position: absolute; top: 0; left: 0; }
@@ -1057,10 +960,7 @@ main.finder { padding: 8px 28px 70px; }
 .pt-busca .limpa:hover { color: var(--red); }
 .part-row.oculta { display: none; }
 
-/* hotspot: área clicável SEMPRE visível (quadrado amarelo, como no editor do
-   admin); "acende" em PRETO no hover/seleção (o fundo já é amarelo — a
-   seleção precisa contrastar). O número da peça NÃO é exibido ao cliente —
-   é um dado interno do administrador. */
+/* Hotspot sempre visível; preto no hover/seleção. O número não aparece ao cliente. */
 .hotspot { position: absolute; background: rgba(229, 177, 0, .14); border: 2px solid var(--red); cursor: pointer; padding: 0; border-radius: 3px; }
 .hotspot:hover, .hotspot.hover { border-color: var(--ink); background: rgba(229, 177, 0, .28); }
 .hotspot.on { border-color: var(--ink); background: rgba(229, 177, 0, .38); box-shadow: 0 0 0 1px rgba(28, 28, 28, .45); }
@@ -1080,13 +980,9 @@ main.finder { padding: 8px 28px 70px; }
   main.finder, main.finder * { visibility: visible; }
   main.finder .search-panel, main.finder .fnd-actions,
   main.finder .diag-fab, main.finder .pt-busca { display: none; }
-  /* Na tela o desenho é posicionado à mão dentro de um quadro de altura fixa;
-     no papel isso viraria uma imagem cortada, presa no zoom e na posição em
-     que o cliente por acaso deixou. Aqui ele volta ao fluxo normal, inteiro e
-     na largura da página. */
+  /* Impressão: desenho inteiro, no fluxo normal. */
   main.finder .diag-viewport { height: auto; overflow: visible; }
-  /* No papel some a proporção fixa das colunas: cada uma ocupa o que o seu
-     conteúdo pedir, e a lista sai inteira em vez de cortada na altura da tela. */
+  /* Impressão: lista inteira. */
   main.finder .part-layout > * { aspect-ratio: auto; max-height: none; min-height: 0; }
   main.finder .diag-canvas {
     position: relative !important;
@@ -1130,9 +1026,7 @@ main.finder { padding: 8px 28px 70px; }
 .media-gallery.sm .media-item .play { font-size: 15px; }
 .media-gallery.sm .media-item.is-video::before { font-size: 7px; padding: 0 3px; }
 
-/* Seletor de fotos/vídeos do formulário de reivindicação (js/portal.js,
-   montarSeletorMidia): contador "2 de 5", miniatura que abre em tela cheia e
-   um X para tirar o arquivo escolhido por engano. */
+/* Seletor de fotos/vídeos da reivindicação (portal.js, montarSeletorMidia). */
 .midia-cont { font-weight: 400; color: var(--gray); margin-left: 4px; }
 .midia-dica { font-size: 11px; margin-top: 4px; }
 .media-item .midia-x {
@@ -1143,10 +1037,7 @@ main.finder { padding: 8px 28px 70px; }
 }
 .media-item .midia-x:hover { background: #b91c1c; }
 
-/* Visualizador em tela cheia — fundo escuro e X redondo no canto, acima do
-   modal (90) e da cortina de envio (95). Os `min-*: 0` evitam que foto/vídeo
-   grande vaze da tela: item de flex tem `min-width:auto`, que para vídeo e
-   imagem resolve para o tamanho INTRÍNSECO e vence o max-width. */
+/* Visualizador em tela cheia. min-*: 0 impede foto/vídeo de vazar. */
 .midia-viewer {
   position: fixed; inset: 0; background: rgba(0, 0, 0, .85); z-index: 96;
   display: flex; align-items: center; justify-content: center; padding: 24px;
@@ -1168,8 +1059,7 @@ main.finder { padding: 8px 28px 70px; }
 .peca-add #nc-peca { width: 100%; }
 .peca-add #nc-peca-qtd { width: 72px; }
 
-/* autocomplete próprio das peças defeituosas — substitui o datalist nativo,
-   que herdava o visual do sistema operacional */
+/* Autocomplete das peças */
 .ac-wrap { position: relative; flex: 1; min-width: 0; }
 .ac-list {
   position: absolute; top: 100%; left: 0; right: 0; z-index: 60;
@@ -1187,8 +1077,7 @@ main.finder { padding: 8px 28px 70px; }
 .ac-item .ac-preco { color: #999; font-size: 11px; white-space: nowrap; }
 .ac-item:hover, .ac-item.on { background: #fdf6dd; }
 
-/* cortina de envio da garantia: cobre o overlay inteiro (não o .modal, que
-   rola) para a mensagem ficar sempre centralizada na tela. */
+/* Cortina de envio da garantia, centralizada na tela. */
 .claim-envio {
   position: fixed; inset: 0; z-index: 95; background: rgba(0, 0, 0, .5);
   display: flex; align-items: center; justify-content: center; padding: 24px;
@@ -1277,10 +1166,7 @@ main.finder { padding: 8px 28px 70px; }
 .cl-check { cursor: pointer; }
 
 /* =========================================================
-   TEXTOS AMARELOS: sempre em NEGRITO (sem contorno — o dono
-   pediu a remoção das bordas pretas em 2026-07-16).
-   Agrupa os seletores que usam o amarelo como cor de TEXTO;
-   toda UI nova com texto amarelo deve entrar nesta lista.
+   TEXTOS AMARELOS: sempre em negrito. Texto amarelo novo entra nesta lista.
    ========================================================= */
 .brand, .brand .g-badge, .field-title, .topbar .logo span, .pf-link:hover,
 .crumb a, .card-title, .cl-num, .row-claim .chev, .fin-card .v, .pdf-ico,
@@ -1292,8 +1178,7 @@ main.finder { padding: 8px 28px 70px; }
 .finder-crumb .crumb-print, .btn.ghost, .link-action, .veh-card h3 {
   font-weight: 700;
 }
-/* No cabeçalho AMARELO da loja o hover amarelo sumiria — lá o hover do
-   link do finder fica preto sublinhado (sem contorno). */
+/* No cabeçalho amarelo, o hover fica preto. */
 .shop-head .pf-link:hover { color: #fff; background: var(--ink); text-decoration: none; }
 
 /* Anexos nas notificações do portal (enviados pelo admin). */
@@ -1303,22 +1188,14 @@ main.finder { padding: 8px 28px 70px; }
 .notif .nt-chamado { display: inline-block; margin: 8px 0 2px; font-weight: 700; }
 
 /* =========================================================
-   SUPORTE TÉCNICO (helpdesk)
-   ---------------------------------------------------------
-   Quatro peças, na ordem em que aparecem abaixo:
-     1. o pop-up flutuante do canto inferior direito (.sup-widget);
-     2. os rótulos de status, compartilhados pelas três telas;
-     3. a aba "Suporte Técnico" do portal (.sup-page-*);
-     4. a conversa do chamado (.sup-conversa), usada no portal e no painel
-        administrativo — os dois lados leem o mesmo fio.
+   SUPORTE TÉCNICO: pop-up (.sup-widget), status, aba do portal (.sup-page-*) e conversa (.sup-conversa)
    ========================================================= */
 
 /* ---------- 1. pop-up flutuante ---------- */
 .sup-widget { position: fixed; right: 22px; bottom: 22px; z-index: 300; }
 /* Na loja o carrinho já mora no canto: o suporte sobe uma cadeira. */
 .sup-widget.sup-com-carrinho { bottom: 96px; }
-/* Com um pop-up aberto o botão sai de cena: ele fica acima do modal (300 x 90)
-   e, no celular, cobria o botão de enviar do rodapé. */
+/* Com um pop-up aberto, o botão some. */
 body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
 
 .sup-fab {
@@ -1337,8 +1214,7 @@ body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
   border-radius: 11px; min-width: 20px; height: 20px; padding: 0 5px;
   font-size: 11px; font-weight: 800; line-height: 16px; text-align: center;
 }
-/* Pulso discreto enquanto há resposta não lida: o revendedor percebe a
-   novidade sem que nada fique piscando na cara dele o tempo todo. */
+/* Pulso enquanto há resposta não lida. */
 .sup-fab.tem-novidade { animation: sup-pulso 2.4s ease-in-out infinite; }
 @keyframes sup-pulso {
   0%, 100% { box-shadow: 0 4px 16px rgba(0, 0, 0, .28); }
@@ -1453,8 +1329,7 @@ body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
 .sup-filtros button.on { background: var(--red); border-color: var(--ink); font-weight: 700; }
 
 .sup-tabela .num { font-weight: 700; }
-/* Linha com mensagem que ninguém leu — vale no portal (.table) e no painel
-   administrativo (.tbl), que são duas tabelas de estilos diferentes. */
+/* Linha com mensagem não lida (portal e admin). */
 .sup-tabela tr.tem-novo td { background: #fffbe9; }
 .sup-tabela tr.tem-novo:hover td { background: #fff6d6; }
 .sup-badge-novo {
@@ -1481,12 +1356,7 @@ body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
 .sup-msg .sup-msg-quem { display: block; font-size: 11px; font-weight: 700; margin-bottom: 4px; }
 .sup-msg .sup-msg-txt { white-space: pre-line; }
 .sup-msg .sup-msg-hora { display: block; font-size: 10.5px; color: var(--gray); margin-top: 6px; }
-/* O lado é de QUEM ESTÁ LENDO, não do papel de quem escreveu: as próprias
-   mensagens à direita, no amarelo da marca; as do outro lado à esquerda, em
-   cinza. É por isso que as classes são `de-mim`/`de-outro` — a mesma mensagem
-   de um revendedor aparece à direita no portal dele e à esquerda no painel do
-   atendente. Amarrar o lado ao papel deixaria o revendedor lendo a própria
-   conversa espelhada. */
+/* Lado de quem está LENDO: minhas mensagens à direita, as do outro à esquerda. */
 .sup-msg.de-outro { align-self: flex-start; background: #f1f1f1; border: 1px solid #e2e2e2; }
 .sup-msg.de-mim { align-self: flex-end; background: var(--red-soft); border: 1px solid #f0dfa4; }
 .sup-msg.de-sistema {
@@ -1509,12 +1379,7 @@ body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
 }
 
 /* =========================================================
-   CELULAR (30/09/2026) — nada pode escapar da largura da tela
-   ---------------------------------------------------------
-   Achado da varredura: 7 de 12 telas ganhavam rolagem lateral em 390 px.
-   Três causas: (1) colunas de grid "1fr" não encolhem abaixo do conteúdo
-   (precisam de minmax(0, 1fr)); (2) tabelas largas empurravam a página;
-   (3) o zoom de 1.15 da interface alarga tudo ~15% — em celular não vale.
+   CELULAR: nada passa da largura da tela (grid com minmax(0, 1fr), tabelas roláveis, sem zoom)
    ========================================================= */
 @media (max-width: 640px) {
   :root { --zoom-ui: 1; }

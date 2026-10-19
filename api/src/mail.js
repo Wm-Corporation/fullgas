@@ -1,11 +1,4 @@
-// ============================================================
-// Envio de e-mail (SMTP) — usado hoje só pela recuperação de senha.
-// ------------------------------------------------------------
-// Sem SMTP_HOST no .env o módulo entra em "modo dev": nada sai pela rede, o
-// e-mail é despejado no console do servidor. Assim dá para testar o fluxo
-// inteiro sem mandar mensagem para ninguém — e um deploy sem SMTP configurado
-// avisa no log em vez de derrubar a rota.
-// ============================================================
+// Envio de e-mail (SMTP). Sem SMTP_HOST, modo dev: nada sai pela rede.
 import nodemailer from 'nodemailer';
 import 'dotenv/config';
 
@@ -15,19 +8,8 @@ export function mailConfigurado() {
   return !!process.env.SMTP_HOST;
 }
 
-// Endereço público do site — é a base do link que vai no e-mail. Sem barra no fim.
-//
-// Com APP_URL definido, ele manda e pronto (é o caso de produção: o valor é
-// fixo e não depende de quem chamou). SEM APP_URL, em vez de cravar
-// "localhost" — que não abre em nenhum outro aparelho — aproveitamos a origem
-// de quem fez o pedido: se o gerente abriu o portal em http://192.168.1.131:5500
-// pelo celular, o link chega com esse mesmo endereço e funciona.
-//
-// SEGURANÇA: a origem vem de um cabeçalho, ou seja, do cliente. Aceitá-la de
-// olhos fechados permitiria alguém pedir a recuperação de OUTRA pessoa forjando
-// o Origin e receber um link apontando para o servidor dele — o token vazaria.
-// Por isso só passam origens comprovadamente nossas: as listadas em
-// CORS_ORIGIN, ou endereços locais/de rede interna (uso em desenvolvimento).
+// Endereço público do site (base dos links do e-mail). Usa APP_URL;
+// sem ela, só aceita a origem da requisição se for nossa (CORS_ORIGIN ou rede local).
 export function appUrl(req) {
   const conf = (process.env.APP_URL || '').replace(/\/+$/, '');
   if (conf) return conf;
@@ -66,17 +48,10 @@ function obterTransporte() {
   return transporte;
 }
 
-// Envia um e-mail. Devolve { enviado } — em modo dev, { enviado: false }.
-// Nunca lança por falta de configuração; lança só em erro real de SMTP.
+// Envia um e-mail: { enviado }. Só lança em erro real de SMTP.
 export async function enviarEmail({ para, assunto, texto, html }) {
   if (!mailConfigurado()) {
-    // Em DESENVOLVIMENTO despejamos o e-mail inteiro no console — é assim que
-    // se testa a recuperação de senha sem servidor SMTP.
-    //
-    // Em PRODUÇÃO isso seria um vazamento grave: o corpo do e-mail de
-    // recuperação contém o link COM o token, válido por uma hora. Se a API
-    // subisse sem SMTP_HOST, qualquer pessoa com acesso ao log do PM2
-    // conseguiria trocar a senha de qualquer conta. Então lá o corpo não sai.
+    // Dev: mostra o e-mail no console. Produção: nunca (o corpo leva o link com token).
     if (process.env.NODE_ENV === 'production') {
       console.error(
         `E-MAIL NÃO ENVIADO para ${para} ("${assunto}"): SMTP não configurado. ` +

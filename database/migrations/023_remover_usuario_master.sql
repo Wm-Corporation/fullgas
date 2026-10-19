@@ -1,13 +1,7 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 023 — Remove o usuário MASTER (desfaz a 022)
--- ------------------------------------------------------------
--- Decisão do dono (2026-07-16): o usuário master não será mais
--- necessário. Remove o trigger de proteção, a conta e a coluna.
--- Idempotente: roda quantas vezes for preciso.
--- ============================================================
+-- 023 - Remove o usuario MASTER, o trigger e a coluna. Idempotente.
 SET QUOTED_IDENTIFIER ON;
 
 IF OBJECT_ID('dbo.TR_Usuario_ProtegeMaster', 'TR') IS NOT NULL

@@ -1,10 +1,4 @@
-// Testes da REVOGAÇÃO de sessão (migration 037 + revalidarSessao).
-//
-// O que estava quebrado antes disto: a API só conferia a assinatura do JWT,
-// nunca o banco. Logout, troca de senha, bloqueio e rebaixamento de admin não
-// derrubavam nada — valiam só no login seguinte, até 8h depois.
-//
-// Roda sem banco: a consulta é injetada por configurarRevalidacao().
+// Revogação de sessão (migration 037 + revalidarSessao). Sem banco: a consulta é injetada.
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'chave-de-teste-com-mais-de-32-caracteres-ok';
@@ -15,8 +9,7 @@ beforeAll(async () => {
   auth = await import('../src/auth.js');
 });
 
-// Linha do banco que a consulta injetada devolve. Os testes a alteram para
-// simular o que um admin faria pelo painel.
+// Linha que a consulta injetada devolve (os testes a alteram).
 let linhaBanco;
 let consultas;
 

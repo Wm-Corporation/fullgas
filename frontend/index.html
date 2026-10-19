@@ -40,13 +40,7 @@
             <label for="lg-senha">Senha</label>
             <input id="lg-senha" type="password" autocomplete="current-password" placeholder="••••••••">
           </div>
-          <!-- Verificação anti-robô, ANTES do botão de entrar: a ordem visual
-               importa, porque o usuário precisa marcar a caixa antes de
-               clicar. Fica vazia e escondida até o auth.js confirmar que há
-               chave configurada no servidor (GET /api/auth/captcha/config) e
-               o widget ser desenhado aqui dentro. Sem configuração, nada
-               disto aparece e o login segue funcionando — é o que mantém o
-               desenvolvimento local simples. -->
+          <!-- Anti-robô: aparece só se o servidor tiver chave configurada (auth.js). -->
           <div id="captcha-bloco" class="hidden" style="margin:14px 0;">
             <div id="captcha-widget" style="display:flex;justify-content:center;"></div>
           </div>
@@ -144,12 +138,7 @@
             </div>
           </div>
 
-          <!-- Mesma verificação anti-robô do login, e pelo mesmo motivo: sem
-               ela, o cadastro é um formulário público que cria empresa +
-               usuário no banco e ainda dispara uma chamada ao Tiny. É um
-               SEGUNDO widget, não o do login reaproveitado: o token do
-               Turnstile vale uma vez só, e um widget escondido (o formulário
-               de login fica display:none aqui) não renderiza. -->
+          <!-- Segundo widget anti-robô (o token vale uma vez e o do login fica escondido). -->
           <div id="captcha-bloco-cad" class="hidden" style="margin:14px 0;">
             <div id="captcha-widget-cad" style="display:flex;justify-content:center;"></div>
           </div>
@@ -161,11 +150,6 @@
       </section>
     </div>
 
-    <!-- Aqui existia um quadro "Acessos de demonstração" com e-mail e senha das
-         contas de teste. Saiu na preparação para produção: ficava visível para
-         qualquer visitante da tela de acesso, entregando contas válidas e o
-         padrão de senha da casa. As credenciais de teste vivem no
-         database/fullgas_seeds.sql, que não é aplicado em produção. -->
   </div>
 
   <script src="js/config.js?v=20260727a"></script>

@@ -1,8 +1,5 @@
-// Cancelamento entre Fullgas e Tiny (30/09/2026):
-//  - cancelar no Fullgas com peça já enviada NÃO cancela sozinho no Tiny
-//    (devolveria ao estoque de lá peças que já foram embora) — deixa aviso;
-//  - pedido cancelado ou EXCLUÍDO direto no Tiny vira aviso na exportação,
-//    em vez de seguir "Enviado" com a fatura em aberto sem ninguém saber.
+// Cancelamento: com peça já enviada, não cancela no Tiny (só aviso);
+// cancelado ou excluído no Tiny vira aviso na exportação.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 let exportacoes, chamadasTiny, situacao, updates;

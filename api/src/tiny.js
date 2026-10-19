@@ -1,39 +1,15 @@
-// ============================================================
-// Integração com o Tiny ERP — API v2 (token simples, sem OAuth)
-// ------------------------------------------------------------
-// O Tiny é a única fonte de verdade dos produtos importados dele:
-// estoque, preço, nome, descrição e foto são sempre espelho do
-// Tiny (Tiny → Fullgas, sem override manual). No sentido inverso
-// vão só os PEDIDOS (tiny-pedidos.js): quando o admin confirma o envio
-// das peças encontradas (remessa), elas viram um pedido 'aprovado' no
-// Tiny, baixando o estoque lá.
-//
-// A atualização automática NÃO usa webhook (método descartado —
-// as notificações do Tiny se mostraram pouco confiáveis): é o
-// agendamento node-cron em tiny-cron.js que, a cada N minutos,
-// roda o MESMO lote do botão "Sincronizar" do admin
-// (sincronizarLote, no fim deste arquivo).
-//
-// Toda a comunicação com o Tiny passa por este arquivo — se a
-// API deles mudar, só este arquivo muda.
-// ============================================================
+// Integração com o Tiny ERP (API v2). Toda chamada ao Tiny passa por aqui.
+// Produtos importados são espelho do Tiny; no sentido inverso só vão pedidos (tiny-pedidos.js).
 import 'dotenv/config';
 import { query } from './db.js';
 import { prepararMiniaturas } from './miniaturas.js';
 
 const BASE = 'https://api.tiny.com.br/api2';
 
-// O Tiny v2 bloqueia o token que passa de ~60 requisições por minuto.
-// Todas as chamadas passam por uma fila que garante o intervalo mínimo —
-// um lote grande fica lento, mas nunca derruba a integração inteira.
-// Chamadas PRIORITÁRIAS (cliente esperando: checagem de estoque do checkout
-// e exportação de pedido) furam a fila — entram na FRENTE do lote do cron,
-// senão o checkout ficaria minutos atrás de uma rodada de sincronização.
+// Fila: no máximo ~60 req/min (o Tiny bloqueia acima disso). Prioritárias entram na frente.
 const INTERVALO_MS = 1100;
 
-// Sem timeout, uma resposta pendurada do Tiny trava a rodada do cron para
-// sempre: a trava `rodando` (tiny-cron.js) só é liberada no `finally`, que
-// nunca chega a rodar. Toda rodada seguinte seria pulada em silêncio.
+// Sem timeout, uma resposta pendurada travaria o cron para sempre.
 const TIMEOUT_MS = Number(process.env.TINY_TIMEOUT_MS || 20000);
 
 const filaEspera = [];   // resolvers aguardando a vez de chamar o Tiny
@@ -68,19 +44,8 @@ class TinyError extends Error {
   }
 }
 
-// Reúne as mensagens de erro de uma resposta do Tiny.
-//
-// Elas chegam em DOIS lugares, e é preciso olhar os dois. Nas CONSULTAS o
-// motivo vem no topo (retorno.erros). Nas GRAVAÇÕES (contato.incluir,
-// pedido.incluir, contato.alterar...) o topo traz só status "Erro", sem lista
-// nenhuma — o motivo real fica um nível abaixo, em registros[].registro.erros.
-// Enquanto isto lia apenas o topo, TODA falha de gravação virava o inútil
-// "Erro não especificado do Tiny": foi essa mensagem que escondeu por semanas
-// um simples "O número de sequência deve ser informado".
-//
-// O codigo_erro segue a mesma regra — vale o do topo e, na falta dele, o do
-// registro. É o que faz o tratamento por código (20 = "não retornou
-// registros", 30 = "CNPJ já cadastrado") continuar valendo nas gravações.
+// Erros da resposta: em consultas vêm no topo; em gravações, em registros[].registro.erros.
+// O codigo_erro segue a mesma regra (20 = sem registros, 30 = CNPJ já cadastrado).
 function extrairErros(ret) {
   const lista = v => (Array.isArray(v) ? v : v ? [v] : []);
   const msgs = lista(ret.erros).map(e => e?.erro).filter(Boolean);
@@ -96,8 +61,7 @@ function extrairErros(ret) {
   return { msg: [...new Set(msgs)].join('; '), codigo };
 }
 
-// POST na API v2 (o Tiny só aceita POST form-encoded). Lança TinyError
-// quando o retorno vem com status "Erro".
+// POST form-encoded na API v2. Lança TinyError se o status vier "Erro".
 async function tinyPost(endpoint, params = {}, { prioritario = false } = {}) {
   const token = process.env.TINY_TOKEN;
   if (!token) throw new TinyError('TINY_TOKEN não configurado no .env da API.');
@@ -117,15 +81,13 @@ async function tinyPost(endpoint, params = {}, { prioritario = false } = {}) {
       signal: AbortSignal.timeout(TIMEOUT_MS)
     });
   } catch (e) {
-    // Timeout e falha de rede viram TinyError para cair no mesmo tratamento
-    // que os demais erros do Tiny (log por produto no lote, aviso no checkout).
+    // Timeout e falha de rede também viram TinyError.
     if (e?.name === 'TimeoutError' || e?.name === 'AbortError')
       throw new TinyError(`Tiny não respondeu em ${TIMEOUT_MS / 1000}s.`);
     throw new TinyError(`Falha de rede ao chamar o Tiny: ${e.message}`);
   }
   if (!resp.ok) {
-    // Descarta o corpo antes de lançar: sem isso o undici segura os buffers e
-    // o socket, e uma rajada de erro do Tiny faz a memória do processo crescer.
+    // Descarta o corpo para liberar o socket.
     await resp.body?.cancel().catch(() => {});
     throw new TinyError(`Tiny respondeu HTTP ${resp.status}.`);
   }
@@ -142,17 +104,13 @@ async function tinyPost(endpoint, params = {}, { prioritario = false } = {}) {
 
 /* ---------------- normalização dos dados do Tiny ---------------- */
 
-// Descrição no Tiny vem em HTML (parágrafos e listas <ul><li>). A coluna
-// guarda 1000 chars de TEXTO — mas preservamos a estrutura como quebras de
-// linha: cada item de lista vira uma linha com marcador "• " e o fim de cada
-// bloco (</p>, </li>, </div>...) quebra linha. Sem isso os itens ficariam
-// grudados num texto corrido. A loja renderiza essas quebras (white-space).
+// Descrição HTML → texto com quebras de linha e "• " nos itens de lista (máx. 1000).
 function limparDescricao(html) {
   if (!html) return null;
   const texto = String(html)
     .replace(/<li[^>]*>/gi, '\n• ')                       // item de lista → linha com marcador
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|ul|ol|tr|h[1-6])\s*>/gi, '\n')     // fim de bloco → quebra (</li> não: o <li> já abriu linha)
+    .replace(/<\/(p|div|ul|ol|tr|h[1-6])\s*>/gi, '\n')     // fim de bloco → quebra
     .replace(/<[^>]+>/g, '')                              // remove as demais tags
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
@@ -185,8 +143,7 @@ function clampEstoque(v) {
 
 /* ---------------- consultas ao Tiny ---------------- */
 
-// Lista paginada de produtos do Tiny (100 por página) — tela de importação.
-// Página sem resultados não é erro: o Tiny devolve codigo_erro 20.
+// Produtos do Tiny, 100 por página. Página vazia vem como codigo_erro 20.
 export async function listarProdutos(pagina = 1, pesquisa = '') {
   let ret;
   try {
@@ -211,9 +168,7 @@ export async function listarProdutos(pagina = 1, pesquisa = '') {
   };
 }
 
-// Detalhe completo + saldo de estoque de um produto, já normalizado para as
-// colunas do Fullgas. O saldo vem de produto.obter.estoque.php quando o
-// detalhe não o trouxer junto.
+// Detalhe + saldo de estoque, nas colunas do portal.
 export async function obterProdutoCompleto(tinyId) {
   const p = (await tinyPost('produto.obter.php', { id: tinyId })).produto;
   if (!p) throw new TinyError('Produto não encontrado no Tiny.');
@@ -237,10 +192,7 @@ export async function obterProdutoCompleto(tinyId) {
 
 /* ---------------- listas de preço ---------------- */
 
-// TODAS as listas de preço do Tiny (100 por página), já normalizadas:
-// [{ id, descricao, percentual }]. O % segue o Tiny: negativo = desconto,
-// positivo = acréscimo (-20 = 20% de desconto). Nenhuma lista cadastrada
-// não é erro: o Tiny devolve codigo_erro 20.
+// Todas as listas de preço: [{ id, descricao, percentual }]. Negativo = desconto.
 export async function listarListasPreco() {
   const listas = [];
   for (let pagina = 1, total = 1; pagina <= total; pagina++) {
@@ -265,9 +217,7 @@ export async function listarListasPreco() {
 
 /* ---------------- contatos (clientes) no Tiny ---------------- */
 
-// Procura um contato pelo CPF/CNPJ exato. O Tiny devolve codigo_erro 20
-// quando a pesquisa não encontra nada — isso não é erro, é "não existe".
-// Devolve { id, nome } do primeiro contato ou null.
+// Contato pelo CPF/CNPJ exato: { id, nome } ou null.
 export async function pesquisarContatoPorCpfCnpj(cpfCnpj) {
   let ret;
   try {
@@ -280,9 +230,7 @@ export async function pesquisarContatoPorCpfCnpj(cpfCnpj) {
   return c ? { id: String(c.id), nome: c.nome || '' } : null;
 }
 
-// Inclui um contato no Tiny (contato.incluir.php). Recebe o objeto já no
-// formato da API v2 (nome, tipo_pessoa, cpf_cnpj, endereco...) e devolve
-// { id } do contato criado. Mesmo formato de retorno de pedido.incluir.
+// contato.incluir.php → { id }.
 export async function incluirContato(contato) {
   const ret = await tinyPost('contato.incluir.php',
     { contato: JSON.stringify({ contatos: [{ contato }] }) }, { prioritario: true });
@@ -297,9 +245,7 @@ export async function incluirContato(contato) {
   return { id: String(reg.id) };
 }
 
-// Altera um contato JÁ existente no Tiny (contato.alterar.php). Recebe o objeto
-// no formato v2 COM o `id` do contato; mesmo envelope do incluir. Sentido
-// Fullgas → Tiny quando o cadastro da empresa muda no portal.
+// contato.alterar.php (objeto com `id`).
 export async function alterarContato(contato) {
   const ret = await tinyPost('contato.alterar.php',
     { contato: JSON.stringify({ contatos: [{ contato }] }) }, { prioritario: true });
@@ -313,9 +259,7 @@ export async function alterarContato(contato) {
   return { id: String(reg?.id || contato.id) };
 }
 
-// Lê um contato do Tiny pelo id (contato.obter.php). Devolve o objeto contato
-// (nome, fantasia, cpf_cnpj, ie, email, fone, endereco, numero...) ou null.
-// Sentido Tiny → Fullgas: alimenta o espelho do cadastro no cron.
+// contato.obter.php → contato ou null.
 export async function obterContato(tinyId) {
   const ret = await tinyPost('contato.obter.php', { id: tinyId });
   const c = ret.contato
@@ -325,16 +269,13 @@ export async function obterContato(tinyId) {
 
 /* ---------------- pedidos no Tiny (escrita) ---------------- */
 
-// Saldo atual de um produto no Tiny — usado pela checagem em tempo real do
-// checkout (prioritário: o cliente está esperando a resposta).
+// Saldo atual (prioritário: checkout esperando).
 export async function obterSaldoAtual(tinyId) {
   const est = (await tinyPost('produto.obter.estoque.php', { id: tinyId }, { prioritario: true })).produto;
   return clampEstoque(est?.saldo);
 }
 
-// Inclui um pedido no Tiny (pedido.incluir.php). Recebe o objeto já no formato
-// da API v2 (cliente, itens, numero_pedido_ecommerce...) e devolve { id, numero }
-// do pedido criado lá. O retorno vem em registros[].registro (às vezes objeto).
+// pedido.incluir.php → { id, numero }.
 export async function incluirPedido(pedido) {
   const ret = await tinyPost('pedido.incluir.php',
     { pedido: JSON.stringify({ pedido }) }, { prioritario: true });
@@ -349,17 +290,13 @@ export async function incluirPedido(pedido) {
   return { id: String(reg.id), numero: reg.numero != null ? String(reg.numero) : null };
 }
 
-// Muda a situação de um pedido no Tiny. 'aprovado' baixa o estoque lá (com a
-// conta configurada para lançar estoque na aprovação); 'cancelado' devolve.
+// Situação do pedido no Tiny: 'aprovado' baixa o estoque, 'cancelado' devolve.
 export async function alterarSituacaoPedido(tinyPedidoId, situacao) {
   await tinyPost('pedido.alterar.situacao.php',
     { id: tinyPedidoId, situacao }, { prioritario: true });
 }
 
-// Lê a situação atual de um pedido no Tiny (pedido.obter.php). Devolve o texto
-// da situação em minúsculas (ex.: 'aprovado', 'faturado', 'enviado', 'entregue',
-// 'cancelado') ou null se não vier. Usada para refletir Enviado/Entregue no
-// status local (tiny-pedidos.js → sincronizarSituacaoPedidos).
+// pedido.obter.php → situação em minúsculas, ou null.
 export async function obterSituacaoPedido(tinyPedidoId) {
   const ret = await tinyPost('pedido.obter.php', { id: tinyPedidoId });
   const ped = ret.pedido
@@ -368,28 +305,11 @@ export async function obterSituacaoPedido(tinyPedidoId) {
   return sit != null && sit !== '' ? String(sit).trim().toLowerCase() : null;
 }
 
-/* ---------------- reserva: vendido aqui, ainda fora do Tiny ----------------
-   O saldo do Tiny só desconta uma venda do Fullgas depois que ela é exportada
-   e aprovada lá. Até isso acontecer, quem ESPELHA o estoque (o cron e a
-   checagem do checkout) precisa subtrair essas peças — senão "devolve" ao site
-   um estoque já vendido, e a mesma peça é vendida duas vezes.
+// ---- Reserva: vendido aqui, ainda não descontado no Tiny ----
+// O espelho de estoque subtrai: (1) itens ainda não exportados de pedidos não cancelados;
+// (2) exportações 'pendente'/'erro'. Senão a mesma peça seria vendida duas vezes.
 
-   São DUAS fases, e as duas contam:
-     1. Ainda não saiu para o Tiny: itens em estoque (EmBackorder = 0) de
-        pedidos não cancelados, na parte Quantidade − QuantidadeExportada.
-        É o pedido esperando o "Confirmar envio" — inclusive o restante de
-        um pedido Parcial, que sai numa remessa seguinte.
-     2. Já saiu, mas o Tiny ainda não confirmou: linhas de TinyPedidoExport
-        'pendente' ou 'erro' (Tiny fora do ar, retry do cron). O item já foi
-        marcado como exportado — a quantidade está no ItensJson da linha.
-
-   Até 30/09/2026 só a fase 2 existia, e só no escopo 'normal'. Com a
-   exportação adiada para o envio (17/09) a fase 1 ficou descoberta: o cron
-   regravava o estoque cheio e a venda "sumia" em até 30 minutos. */
-
-// Soma, nas linhas de exportação ainda não confirmadas, a quantidade do SKU.
-// Linha antiga sem ItensJson (escopo 'normal' de antes de 30/09) usa os itens
-// do pedido, que o chamador põe em `itensDoPedido`. Pura, para ser testada.
+// Quantidade do SKU nas exportações não confirmadas (sem ItensJson, usa `itensDoPedido`).
 export function somarReservaExportacoes(sku, linhas) {
   let total = 0;
   for (const l of linhas) {
@@ -453,10 +373,7 @@ export async function registrarLog(tinyId, sku, evento, status, mensagem) {
   ).catch(e => console.error('TinySyncLog falhou:', e.message));
 }
 
-// Mantém no TinySyncLog apenas os 3 registros de 'cron' mais recentes de cada
-// produto — o cron roda o dia todo e o log do editor de produto ficava
-// gigante sem dizer nada de novo. Eventos manuais ('lote', 'importacao') não
-// são tocados. Chamada ao fim de cada rodada do cron (tiny-cron.js).
+// Mantém só os N últimos logs de 'cron' por produto (eventos manuais ficam).
 export async function podarLogCron(manterPorProduto = 3) {
   await query(
     `WITH ranqueado AS (
@@ -471,8 +388,7 @@ export async function podarLogCron(manterPorProduto = 3) {
   ).catch(e => console.error('Poda do TinySyncLog falhou:', e.message));
 }
 
-// Aplica no produto local os campos espelhados do Tiny. Só grava o que veio
-// definido em `dados` (um campo ausente não apaga o valor atual).
+// Aplica no produto os campos do Tiny (campo ausente não apaga).
 export async function aplicarAtualizacao(tinyId, dados, evento) {
   const rows = await query(
     'SELECT ProdutoId, Sku, TinyAtivo FROM dbo.Produto WHERE TinyId = @tid',
@@ -491,8 +407,7 @@ export async function aplicarAtualizacao(tinyId, dados, evento) {
   const sets = ['TinySincronizadoEm = SYSUTCDATETIME()', 'AtualizadoEm = SYSUTCDATETIME()'];
   const params = { pid: p.ProdutoId };
   if (dados.estoque !== undefined) {
-    // Saldo do Tiny menos as vendas locais que ainda não chegaram lá
-    // (exportação pendente/erro) — ver reservaPendente.
+    // Saldo do Tiny menos a reserva pendente.
     const reserva = await reservaPendente(p.ProdutoId);
     sets.push('Estoque = @est');
     params.est = Math.max(0, clampEstoque(dados.estoque) - reserva);
@@ -507,14 +422,7 @@ export async function aplicarAtualizacao(tinyId, dados, evento) {
   return { status: 'ok', sku: p.Sku };
 }
 
-// Sincroniza um lote de produtos locais (por ProdutoId) contra o Tiny.
-// É o coração da atualização automática E da manual — o botão "Sincronizar"
-// do admin e o agendamento do tiny-cron.js chamam esta mesma função:
-//   - `produtoIds = null` sincroniza todos os produtos com TinyAtivo = 1
-//     (é assim que o cron usa);
-//   - `evento` identifica a origem no TinySyncLog: 'lote' (botão do admin)
-//     ou 'cron' (agendamento automático).
-// Sequencial de propósito: a fila de requisições já limita o ritmo.
+// Sincroniza produtos com o Tiny (null = todos os TinyAtivo). evento: 'lote' (botão) ou 'cron'.
 export async function sincronizarLote(produtoIds = null, evento = 'lote') {
   let sqlSel = `SELECT ProdutoId, TinyId, Sku FROM dbo.Produto
                  WHERE TinyAtivo = 1 AND TinyId IS NOT NULL`;

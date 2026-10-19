@@ -1,18 +1,6 @@
-// ============================================================
-// Rotas do Parts Finder (Frente 1.4 expandida — 100% administrável)
-// ------------------------------------------------------------
-// Leitura (autenticado): modelos com árvore, modelo + seções por lado,
-// seção com peças + hotspots, busca por VIN / número de motor (com log).
-// Escrita (admin): CRUD completo de modelos, seções, peças da seção e
-// hotspots, além de upload das imagens (foto do modelo e diagrama da seção).
-//
-// Convenções:
-// - Imagens são gravadas em /uploads/finder e o banco guarda a URL RELATIVA;
-//   as respostas convertem para URL absoluta (front pode estar em outra origem).
-// - Hotspots usam PIXELS da imagem em tamanho natural; o front converte em %.
-// - PecaSecao.Posicao (coluna legada NOT NULL) é mantida em sincronia com o
-//   NumeroImagem quando ele é numérico; senão recebe um sequencial.
-// ============================================================
+// ---- Parts Finder ----
+// Leitura: modelos, seções, peças e hotspots, busca por VIN/motor. Escrita: só admin.
+// Imagens em /uploads/finder (URL relativa no banco). Hotspots em pixels da imagem original.
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'node:path';
@@ -59,8 +47,7 @@ function uploadImagem(req, res, next) {
   });
 }
 
-// Apaga do disco um arquivo referenciado por URL relativa (/uploads/...).
-// Só remove se o caminho resolvido continuar dentro de /uploads (segurança).
+// Apaga um arquivo de /uploads (só se o caminho continuar dentro da pasta).
 export function apagarUpload(rel) {
   if (!rel || !String(rel).startsWith('/uploads/')) return;
   const abs = path.resolve(UPLOADS_ROOT, String(rel).replace(/^\/uploads\//, ''));
@@ -75,9 +62,7 @@ function urlAbs(req, rel) {
   return req.protocol + '://' + req.get('host') + rel;
 }
 
-/* =========================================================================
-   Mapeadores linha do banco → JSON do front
-   ========================================================================= */
+// ---- Mapeadores: linha do banco → JSON do front ----
 function toModelo(req, r) {
   const m = {
     id: r.Codigo,
@@ -94,9 +79,7 @@ function toModelo(req, r) {
     tipoMotor: r.TipoMotor || null,
     ativo: r.Ativo === undefined ? true : !!r.Ativo
   };
-  // Montada na hora a partir dos campos: editar a categoria (ou o nome, ou o
-  // ano) já muda a árvore. A coluna ModeloMoto.Arvore, digitada à mão até
-  // 16/09/2026, não é mais lida nem gravada.
+  // Árvore montada a partir dos campos (a coluna Arvore não é mais usada).
   m.arvore = arvoreModelo(m);
   return m;
 }
@@ -180,9 +163,7 @@ function intOuNull(v) {
   return Number.isInteger(n) ? n : NaN;
 }
 
-/* =========================================================================
-   LEITURA (cliente autenticado)
-   ========================================================================= */
+// ---- Leitura (cliente autenticado) ----
 
 // GET /api/finder/modelos — lista com árvore (só ativos; admin: ?todos=1).
 router.get('/finder/modelos', requireAuth, requireArea('finder'), async (req, res, next) => {
@@ -195,19 +176,14 @@ router.get('/finder/modelos', requireAuth, requireArea('finder'), async (req, re
   } catch (e) { next(e); }
 });
 
-// GET /api/finder/busca?vin=...&motor=... — resolve VIN ou nº de motor para o
-// modelo. Registra a busca no LogBusca (alimenta o dashboard do admin).
+// GET /api/finder/busca?vin=...&motor=... — VIN ou nº de motor → modelo. Registra no LogBusca.
 router.get('/finder/busca', requireAuth, requireArea('finder'), async (req, res, next) => {
   try {
     const vin = String(req.query.vin || '').trim();
     const motor = String(req.query.motor || '').trim();
     if (!vin && !motor) return res.status(400).json({ erro: 'Informe vin ou motor.' });
 
-    // ESCOPO POR EMPRESA — o mesmo padrão de veiculos.routes.js (escopoEmpresa).
-    // Sem ele, esta rota respondia sobre QUALQUER chassi da base: bastava estar
-    // logado para descobrir, a partir de um número de chassi, o modelo, a cor e
-    // se a moto já foi vendida — inclusive de outra concessionária. Era o único
-    // ponto do sistema onde dado de veículo escapava do isolamento por empresa.
+    // Escopo por empresa: cliente só encontra chassi da própria concessionária.
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
 
     const rows = await query(
@@ -241,10 +217,7 @@ router.get('/finder/busca', requireAuth, requireArea('finder'), async (req, res,
   } catch (e) { next(e); }
 });
 
-// GET /api/finder/uso?sku=&descricao= — todas as seções do finder que contêm
-// uma peça, buscada pelo número do artigo (SKU) e/ou pela descrição. Alimenta a
-// tela "Usage list": o cliente digita um SKU e vê em quais modelos/seções ele
-// aparece, com link para abrir a seção. Busca parcial (LIKE) em ambos os campos.
+// GET /api/finder/uso?sku=&descricao= — seções que contêm a peça (tela "Usage list"). Busca parcial.
 router.get('/finder/uso', requireAuth, requireArea('finder'), async (req, res, next) => {
   try {
     const sku = String(req.query.sku || '').trim();
@@ -305,9 +278,7 @@ router.get('/finder/modelos/:codigo', requireAuth, requireArea('finder'), async 
   } catch (e) { next(e); }
 });
 
-// GET /api/finder/secoes/:id — seção com peças + hotspots + vizinhas (anterior/
-// próxima do mesmo lado, para as setas e o "NEXT CATEGORY" do cliente).
-// Cliente vê só peças ativas; admin vê todas (para o painel).
+// GET /api/finder/secoes/:id — seção com peças, hotspots e vizinhas. Cliente vê só peças ativas.
 router.get('/finder/secoes/:id', requireAuth, requireArea('finder'), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -353,17 +324,12 @@ router.get('/finder/secoes/:id', requireAuth, requireArea('finder'), async (req,
   } catch (e) { next(e); }
 });
 
-/* =========================================================================
-   ADMIN — MODELOS
-   ========================================================================= */
+// ---- Admin: modelos ----
 
-// Valida/normaliza o corpo de modelo. Devolve { dados } ou { erro }.
-// O código NÃO vem do corpo: é sempre gerado do nome e do ano (ver
-// utils/modelo-moto.js), no cadastro e em toda edição.
+// Valida o corpo de modelo: { dados } ou { erro }. O código é gerado do nome e ano.
 function parseModelo(body) {
   const dados = {};
-  // Marca e modalidade têm padrão porque hoje só existe uma de cada; a
-  // categoria não tem — é ela que separa os modelos no finder.
+  // Marca e modalidade têm padrão; a categoria é obrigatória.
   dados.marca = String(body?.marca || '').trim() || MARCA_PADRAO;
   dados.modalidade = String(body?.modalidade || '').trim() || MODALIDADE_PADRAO;
   dados.categoria = String(body?.categoria || '').trim();
@@ -390,8 +356,7 @@ function parseModelo(body) {
   return { dados };
 }
 
-// Mesmo código = mesmo nome e ano. Devolve a mensagem de conflito, ou null.
-// `exceto` é o próprio modelo numa edição (manter o nome não é conflito).
+// Mesmo nome e ano = mesmo código. Devolve a mensagem de conflito ou null.
 async function conflitoDeCodigo(dados, exceto) {
   const outro = (await query(
     'SELECT Nome, Ano FROM dbo.ModeloMoto WHERE Codigo = @cod AND ModeloId <> @id',
@@ -426,10 +391,7 @@ router.post('/finder/modelos', requireAuth, requireAdmin, async (req, res, next)
   } catch (e) { next(e); }
 });
 
-// PUT /api/finder/modelos/:codigo  (admin) — edita. O código acompanha o
-// nome e o ano: renomear o modelo troca o código, e a resposta traz o novo
-// (`id`) — é por ele que o front segue (foto, links). Tudo o que pendura no
-// modelo (seções, chassis) usa o ModeloId numérico e não é afetado.
+// PUT /api/finder/modelos/:codigo  (admin) — edita. Renomear troca o código (a resposta traz o novo `id`).
 router.put('/finder/modelos/:codigo', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const m = await acharModelo(req.params.codigo);
@@ -458,8 +420,7 @@ router.put('/finder/modelos/:codigo', requireAuth, requireAdmin, async (req, res
   } catch (e) { next(e); }
 });
 
-// DELETE /api/finder/modelos/:codigo  (admin) — apaga modelo + seções/peças/
-// hotspots (cascata). Bloqueado se houver veículos vinculados (FK).
+// DELETE /api/finder/modelos/:codigo  (admin) — apaga em cascata. Bloqueado se houver veículos.
 router.delete('/finder/modelos/:codigo', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const m = await acharModelo(req.params.codigo);
@@ -484,9 +445,7 @@ router.delete('/finder/modelos/:codigo', requireAuth, requireAdmin, async (req, 
   } catch (e) { next(e); }
 });
 
-// POST /api/finder/modelos/:codigo/imagem  (admin) — sobe/troca a foto do modelo.
-// É a mesma foto da ficha de cada chassi do modelo (portal, ações,
-// reivindicações) — a aba Chassis do admin sobe por esta mesma rota.
+// POST /api/finder/modelos/:codigo/imagem  (admin) — foto do modelo (a mesma da ficha do chassi).
 router.post('/finder/modelos/:codigo/imagem', requireAuth, requireAdmin, uploadImagem, async (req, res, next) => {
   try {
     const m = await acharModelo(req.params.codigo);
@@ -511,9 +470,7 @@ router.delete('/finder/modelos/:codigo/imagem', requireAuth, requireAdmin, async
   } catch (e) { next(e); }
 });
 
-/* =========================================================================
-   ADMIN — SEÇÕES (diagramas de um modelo)
-   ========================================================================= */
+// ---- Admin: seções (diagramas) ----
 
 // POST /api/finder/modelos/:codigo/secoes  (admin) — cria seção num lado.
 router.post('/finder/modelos/:codigo/secoes', requireAuth, requireAdmin, async (req, res, next) => {
@@ -578,8 +535,7 @@ router.delete('/finder/secoes/:id', requireAuth, requireAdmin, async (req, res, 
   } catch (e) { next(e); }
 });
 
-// PUT /api/finder/modelos/:codigo/secoes/ordem  (admin) — reordena um lado.
-// Body: { lado, ids: [SecaoId na nova ordem] }.
+// PUT /api/finder/modelos/:codigo/secoes/ordem  (admin) — { lado, ids: [SecaoId na nova ordem] }
 router.put('/finder/modelos/:codigo/secoes/ordem', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const m = await acharModelo(req.params.codigo);
@@ -633,9 +589,7 @@ router.delete('/finder/secoes/:id/imagem', requireAuth, requireAdmin, async (req
   } catch (e) { next(e); }
 });
 
-/* =========================================================================
-   ADMIN — PEÇAS DA SEÇÃO (linhas da lista do finder)
-   ========================================================================= */
+// ---- Admin: peças da seção ----
 
 // Valida campos numéricos comuns da peça. Devolve { dados } ou { erro }.
 function parsePeca(body) {
@@ -668,8 +622,7 @@ router.post('/finder/secoes/:id/pecas', requireAuth, requireAdmin, async (req, r
     const { dados, erro } = parsePeca(req.body);
     if (erro) return res.status(400).json({ erro });
 
-    // Posicao (legada, NOT NULL): usa o NumeroImagem quando numérico; senão o
-    // próximo sequencial da seção.
+    // Posicao (legada): NumeroImagem se numérico, senão o próximo sequencial.
     const posNum = /^\d+$/.test(dados.numeroImagem) ? Number(dados.numeroImagem) : null;
 
     const rows = await query(
@@ -692,8 +645,7 @@ router.post('/finder/secoes/:id/pecas', requireAuth, requireAdmin, async (req, r
   } catch (e) { next(e); }
 });
 
-// PUT /api/finder/pecas/:id  (admin) — edita a linha (nº na imagem, qtds,
-// situação, ordem). O produto (SKU) não muda — remova e adicione outro.
+// PUT /api/finder/pecas/:id  (admin) — edita a linha. O SKU não muda.
 router.put('/finder/pecas/:id', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -739,8 +691,7 @@ router.delete('/finder/pecas/:id', requireAuth, requireAdmin, async (req, res, n
   } catch (e) { next(e); }
 });
 
-// PUT /api/finder/secoes/:id/pecas/ordem  (admin) — reordena as linhas.
-// Body: { ids: [PecaSecaoId na nova ordem] }.
+// PUT /api/finder/secoes/:id/pecas/ordem  (admin) — { ids: [PecaSecaoId na nova ordem] }
 router.put('/finder/secoes/:id/pecas/ordem', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const s = await acharSecao(Number(req.params.id));
@@ -768,9 +719,7 @@ router.put('/finder/secoes/:id/pecas/ordem', requireAuth, requireAdmin, async (r
   } catch (e) { next(e); }
 });
 
-/* =========================================================================
-   ADMIN — HOTSPOTS (áreas clicáveis do diagrama)
-   ========================================================================= */
+// ---- Admin: hotspots ----
 
 // Valida um hotspot. Devolve { dados } ou { erro }.
 function parseHotspot(body) {
@@ -808,8 +757,7 @@ router.post('/finder/secoes/:id/hotspots', requireAuth, requireAdmin, async (req
   } catch (e) { next(e); }
 });
 
-// PUT /api/finder/secoes/:id/hotspots  (admin) — substitui TODAS as áreas de
-// uma vez (salvar do editor visual). Body: { hotspots: [{x,y,w,h,texto,linkNumero}] }.
+// PUT /api/finder/secoes/:id/hotspots  (admin) — substitui todos: { hotspots: [{x,y,w,h,texto,linkNumero}] }
 router.put('/finder/secoes/:id/hotspots', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const s = await acharSecao(Number(req.params.id));

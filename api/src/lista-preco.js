@@ -1,34 +1,10 @@
-// ============================================================
-// Listas de preço por cliente (migration 048, 02/10/2026)
-// ------------------------------------------------------------
-// O B2B atende mais de um tipo de revendedor. Cada tipo é uma
-// "lista de preços" do Tiny com um % geral sobre o preço base:
-// negativo = desconto, positivo = acréscimo (-20 = 20% off).
-//
-//   - dbo.ListaPreco espelha as listas do Tiny. Quem atualiza é o
-//     cron (a cada rodada) e o botão "Atualizar do Tiny" do painel —
-//     mudar o % de uma lista no Tiny vale para todos os clientes dela.
-//   - Empresa.ListaPrecoId vem do CONTATO no Tiny (id_lista_preco),
-//     lido no cadastro (vincularContatoTiny) e a cada rodada do cron
-//     (sincronizarContatosDoTiny) — origem 'tiny'. O Tiny manda: o
-//     painel não troca essa lista, muda-se no contato lá.
-//   - Contato sem lista no Tiny (ou sem contato): a empresa fica SEM
-//     lista (preço cheio) e marcada em vermelho no painel, até um
-//     responsável escolher uma das listas que já existem no Tiny —
-//     origem 'manual' (migration 049). Não existe "criar lista" aqui.
-//     A escolha é na aprovação (PATCH /usuarios/:id) ou depois
-//     (PUT /empresas/:id/lista-preco).
-//   - O cliente vê e compra pelo preço da lista; o admin vê sempre o
-//     preço base (é o que ele cadastra e edita no catálogo).
-//
-// Só o % geral: exceções por produto da lista NÃO são lidas (decisão
-// do usuário — as listas da casa não usam exceção).
-// ============================================================
+// Listas de preço por cliente (migrations 048/049).
+// Cada lista do Tiny é um % sobre o preço base (-20 = 20% off). A lista da empresa vem do contato
+// no Tiny; sem lista lá, o admin escolhe uma manualmente. Cliente vê o preço da lista; admin, o base.
 import { query } from './db.js';
 import { listarListasPreco, registrarLog } from './tiny.js';
 
-// Limites do CHECK da tabela: -100% zeraria o preço; acima de +1000% é
-// quase certo erro de digitação no Tiny. Fora disso a lista é ignorada.
+// Fora desta faixa a lista é ignorada (provável erro de digitação no Tiny).
 const PCT_MIN = -100, PCT_MAX = 1000;
 export function percentualValido(p) {
   return Number.isFinite(p) && p > PCT_MIN && p <= PCT_MAX;
@@ -42,10 +18,7 @@ export function aplicarPercentual(preco, percentual) {
   return Math.max(0, Math.round(base * (100 + pct)) / 100);
 }
 
-// Lista da empresa: { id, descricao, percentual, ativa, origem } ou null
-// (preço cheio). Lista que sumiu do Tiny (ativa = false) continua valendo
-// com o último % conhecido — o painel avisa, e o cliente não muda de preço
-// de surpresa.
+// Lista da empresa ({ id, descricao, percentual, ativa, origem }) ou null = preço cheio.
 export async function listaDaEmpresa(empresaId) {
   if (!empresaId) return null;
   const r = (await query(
@@ -59,8 +32,7 @@ export async function listaDaEmpresa(empresaId) {
   } : null;
 }
 
-// O % que vale para quem está pedindo. Admin vê o preço base (0). Durante
-// "Entrar na conta", req.user é o cliente — e o admin vê o preço DELE.
+// % de quem está pedindo. Admin = 0; em "Entrar na conta" vale o % do cliente.
 export async function percentualDoUsuario(user) {
   if (!user || user.papel === 'admin') return 0;
   return (await listaDaEmpresa(user.empresaId))?.percentual || 0;
@@ -87,9 +59,7 @@ export async function listarListas() {
   return rows.map(toLista);
 }
 
-// Traz as listas do Tiny para dbo.ListaPreco: cria as novas, atualiza nome
-// e %, e marca Ativa = 0 as que sumiram de lá. Devolve um resumo.
-// Lança se o Tiny falhar — quem chama decide se isso é fatal.
+// Espelha as listas do Tiny em dbo.ListaPreco. Lança se o Tiny falhar.
 export async function sincronizarListasPreco() {
   const doTiny = (await listarListasPreco()).filter(l => percentualValido(l.percentual));
   const locais = new Map((await query(
@@ -123,10 +93,7 @@ export async function sincronizarListasPreco() {
   return resumo;
 }
 
-// Valida a escolha do painel (`listaPrecoId` do corpo da requisição): tem
-// de ser uma lista ATIVA do espelho. "Preço cheio" não é escolha — sem
-// lista é justamente o estado que o painel marca em vermelho.
-// Devolve { lista } ou { erro }.
+// Valida a lista escolhida no painel (precisa estar ativa). Devolve { lista } ou { erro }.
 export async function resolverListaEscolhida(valor) {
   if (valor === null || valor === undefined || valor === '')
     return { erro: 'Escolha uma das listas de preço do Tiny.' };
@@ -146,16 +113,8 @@ export function rotuloLista(l) {
   return l.descricao + ' (' + (l.percentual > 0 ? '+' : '') + l.percentual + '%)';
 }
 
-// Aplica na empresa a lista que o CONTATO tem no Tiny (contato.obter →
-// id_lista_preco). Chamada no cadastro, pelo cron e pelo botão "Buscar no
-// Tiny". Devolve:
-//   'aplicada'     a empresa passou a usar essa lista (origem 'tiny');
-//   'igual'        já estava com ela;
-//   'sem-lista'    o contato não tem lista lá — NADA muda (a lista manual,
-//                  se houver, continua; sem nenhuma, segue em vermelho);
-//   'desconhecida' o id não existe no espelho nem depois de atualizá-lo.
-// Uma lista nova no Tiny ainda não espelhada é trazida na hora (uma
-// chamada a mais, só nesse caso).
+// Aplica na empresa a lista do contato no Tiny.
+// Devolve 'aplicada' | 'igual' | 'sem-lista' (nada muda) | 'desconhecida'.
 export async function aplicarListaDoTiny(empresaId, idListaTiny, contatoId = null) {
   const id = Number(idListaTiny);
   if (!Number.isInteger(id) || id <= 0) return 'sem-lista';

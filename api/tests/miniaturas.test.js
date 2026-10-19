@@ -1,6 +1,4 @@
-// Miniaturas das fotos de produto (17/09/2026). Ver src/miniaturas.js.
-//
-// O db.js é um dublê e o fetch é espionado: nada sai para a rede.
+// Miniaturas (src/miniaturas.js). db.js é um dublê e o fetch é espionado.
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -105,8 +103,7 @@ describe('gerarMiniatura', () => {
   });
 });
 
-// Foto do modelo de moto (06/10/2026): aparece em toda linha da lista de
-// chassis, então ganha miniatura como as fotos de produto.
+// Foto do modelo de moto também ganha miniatura.
 describe('foto do modelo (/uploads/finder)', () => {
   it('gera a miniatura a partir do upload do Localizador de Peças', async () => {
     const nome = 'teste-mini-modelo.png';

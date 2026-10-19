@@ -13,8 +13,7 @@
     location.href = '/portal'; return;
   }
 
-  // Espera o cache (carregado de forma assíncrona via fetch) antes de montar a
-  // tela — nada de renderizar com dados vazios.
+  // Espera o cache carregar antes de montar a tela.
   FG.pronto.then(function () {
 
   var view = document.getElementById('view');
@@ -79,8 +78,7 @@
 
   function setBand(titulo, trilha) {
     document.getElementById('page-title').textContent = titulo.toUpperCase();
-    // Botão VOLTAR sempre visível no início da trilha: na home leva ao
-    // portal; nas demais telas volta um passo na navegação.
+    // VOLTAR: na home vai ao portal; nas outras, um passo atrás.
     var home = !(trilha || []).length;
     var bc = home
       ? '<a class="btn-voltar" href="/portal">Portal</a>'
@@ -102,10 +100,7 @@
     return '<span class="stock-out">Indisponível</span>';
   }
 
-  // Foto real do produto quando houver (upload do admin ou espelhada do Tiny
-  // ERP); sem foto, cai no desenho esquemático da categoria. Na lista e na
-  // cesta vai a miniatura gerada pela API (≈4 KB e com cache); `inteira` pede
-  // a foto original (página do produto). A ampliação usa data-grande.
+  // Foto do produto (miniatura na lista; `inteira` = original); sem foto, o desenho da categoria.
   function prodImg(p, w, inteira) {
     if (p.imagem) {
       var src = inteira ? p.imagem : (p.miniatura || p.imagem);
@@ -117,8 +112,7 @@
     return catIcon(key || 'engrenagem', w || 95);
   }
 
-  /* clique na foto do produto abre em tamanho grande (lightbox) — listener
-     delegado no container, porque as telas são re-renderizadas a cada rota */
+  /* clique na foto amplia (listener delegado) */
   view.addEventListener('click', function (e) {
     var img = e.target.closest('.prod-img img, .prod-page .big-img img, .cart-img img');
     if (!img) return;
@@ -174,8 +168,7 @@
 
     // Numa categoria de topo, inclui os produtos das suas subcategorias.
     var catIds = (termoBusca != null || !cat) ? null : FG.categoriaEDescendentes(catId);
-    // Filtro por moto: as peças do modelo vêm do Finder (assíncrono, com cache).
-    // Enquanto não chegam, desenha a tela de "carregando" e redesenha em seguida.
+    // Filtro por moto: peças do modelo vêm do Finder; redesenha quando chegam.
     var artigosModelo = null;
     if (motoFiltro) {
       var pronto = FG._artigosModelo && FG._artigosModelo[motoFiltro];
@@ -201,15 +194,13 @@
     });
     if (termoBusca != null) FG.logSearch(termoBusca, todos.length);
 
-    // Disponíveis primeiro (30/09/2026): antes o indisponível aparecia no topo
-    // da lista e empurrava o que dá para comprar para a página seguinte.
+    // Disponíveis primeiro.
     todos.sort(function (a, b) { return (FG.compravel(b.artigo) ? 1 : 0) - (FG.compravel(a.artigo) ? 1 : 0); });
     var totalPag = Math.max(1, Math.ceil(todos.length / POR_PAGINA));
     if (pagina > totalPag) pagina = totalPag;
     var lista = todos.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
 
-    // Sidebar em árvore: categorias de topo sempre; subcategorias aparecem
-    // expandidas sob a categoria ativa (a atual ou a mãe da subcategoria atual).
+    // Sidebar: categorias de topo e as subcategorias da ativa.
     function contaCat(id) {
       var ids = FG.categoriaEDescendentes(id);
       return FG.all('products').filter(function (p) { return ids.indexOf(p.cat) >= 0; }).length;
@@ -463,9 +454,7 @@
         '<span class="right"><b>' + FG.fmtMoney(p.preco * i.qtd) + '</b></span>' +
         '<button class="del link-action ct-del" data-art="' + esc(p.artigo) + '" title="Remover">✕</button></div>';
     });
-    // Itens indisponíveis (sem estoque e sem previsão) não podem ser comprados;
-    // bloqueiam o envio. Itens em pré-venda (sem estoque, com previsão) entram
-    // em backorder ao confirmar.
+    // Indisponíveis bloqueiam o envio; pré-venda entra em backorder.
     var indispItens = cart.filter(function (i) { return !FG.compravel(i.artigo); });
     var preVenda = cart.filter(function (i) { var p = FG.product(i.artigo); return p && p.estoque < i.qtd && FG.compravel(i.artigo); });
     var avisoHTML = '';
@@ -532,8 +521,7 @@
   }
 
   /* =========================================================
-     ROTA: histórico de pedidos (entregas saíram do fluxo —
-     não há módulo de entrega no projeto)
+     ROTA: histórico de pedidos
      ========================================================= */
   var verEmpresa = false;
 
@@ -595,5 +583,5 @@
   window.addEventListener('hashchange', route);
   route();
 
-  }); // fim FG.pronto.then — tela montada só após o cache chegar
+  }); // fim FG.pronto.then
 })();

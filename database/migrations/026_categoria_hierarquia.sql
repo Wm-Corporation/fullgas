@@ -1,12 +1,7 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 026 — Hierarquia de categorias (subcategorias).
--- Adiciona ParentId à Categoria: NULL = categoria de topo; preenchido = é
--- subcategoria da categoria pai. FK auto-referente. Um índice ajuda a montar a
--- árvore. Idempotente.
--- ============================================================
+-- 026 - Subcategorias: Categoria.ParentId (NULL = topo). Idempotente.
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO

@@ -1,15 +1,8 @@
-// ============================================================
-// Rotas de notificações (admin → concessionárias)
-//   - GET    /notificacoes        lista (cliente: as da sua empresa + as
-//                                 gerais; admin: todas, com destinatário)
-//   - POST   /notificacoes        admin envia (multipart: texto + anexo
-//                                 opcional — imagem, vídeo ou arquivo)
-//   - PATCH  /notificacoes/:id/lida   marca lida/não lida (por usuário)
-//   - DELETE /notificacoes/:id    admin apaga (anexo sai do disco junto)
-//
-// Anexos vão para /uploads/notificacoes (multer → disco); o banco guarda a
-// URL RELATIVA — mesmo esquema das imagens do finder.
-// ============================================================
+// ---- Notificações (admin → concessionárias) ----
+//   GET    /notificacoes            caixa de quem pediu
+//   POST   /notificacoes            admin envia (multipart, anexo opcional)
+//   PATCH  /notificacoes/:id/lida   lida/não lida, por usuário
+//   DELETE /notificacoes/:id        admin apaga (e o anexo)
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'node:path';
@@ -94,26 +87,9 @@ function toNotif(req, r) {
   };
 }
 
-/* ------------------------------------------------------------------
-   QUEM VÊ O QUÊ
-   ------------------------------------------------------------------
-   Até a migração 036 a caixa tinha um sentido só (admin → concessionárias) e
-   a regra cabia em uma linha: cliente vê as gerais e as suas, admin vê tudo.
-   Com o Suporte Técnico a caixa passou a ter os dois sentidos, e "admin vê
-   tudo" viraria uma caixa de entrada com a conversa de todas as
-   concessionárias com elas mesmas.
-
-     cliente   o que é PARA cliente (Publico='cliente'), geral ou da sua empresa.
-     admin     o que é PARA o suporte (Publico='admin') mais o que ele mesmo
-               escreveu à mão (Origem='admin') — que é o que ele já via.
-
-   A mesma condição vale para o GET e para o PATCH de leitura; por isso mora
-   numa constante só. Uma cópia divergente aqui significaria alguém marcando
-   como lida uma notificação que não pode nem ver.
-   ------------------------------------------------------------------ */
-// Exportado porque o /api/pulso (pulso.routes.js) conta as NÃO LIDAS desta
-// mesma caixa. Uma segunda cópia da condição ali significaria um contador que
-// acende para uma notificação que o usuário não pode nem abrir.
+// Quem vê o quê: cliente vê o que é para cliente (geral ou da empresa);
+// admin vê o que é para o suporte e o que ele mesmo escreveu.
+// Usada também pelo /api/pulso, para o contador bater com a caixa.
 export const VISIVEL_PARA = `(
   (@admin = 1 AND (n.Publico = 'admin' OR n.Origem = 'admin'))
   OR
@@ -123,12 +99,7 @@ export const VISIVEL_PARA = `(
                     WHERE c.ChamadoId = n.ChamadoId AND c.UsuarioId = @uid)))
 )`;
 
-// O aviso de chamado carrega a PRÉVIA da mensagem no corpo. Ele é gravado com
-// Publico='cliente' + EmpresaId, o que o entregaria a todas as contas da
-// concessionária: a conversa ficaria privada na aba do suporte e vazaria na
-// caixa de notificações. Por isso o recorte por chamado acima — quem não é
-// dono do chamado não recebe o aviso dele. Notificação sem ChamadoId (o
-// comunicado que o administrador dispara) segue valendo para a empresa toda.
+// Aviso de chamado só vai para o dono do chamado (leva prévia da conversa).
 
 // Parâmetros que a condição acima exige.
 export function escopo(user) {
@@ -136,8 +107,7 @@ export function escopo(user) {
   return { admin: admin ? 1 : 0, eid: admin ? null : user.empresaId, uid: user.id };
 }
 
-// GET /api/notificacoes — a caixa de quem pediu (ver VISIVEL_PARA).
-// `lida` é POR USUÁRIO.
+// GET /api/notificacoes — `lida` é por usuário.
 router.get('/notificacoes', requireAuth, async (req, res, next) => {
   try {
     const rows = await query(
@@ -156,9 +126,7 @@ router.get('/notificacoes', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// POST /api/notificacoes (SÓ ADMIN) — multipart/form-data:
-//   titulo*, texto, tipo ('info'|'critica'), empresaId (vazio = todas),
-//   anexo (arquivo opcional: imagem, vídeo, PDF...)
+// POST /api/notificacoes (admin) — multipart: titulo*, texto, tipo, empresaId (vazio = todas), anexo
 router.post('/notificacoes', requireAuth, requireAdmin, uploadAnexo, async (req, res, next) => {
   try {
     const titulo = String(req.body?.titulo || '').trim().slice(0, 160);

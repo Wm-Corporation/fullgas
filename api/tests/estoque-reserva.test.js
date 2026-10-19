@@ -1,7 +1,4 @@
-// Reserva de estoque (tiny.js → reservaPendente): o que foi vendido no Fullgas
-// e ainda não chegou ao Tiny. Sem ela o cron regravava o estoque cheio e a
-// mesma peça era vendida duas vezes (achado de 30/09/2026: a venda de 2
-// arruelas "sumiu" no cron seguinte, 33 → 35).
+// Reserva de estoque (tiny.js → reservaPendente): vendido aqui e ainda não descontado no Tiny.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 let produto, fase1, exportacoesAbertas, itensDoPedido;

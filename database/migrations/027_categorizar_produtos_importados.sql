@@ -1,15 +1,7 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 027 — Cria subcategorias e classifica os produtos importados.
--- Os produtos vindos do Tiny caíram quase todos em "Acessórios Técnicos".
--- Esta migração cria subcategorias sob "Peças de Reposição" (pecas) e move
--- cada produto para a categoria/subcategoria adequada, por palavra-chave do
--- nome. Produtos que não casam com nenhuma regra ficam onde estão.
--- Idempotente: as subcategorias só são criadas se faltarem; o UPDATE é seguro
--- de repetir (sempre reclassifica pelo nome).
--- ============================================================
+-- 027 - Cria subcategorias de "Pecas de Reposicao" e classifica os produtos do Tiny pelo nome. Idempotente.
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 SET XACT_ABORT ON;
@@ -20,9 +12,7 @@ BEGIN TRAN;
 DECLARE @pecas INT = (SELECT CategoriaId FROM dbo.Categoria WHERE Codigo = 'pecas');
 DECLARE @ord   INT = (SELECT ISNULL(MAX(Ordem), 0) FROM dbo.Categoria);
 
--- 1) Subcategorias de "Peças de Reposição" (cria as que faltarem).
--- Nomes acentuados montados com NCHAR() (á=225, ã=227, é=233, ç=231) para o
--- arquivo ser 100% ASCII e não depender do encoding com que o sqlcmd o lê.
+-- 1) Subcategorias que faltarem. Acentos com NCHAR() para o arquivo ficar ASCII.
 DECLARE @subs TABLE (Codigo VARCHAR(40), Nome NVARCHAR(120), Seq INT);
 INSERT INTO @subs (Codigo, Nome, Seq) VALUES
   ('freios',      N'Freios',                                                     1),

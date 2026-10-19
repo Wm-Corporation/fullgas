@@ -26,8 +26,7 @@ describe('categorias de ajuda', () => {
     }
   });
 
-  // Chamado antigo cuja categoria saiu da lista continua legível: o portal
-  // mostra o código em vez de uma linha em branco.
+  // Categoria que saiu da lista mostra o código.
   it('devolve o próprio código quando a categoria não existe mais', () => {
     expect(nomeCategoria('pedidos')).toBe('Pedidos e entregas');
     expect(nomeCategoria('categoria-aposentada')).toBe('categoria-aposentada');
@@ -70,8 +69,7 @@ describe('para onde o chamado vai depois de uma resposta', () => {
     expect(statusAposResposta('Aguardando cliente', 'cliente')).toBe('Em atendimento');
   });
 
-  // O caso que existe para valer: "resolvido" com o revendedor discordando.
-  // Sem isto o chamado morreria como resolvido com uma pergunta dentro.
+  // Resposta em chamado resolvido reabre.
   it('responder em chamado resolvido reabre o atendimento', () => {
     expect(statusAposResposta('Resolvido', 'cliente')).toBe('Em atendimento');
     expect(statusAposResposta('Resolvido', 'admin')).toBe('Aguardando cliente');

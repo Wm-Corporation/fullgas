@@ -1,10 +1,6 @@
 /* =========================================================
    FULLGAS B2B — Usage list (finder-uso.html)
-   ---------------------------------------------------------
-   Busca reversa do Parts Finder: o cliente digita o número do
-   artigo (SKU) e/ou a descrição e recebe TODAS as seções do
-   finder que possuem aquela peça anexada, com link para abrir
-   a seção. Alimentado por GET /api/finder/uso.
+   Busca as seções do finder que usam uma peça (GET /api/finder/uso).
    ========================================================= */
 (function () {
   'use strict';

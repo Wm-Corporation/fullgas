@@ -1,6 +1,4 @@
-// ============================================================
-// Conexão com o SQL Server (pool reutilizável)
-// ============================================================
+// Conexão com o SQL Server (pool reutilizável).
 import sql from 'mssql';
 import 'dotenv/config';
 
@@ -14,8 +12,7 @@ const config = {
     encrypt: String(process.env.DB_ENCRYPT) === 'true',
     trustServerCertificate: String(process.env.DB_TRUST_CERT) === 'true'
   },
-  // Timeouts folgados: o Azure SQL serverless "dorme" quando ocioso e a
-  // primeira conexão depois disso demora alguns segundos para acordar o banco.
+  // Timeouts folgados: o banco pode demorar para "acordar".
   connectionTimeout: 30000,
   requestTimeout: 30000,
   pool: { max: 10, min: 0, idleTimeoutMillis: 30000 }
@@ -40,8 +37,7 @@ export function getPool() {
   return poolPromise;
 }
 
-// Helper para rodar consultas com parâmetros nomeados (evita SQL injection).
-//   query('SELECT * FROM Produto WHERE Sku = @sku', { sku: 'A123' })
+// Consulta com parâmetros nomeados: query('... WHERE Sku = @sku', { sku: 'A123' })
 export async function query(text, params = {}) {
   const pool = await getPool();
   const req = pool.request();

@@ -7,8 +7,7 @@
   var sess = FG.guard('admin');
   if (!sess) return;
 
-  // Espera o cache (carregado de forma assíncrona via fetch) antes de montar a
-  // tela — nada de renderizar com dados vazios.
+  // Espera o cache carregar antes de montar a tela.
   FG.pronto.then(function () {
 
   var view = document.getElementById('adm-view');
@@ -19,9 +18,7 @@
   document.getElementById('adm-user').innerHTML = esc(sess.nome) + ' ' + FG.seloFabrica();
   document.getElementById('adm-sair').addEventListener('click', function () { FG.logout(); });
 
-  // Ampliar qualquer miniatura (.fnd-thumb) em lightbox — vale para as fotos
-  // nos pop-ups (editar produto/peça) e na tabela do catálogo. Listener único e
-  // delegado no body: cobre telas re-renderizadas e modais criados na hora.
+  // Clique numa miniatura (.fnd-thumb) amplia em lightbox (listener delegado).
   document.body.addEventListener('click', function (e) {
     var img = e.target.closest('img.fnd-thumb');
     if (!img || !img.getAttribute('src')) return;
@@ -36,8 +33,7 @@
     back.querySelector('.x').addEventListener('click', function () { back.remove(); });
     // Clicar fora NÃO fecha — pop-ups só fecham no X (padrão do painel).
   });
-  // O sino conta cadastros esperando aprovação — que são sempre de clientes
-  // (administrador criado pelo painel já nasce liberado), então leva à aba deles.
+  // O sino conta cadastros pendentes (sempre clientes).
   document.getElementById('adm-bell').addEventListener('click', function () { location.hash = '#clientes'; });
 
   function refreshBell() {
@@ -54,41 +50,27 @@
     });
   }
 
-  /* Telas que buscam dados na hora (Parts Finder, Suporte, Tiny) desenham
-     quando a resposta chega. Se o admin já trocou de seção nesse meio-tempo,
-     a resposta atrasada NÃO pode desenhar por cima: a fila de suporte, por
-     exemplo, tomava a tela de Clientes e ainda acendia "Suporte" na barra,
-     com o endereço em #clientes — clicar em Clientes de novo não fazia nada
-     e a página parecia travada até recarregar. Cada troca de tela ganha um
-     número; quem busca guarda o seu e confere na volta. */
+  // Cada troca de tela ganha um número; resposta atrasada de outra tela não desenha.
   var telaSeq = 0;
   function telaVigente() {
     var minha = telaSeq;
     return function () { return minha === telaSeq; };
   }
 
-  // Além da classe com o texto cru (compatível com os estilos antigos), adiciona
-  // uma classe slug ASCII (ps-<slug>) para status com espaço/acento — ex.:
-  // "Em separação" → "ps-Em-separacao" — que o CSS consegue mirar.
+  // Classe com o texto cru + slug ASCII (ps-<slug>) para status com espaço/acento.
   function pill(v) {
     var slug = String(v).normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-zA-Z0-9]+/g, '-');
     return '<span class="pill-status ' + esc(v) + ' ps-' + esc(slug) + '">' + esc(v) + '</span>';
   }
 
   /* =========================================================
-     FILTROS DAS ABAS
-     ---------------------------------------------------------
-     O estado mora aqui fora dos render() para sobreviver aos re-renders
-     (salvar uma peça, aprovar um usuário, atribuir um chassi...). A chave
-     `busca` é sempre o campo de texto livre da aba.
+     FILTROS DAS ABAS (fora dos render() para sobreviver aos re-renders)
      ========================================================= */
   var filtros = {
     pedidos:  { status: '', busca: '' },
     prevenda: { status: '', busca: '' },
     produtos: { cat: '', estoque: '', busca: '' },
     chassis:  { status: '', modelo: '', atrib: '', busca: '' },
-    // Duas populações, dois filtros: quem compra (clientes das concessionárias)
-    // e quem opera o sistema (administradores da Fullgas).
     clientes: { status: '', tipo: '', lista: '', busca: '' },
     admins:   { status: '', busca: '' },
     suporte:  { status: '', categoria: '', busca: '' }
@@ -110,8 +92,7 @@
     });
   }
 
-  // Barra de filtros. `selects` = [{ k, rotulo, opcoes: [[valor, texto], ...],
-  // todos? }]. `placeholder` vazio esconde o campo de busca.
+  // Barra de filtros. selects = [{ k, rotulo, opcoes: [[valor, texto]], todos? }]; sem placeholder, sem busca.
   function barraFiltro(aba, selects, placeholder) {
     var st = filtros[aba];
     return '<div class="shop-tools adm-filtros">' +
@@ -131,8 +112,7 @@
       '</div>';
   }
 
-  // Liga a barra ao render da aba. A busca espera o usuário parar de digitar e
-  // devolve o foco/cursor depois — o re-render recria o campo do zero.
+  // Busca com espera ao digitar; devolve o foco depois do re-render.
   var buscaTimer = null;
   function bindFiltro(render) {
     Array.prototype.forEach.call(view.querySelectorAll('[data-f]'), function (el) {
@@ -174,8 +154,7 @@
      ========================================================= */
   function renderDash() {
     h1.textContent = 'Painel de Controle'; setOn('dashboard');
-    // Só vendas de verdade: pedido cancelado não é venda, e pedido de garantia
-    // (R$ 0, reposição) puxaria o ticket médio para baixo (30/09/2026).
+    // Só vendas: sem cancelados e sem pedidos de garantia.
     var orders = FG.all('orders').filter(function (o) { return o.status !== 'Cancelado' && !o.garantia; });
     var totalVendas = orders.reduce(function (t, o) { return t + o.total; }, 0);
     var ticket = orders.length ? totalVendas / orders.length : 0;
@@ -254,14 +233,6 @@
 
   /* =========================================================
      CLIENTES  ×  ADMINISTRADORES
-     ---------------------------------------------------------
-     A tabela Usuario do banco guarda duas populações muito diferentes: quem
-     COMPRA (concessionárias — conta gestora e contas internas) e quem OPERA o
-     sistema (equipe Fullgas, com acesso a este painel). Numa lista só, as duas
-     se escondiam: para achar um cadastro pendente era preciso varrer
-     administradores no meio, e para conferir quem tem acesso ao painel era
-     preciso lembrar de filtrar por papel. Agora são duas abas, cada uma com as
-     colunas e as ações que fazem sentido para aquela população.
      ========================================================= */
 
   // Botão "Gerenciar" (ou "(você)" na própria linha do admin logado).
@@ -272,8 +243,7 @@
         : semListaDePreco(u) ? ' <span class="usr-alerta" title="Sem lista de preço — defina em Gerenciar">!</span>' : '');
   }
 
-  // Liga os botões "Gerenciar" da tabela ao painel de ações. `voltar` é o
-  // render da aba de onde o clique saiu — é para lá que o modal devolve.
+  // Botões "Gerenciar" → painel de ações. `voltar` = render da aba de origem.
   function bindGerenciar(voltar) {
     Array.prototype.forEach.call(view.querySelectorAll('[data-ger]'), function (b) {
       b.addEventListener('click', function () {
@@ -283,9 +253,7 @@
     });
   }
 
-  /* ---------------------------------------------------------
-     ABA CLIENTES — concessionárias (papel 'cliente')
-     --------------------------------------------------------- */
+  /* ---- Aba Clientes (papel 'cliente') ---- */
   function renderClientes() {
     h1.textContent = 'Clientes'; setOn('clientes');
     var todos = FG.all('users').filter(function (u) { return u.papel === 'cliente'; });
@@ -310,8 +278,7 @@
       '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>CNPJ</th><th>Endereço</th><th>Tipo</th><th>Lista de preço</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
       (users.length ? users.map(function (u) {
         var e = u.endereco;
-        // Resumo compacto na tabela; os dados completos ficam na linha
-        // expansível abaixo (botão "Expandir ▾"), bem divididos campo a campo.
+        // Resumo na tabela; detalhes na linha expansível.
         var endTxt = e ? (esc(e.cidade || '') + (e.uf ? '/' + esc(e.uf) : '')) : '<span class="muted">—</span>';
         function dd(rotulo, valor) {
           return '<div class="usr-dd"><b>' + rotulo + '</b><span>' +
@@ -360,8 +327,7 @@
     bindGerenciar(renderClientes);
   }
 
-  // Lista de preço da EMPRESA na tabela de clientes. Sem lista = vermelho:
-  // o contato não tem lista no Tiny e ninguém escolheu uma ainda.
+  // Lista de preço da empresa. Sem lista = vermelho.
   function celulaLista(u) {
     var l = u.listaPreco;
     if (!l) return u.gestor === false
@@ -376,9 +342,7 @@
     return u.papel === 'cliente' && u.gestor !== false && !u.listaPreco && !u.fabrica;
   }
 
-  /* ---------------------------------------------------------
-     ABA ADMINISTRADORES — equipe Fullgas (papel 'admin')
-     --------------------------------------------------------- */
+  /* ---- Aba Administradores (papel 'admin') ---- */
   function renderAdmins() {
     h1.textContent = 'Administradores'; setOn('administradores');
     var todos = FG.all('users').filter(function (u) { return u.papel === 'admin'; });
@@ -417,14 +381,7 @@
     document.getElementById('adm-novo').addEventListener('click', modalNovoAdmin);
   }
 
-  /* ---------------------------------------------------------
-     NOVO ADMINISTRADOR
-     ---------------------------------------------------------
-     A conta nasce já aprovada e na mesma empresa de quem cria (a casa) — quem
-     está aqui já é administrador, então mandar o convite para uma fila de
-     aprovação seria cerimônia sem ganho. A senha mínima é maior que a do
-     cadastro de cliente: é a conta que enxerga tudo.
-     --------------------------------------------------------- */
+  /* ---- Novo administrador (nasce aprovado) ---- */
   var SENHA_MINIMA_ADMIN = 8;
 
   function modalNovoAdmin() {
@@ -491,12 +448,7 @@
     });
   }
 
-  /* ---------------------------------------------------------
-     PAINEL DE GESTÃO DO USUÁRIO
-     ---------------------------------------------------------
-     Cada ação é um cartão com título, explicação do que acontece e um botão —
-     em vez de quatro botões soltos numa célula de tabela sem contexto.
-     --------------------------------------------------------- */
+  /* ---- Painel de gestão do usuário: um cartão por ação ---- */
   function modalUsuario(u, voltar) {
     var interna = u.gestor === false;
     var ehAdmin = u.papel === 'admin';
@@ -507,18 +459,14 @@
     // Cada cartão: [chave, ícone, título, descrição, rótulo do botão, tom]
     var cards = [];
 
-    // Assumir a identidade de outro administrador não existe: a API recusa
-    // (não há ganho de suporte e embaralharia a trilha de auditoria).
+    // Não se assume a identidade de outro admin.
     if (!ehAdmin)
       cards.push(['identidade', '👤', 'Alterar identidade',
         'Entra no portal como ' + esc(u.nome) + ' e vê exatamente o que ' + (interna ? 'esta conta interna' : 'o cliente') +
         ' vê. Uma tarja fica no topo e você volta para a sua conta quando quiser.',
         'Entrar na conta', 'destaque']);
 
-    // A lista de preço é da EMPRESA (vale para a conta principal e as
-    // internas) e vem do CONTATO no Tiny. Só quando o contato não tem lista
-    // lá é que se escolhe aqui — uma das listas que já existem no Tiny.
-    // Seletor preenchido em carregarListas().
+    // Lista de preço da empresa: só se escolhe aqui se o contato não tem lista no Tiny.
     var lp = u.listaPreco;
     var listaDoTiny = !!(lp && lp.origem === 'tiny');
     var linkBuscar = '<button type="button" class="link-action lp-buscar">Buscar no Tiny</button>';
@@ -711,8 +659,7 @@
           }
         }
         else if (ac === 'papel') {
-          // Trocar o papel move a conta de aba — o aviso evita a impressão de
-          // que o usuário "sumiu" da lista onde ele estava.
+          // Trocar o papel move a conta de aba.
           patch = { papel: ehAdmin ? 'cliente' : 'admin' };
           msg = ehAdmin
             ? 'Acesso ao painel removido — a conta agora está na aba Clientes.'
@@ -738,10 +685,7 @@
      ========================================================= */
   function renderNotifsAdmin() {
     h1.textContent = 'Notificações'; setOn('notificacoes');
-    // Esta tela é a caixa de SAÍDA do administrador: só o que ele escreveu à
-    // mão. Os avisos automáticos dos chamados (origem 'suporte') chegam na
-    // caixa dele no portal, junto com a carta ✉️ — aqui só fariam volume, e
-    // ainda com um botão "Apagar" que não faz sentido para um evento.
+    // Caixa de saída: só o que o admin escreveu (sem avisos automáticos de chamado).
     var notifs = FG.all('notifications').filter(function (n) { return n.origem !== 'suporte'; });
 
     view.innerHTML =
@@ -820,11 +764,7 @@
   }
 
   /* =========================================================
-     CHASSIS (VINs) — cadastro na Fábrica e atribuição a concessionárias
-     ---------------------------------------------------------
-     Chassi sem concessionária está na Fábrica. A lista de destino
-     (FG.empresas) já vem sem a empresa dos administradores — a API não
-     aceita a Fábrica como concessionária.
+     CHASSIS — cadastro na Fábrica e atribuição a concessionárias
      ========================================================= */
 
   // Autocomplete de concessionária (front próprio, estilo .ac-wrap).
@@ -845,8 +785,7 @@
     return v.fabrica ? FG.seloFabrica() : esc(v.empresa || '—');
   }
 
-  // Modal para atribuir/transferir um chassi a uma concessionária — ou,
-  // se ele já está numa, devolvê-lo à Fábrica.
+  // Atribuir/transferir chassi, ou devolver à Fábrica.
   function modalAtribuir(v) {
     var naFabrica = !!v.fabrica;
     var back = document.createElement('div');
@@ -899,11 +838,7 @@
     });
   }
 
-  // Conferencia antes de gravar o chassi — a "segunda chave" do cadastro.
-  // Chassi digitado errado é caro de desfazer: o NIV é único e acompanha a
-  // moto na garantia, no emplacamento e no histórico. Então, em vez de o botão
-  // gravar direto, ele mostra tudo o que será gravado e exige um segundo sim,
-  // com o resumo à vista. `onOk` só roda se a pessoa confirmar.
+  // Conferência antes de gravar o chassi. `onOk` só roda se confirmar.
   function modalConferirChassi(resumo, onOk) {
     var back = document.createElement('div');
     back.className = 'modal-back';
@@ -935,8 +870,7 @@
     });
   }
 
-  // Corrige o ano de um chassi já cadastrado (NIV não muda — é a identidade
-  // da moto — mas o ano é só um dado digitado, e digitação errada acontece).
+  // Corrige o ano (o NIV não muda).
   function modalEditarAno(v) {
     var back = document.createElement('div');
     back.className = 'modal-back';
@@ -979,8 +913,7 @@
     });
   }
 
-  // Ficha completa de um chassi num pop-up — a mesma que a concessionária vê
-  // em "Ações do veículo" (FG.fichaVeiculo, store.js).
+  // Ficha do chassi (FG.fichaVeiculo).
   function modalFichaChassi(v) {
     var back = document.createElement('div');
     back.className = 'modal-back';
@@ -995,15 +928,8 @@
     document.getElementById('fc-fechar').addEventListener('click', fechar);
   }
 
-  /* FOTOS DOS MODELOS (06/10/2026)
-     Cada modelo tem UMA foto, mostrada em todo chassi dele: na ficha do
-     veículo, no estoque, na venda e nas reivindicações. É a mesma foto do
-     Localizador de Peças (ModeloMoto.ImagemUrl) — trocar aqui troca lá, e
-     vice-versa (a rota de upload é a do Localizador).
-     A lista sai do que a tela já tem: os modelos ativos (FG.all('models')) e,
-     dos chassis, os modelos desativados no Localizador que ainda têm moto na
-     rua — esses também precisam de foto na ficha. Nada é buscado a mais, então
-     o filtro da tabela pode redesenhar a tela a cada tecla. */
+  // Fotos dos modelos: uma por modelo, a mesma do Localizador (ModeloMoto.ImagemUrl).
+  // Modelos ativos + desativados que ainda têm chassi. Sem busca extra.
   function modelosParaFoto() {
     var lista = FG.all('models').map(function (m) {
       return { id: m.id, label: m.label, foto: m.imagem, miniatura: m.miniatura, ativo: true };
@@ -1170,9 +1096,7 @@
     document.getElementById('ch-criar').addEventListener('click', function () {
       var empEl = document.getElementById('ch-nova-emp');
       var idSel = empEl.getAttribute('data-ac-id');
-      // Mesmo teto da API (validarAno em api/src/routes/veiculos.routes.js): a
-      // indústria já vende o ano-modelo dali a dois anos antes de virar o ano
-      // civil (em set/2026 o 2028 já circula).
+      // Mesmo teto da API (validarAno): ano atual + 2.
       var anoMax = new Date().getFullYear() + 2;
       var dados = {
         niv: document.getElementById('ch-niv').value.trim().toUpperCase(),
@@ -1226,10 +1150,7 @@
   /* =========================================================
      CATÁLOGO DE PRODUTOS
      ========================================================= */
-  // Foto de produto em 48 px: usa a miniatura gerada pela API (≈4 KB, com
-  // cache) no lugar da foto inteira do Tiny, que chega a 170 KB e, em parte
-  // dos casos, o navegador é proibido de guardar. `loading="lazy"`: o
-  // Catálogo lista todos os produtos, e só as linhas na tela precisam da foto.
+  // Foto de 48 px: miniatura da API, com loading="lazy".
   function fotoProduto(p) {
     if (!p.imagem) return '<span class="fnd-thumb vazio">sem foto</span>';
     return '<img class="fnd-thumb" src="' + esc(p.miniatura || p.imagem) + '" data-grande="' + esc(p.imagem) +
@@ -1240,8 +1161,7 @@
     h1.textContent = 'Catálogo de produtos'; setOn('produtos');
     var prods = FG.all('products');
     var f = filtros.produtos;
-    // A gestão de categorias abaixo continua vendo o catálogo INTEIRO (`prods`);
-    // o filtro vale só para a tabela de produtos (`prodsF`).
+    // O filtro vale só para a tabela; as categorias usam o catálogo inteiro.
     var prodsF = prods.filter(function (p) {
       // Categoria de topo casa também com os produtos das subcategorias.
       if (f.cat && FG.categoriaEDescendentes(f.cat).indexOf(p.cat) < 0) return false;
@@ -1350,8 +1270,7 @@
     });
   }
 
-  // Modal de criação/edição de categoria (ou subcategoria, quando `paiPre` traz
-  // o código da categoria pai). Na edição, o pai não muda (mover = excluir/recriar).
+  // Criar/editar categoria (`paiPre` = código do pai, para subcategoria). O pai não muda na edição.
   function modalCategoria(cat, paiPre) {
     var novo = !cat;
     var topo = FG.categoriasTopo();
@@ -1404,8 +1323,7 @@
         : FG.apiEditarCategoria(cat.id, { nome: nome });
       prom.then(function (r) {
         if (r && r.ok === false) { btn.disabled = false; FG.toast(r.msg || 'Não foi possível salvar.', 'erro'); return; }
-        // Foto: em categoria nova o código só existe após criar (r.id); na
-        // edição usa o código atual. Sem arquivo escolhido, não faz upload.
+        // Categoria nova só tem código depois de criar (r.id).
         var arquivo = document.getElementById('ct-foto').files[0];
         var codigo = novo ? r.id : cat.id;
         var fotoOk = (arquivo && codigo) ? FG.uploadImagemCategoria(codigo, arquivo) : Promise.resolve({ ok: true });
@@ -1421,8 +1339,7 @@
 
   function modalProduto(p) {
     var novo = !p;
-    // Produto do Tiny: nome, preço, estoque, descrição e foto são espelho do
-    // ERP — ficam travados aqui. Só categoria e previsão continuam editáveis.
+    // Produto do Tiny: só categoria e previsão são editáveis.
     var tiny = !!(p && p.tinyAtivo);
     var trava = tiny ? ' disabled' : '';
     var back = document.createElement('div');
@@ -1456,8 +1373,7 @@
       '<input id="mp-foto" type="file" accept="image/*"' + trava + '>' +
       (p && p.imagem && !tiny ? '<button class="btn-line btn-mini" id="mp-foto-del" type="button">Remover foto</button>' : '') +
       '</div></div>' +
-      // Log de sincronização DESTE produto (saiu da tela Tiny ERP para cá,
-      // junto do cadastro — só aparece em produtos gerenciados pelo Tiny).
+      // Log de sincronização deste produto (só produtos do Tiny).
       (tiny ? '<div class="field"><label>Sincronizações com o Tiny (últimas)</label>' +
         '<div id="mp-tiny-log" class="muted" style="font-size:12px;">Carregando…</div></div>' : '') +
       '</div>' +
@@ -1529,17 +1445,12 @@
   /* =========================================================
      PEDIDOS
      ========================================================= */
-  // 'Parcial' (parte das peças já saiu) entra no FILTRO, mas não no seletor de
-  // status: quem o define é o "Confirmar envio".
-  // 'Aprovado' substituiu 'Em separação' (30/09/2026). Aprovar NÃO vai ao Tiny:
-  // só as peças confirmadas no envio vão (regra das remessas, de volta em 05/10).
+  // 'Parcial' está no filtro, mas não no seletor (vem do "Confirmar envio").
   var STATUS = ['Pendente', 'Aprovado', 'Parcial', 'Enviado', 'Entregue', 'Cancelado'];
   // Status terminais: uma vez aqui, o pedido não pode mais mudar de status.
   var STATUS_TERMINAIS = ['Entregue', 'Cancelado'];
 
-  // Para onde cada status pode ir pelo seletor — a API recusa o resto, mas
-  // oferecer só o caminho válido evita o clique errado. Aprovado só volta a
-  // Pendente enquanto nenhuma peça foi ao Tiny; Entregue só depois de Enviado.
+  // Transições oferecidas no seletor (a API recusa as outras).
   var PROXIMOS = {
     'Pendente': ['Pendente', 'Aprovado', 'Enviado', 'Cancelado'],
     'Aprovado': ['Aprovado', 'Pendente', 'Enviado', 'Cancelado'],
@@ -1547,8 +1458,7 @@
     'Enviado': ['Enviado', 'Entregue', 'Cancelado']
   };
 
-  // Confirmação antes de gravar: cada escolha tem efeito que não se desfaz
-  // (Tiny, fatura, status final). Antes o seletor gravava no mesmo clique.
+  // Confirma antes de gravar (efeitos no Tiny, fatura e status final).
   function confirmaStatus(num, st) {
     var txt = {
       'Aprovado': 'Aprovar o pedido ' + num + '?\n\nNada vai ao Tiny agora. Confira as peças no estoque, ' +
@@ -1564,9 +1474,7 @@
     return !txt || window.confirm(txt);
   }
 
-  // Status de cada peça do pedido (a partir de qtd/qtdEnviada/backorder):
-  // Enviado (tudo), Parcial (parte), Pré-venda (backorder não enviado),
-  // Pendente (normal não enviado). Não altera o status do pedido em si.
+  // Status da peça: Enviado, Parcial, Pré-venda ou Pendente.
   function itemStatus(it) {
     if (it.qtdEnviada >= it.qtd) return { cls: 'Enviado', txt: 'Enviado' };
     if (it.qtdEnviada > 0) return { cls: 'Parcial', txt: 'Parcial ' + it.qtdEnviada + '/' + it.qtd };
@@ -1574,8 +1482,7 @@
     return { cls: 'Pendente', txt: 'Pendente' };
   }
 
-  // Bolinha de status da peça — as MESMAS cores do portal do cliente:
-  // verde=enviado, amarelo=parcial, cinza=não enviado, vermelho=cancelado.
+  // Bolinha da peça (mesmas cores do portal).
   function dotItem(it, cancelado) {
     if (cancelado) return '<span class="item-dot dot-cancelado" title="Cancelado"></span>';
     var cls = it.qtdEnviada >= it.qtd ? 'dot-ok' : (it.qtdEnviada > 0 ? 'dot-parcial' : 'dot-pendente');
@@ -1590,14 +1497,11 @@
     '<span><span class="item-dot dot-cancelado"></span>Cancelado — o pedido foi cancelado</span>' +
     '</div>';
 
-  // Linha de uma peça no detalhe da venda. `ped` é o pedido dono da linha;
-  // `editavel` libera o controle de quantidade enviada (pedido não terminal).
+  // Linha de peça no detalhe. `editavel` libera a quantidade enviada.
   function linhaItemVenda(it, ped, editavel) {
     var st = itemStatus(it);
     var cancelado = ped.status === 'Cancelado';
-    // O controle por peça grava direto em PedidoItem.QuantidadeEnviada. Em
-    // peça de pré-venda, aumentar consome estoque de verdade (a API recusa se
-    // não houver) — por isso o campo é numérico e não um "Enviar" cego.
+    // Grava a quantidade enviada; em pré-venda consome estoque.
     var ctrl = editavel
       ? '<input type="number" class="it-qtd" data-item="' + it.itemId + '" min="0" max="' + it.qtd +
           '" value="' + it.qtdEnviada + '" style="width:62px;">' +
@@ -1615,8 +1519,7 @@
       '<td class="it-ctrl">' + ctrl + '</td></tr>';
   }
 
-  // Grupo de peças (cabeçalho + linhas) dentro do detalhe — separa "Em estoque"
-  // das peças em "Pré-venda". Retorna '' quando o grupo está vazio.
+  // Grupo de peças ("Em estoque" ou "Pré-venda"); '' se vazio.
   function grupoItens(titulo, itens, ped, editavel) {
     if (!itens.length) return '';
     return '<tr class="venda-grp"><td colspan="8">' + esc(titulo) + ' (' + itens.length + ')</td></tr>' +
@@ -1630,8 +1533,7 @@
     return '<span class="pill-status ' + cls + '">' + rot + '</span>';
   }
 
-  // Bloco "Tiny ERP" dentro do detalhe da venda: exportações DESTE pedido
-  // (saiu da tela Tiny ERP para cá). Carregado ao expandir o detalhe.
+  // Exportações ao Tiny deste pedido (carregadas ao abrir o detalhe).
   function carregarTinyVenda(box, numeroPedido) {
     FG.tinyPedidos(numeroPedido).then(function (rows) {
       if (!rows.length) { box.innerHTML = ''; return; }
@@ -1662,16 +1564,14 @@
     }, function () { box.innerHTML = ''; });
   }
 
-  // Bloco de detalhe (cliente + data + peças com status, separadas entre
-  // "Em estoque" e "Pré-venda") que abre sob o pedido.
+  // Detalhe que abre sob o pedido.
   function detalheVenda(o) {
     var pg = o.progresso || { enviada: 0, qtd: 0, pct: 0 };
     var emEstoque = o.itens.filter(function (it) { return !it.backorder; });
     var preVenda = o.itens.filter(function (it) { return it.backorder; });
     // Pedido entregue ou cancelado está fechado: as peças não mudam mais.
     var editavel = STATUS_TERMINAIS.indexOf(o.status) < 0;
-    // Peças marcadas como enviadas que ainda NÃO foram para o Tiny: é o que a
-    // próxima remessa leva. Pré-venda fica de fora (tem fluxo próprio).
+    // Enviadas e ainda não no Tiny = próxima remessa (sem pré-venda).
     var aConfirmar = emEstoque.reduce(function (s, it) {
       return s + Math.max(0, (it.qtdEnviada || 0) - (it.qtdExportada || 0));
     }, 0);
@@ -1709,8 +1609,7 @@
       '<div class="hist-venda" data-ped="' + esc(o.id) + '"></div></div>';
   }
 
-  // Quais detalhes estão abertos (por número de pedido). Salvar uma peça
-  // re-renderiza a tela inteira — sem isto, o detalhe fecharia a cada clique.
+  // Detalhes abertos, para sobreviverem ao re-render.
   var pedAbertos = {};
 
   function renderPedidos() {
@@ -1740,8 +1639,7 @@
           (STATUS_TERMINAIS.indexOf(o.status) >= 0
             ? '<br><span class="muted" style="font-size:11px;">Pedido ' + esc(o.status.toLowerCase()) + ' — status final.</span>'
             : '<br><select class="inline-status" data-id="' + o.id + '" data-atual="' + esc(o.status) + '" style="margin-top:6px;">' +
-              // Pedido em 'Parcial' mostra o próprio status como opção travada:
-              // dali ele sai enviando o restante, não pelo seletor.
+              // 'Parcial' aparece travado no seletor.
               (o.status === 'Parcial' ? '<option selected disabled>Parcial</option>' : '') +
               (PROXIMOS[o.status] || []).map(function (s) { return '<option' + (s === o.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
               '</select>') +
@@ -1932,8 +1830,7 @@
     var pecas = (c.pecas || []).map(function (p) {
       return '<div class="peca-row"><span>' + esc(p.sku) + ' — ' + esc(p.nome) + ' <b>×' + p.quantidade + '</b></span></div>';
     }).join('') || '<span class="muted">—</span>';
-    // data-arquivo (em vez de src/href): o arquivo é privado e vem por fetch
-    // autenticado. FG.carregarArquivos() preenche depois de montar o HTML.
+    // Arquivo privado: data-arquivo, preenchido depois por FG.carregarArquivos().
     function anexoThumb(a) {
       var video = (a.tipo && a.tipo.indexOf('video/') === 0) || /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i.test(a.url || a.nome || '');
       var inner = video
@@ -1962,8 +1859,7 @@
       '<div class="modal-body">' +
       (c.reenviada ? '<div class="reenviada-aviso">↩ Devolvida pelo revendedor — revisar' + (c.atualizadoEm ? ' (em ' + FG.fmtDateTime(c.atualizadoEm) + ')' : '') + '</div>' : '') +
       (c.sentBack ? '<div class="devolvida-aviso">↩ Devolvida ao revendedor — aguardando. Falta: ' + esc(c.faltaInformacao || '—') + '</div>' : '') +
-      // Pedido de origem cancelado depois da abertura: a decisão é do admin,
-      // mas ele precisa saber (30/09/2026).
+      // Avisa se o pedido de origem foi cancelado.
       (c.origem === 'varejo' && c.pedidoStatus === 'Cancelado' && !term
         ? '<div class="devolvida-aviso">⚠ O pedido de origem ' + esc(c.numeroPedido) + ' foi CANCELADO. ' +
           'Confira no histórico do pedido quais peças chegaram a sair antes de decidir.</div>' : '') +
@@ -1972,8 +1868,7 @@
           'para aprovar são necessárias no mínimo 3. Devolva ao revendedor pedindo as que faltam.</div>' : '') +
       (c.status === 'Aprovada' ? '<div class="det-credito">✔ Aprovada — pedido de garantia criado para repor a(s) peça(s) sem cobrança' +
         (c.valorGarantia ? ' (valor de referência: ' + FG.fmtMoney(c.valorGarantia) + ')' : '') + '. Acompanhe na área de pedidos.</div>' : '') +
-      // A moto da reivindicação: foto, concessionária, cliente e se o ocorrido
-      // cai dentro do período da garantia — o que o admin confere para decidir.
+      // Ficha da moto, com o ocorrido dentro ou fora da garantia.
       (veic ? FG.fichaVeiculoResumo(veic, { ocorrido: c.origem === 'preentrega' ? null : c.dataDefeito }) : '') +
       '<div class="det-grid">' +
       linha('N° da reivindicação', '<b class="cl-num">' + esc(c.id) + '</b>') +
@@ -1986,9 +1881,7 @@
           linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
           (c.dataAprovacao ? linha('Data de aprovação', FG.fmtDateTime(c.dataAprovacao)) : '')
         : c.origem === 'preentrega'
-          // Defeito achado na inspeção, com a moto ainda no estoque: não há
-          // uso (horas/km) e a data é a da inspeção. A garantia do comprador
-          // segue sem começar — ela só conta a partir da venda.
+          // Pré-entrega: moto no estoque, sem horas/km.
           ? linha('Origem', 'Pré-entrega (moto ainda no estoque)') +
             linha('NIV', esc(c.niv || '—')) +
             linha('Criador', esc(c.criador || '—')) +
@@ -2015,9 +1908,7 @@
 
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
-    // O link do pedido abre a aba de vendas já filtrada e com o detalhe (e o
-    // histórico) aberto. Antes apontava para "#pedido/…", rota que o admin
-    // não tem — o clique não levava a lugar nenhum.
+    // Link do pedido abre Vendas filtrada, com o detalhe aberto.
     Array.prototype.forEach.call(back.querySelectorAll('.ad-ir-pedido'), function (a) {
       a.addEventListener('click', function () {
         filtros.pedidos.busca = a.getAttribute('data-ped');
@@ -2077,14 +1968,11 @@
   }
 
   /* =========================================================
-     PRÉ-VENDA — rastreador de peças a enviar (sem valor; cobrança é a
-     fatura do pedido). Agrupado por cliente; cada peça tem ação "Enviado"
-     quando o produto volta ao estoque.
+     PRÉ-VENDA — peças a enviar, por cliente (sem valores)
      ========================================================= */
   function pvStatusPill(it) {
     if (it.status === 'Disponivel') return '<span class="pill-status Disponivel">Disponível p/ envio</span>';
-    // Aguardando: estoque insuficiente para a quantidade pendente. Mostra o
-    // estoque atual quando há algo (parcial) para deixar claro o porquê.
+    // Aguardando: mostra o estoque parcial, se houver.
     var detalhe = it.estoque > 0
       ? ' · estoque ' + it.estoque + '/' + it.pendente
       : (it.previsao ? ' · ' + esc(it.previsao) : '');
@@ -2146,10 +2034,7 @@
       return Object.keys(g).map(function (emp) { return blocoEmpresa(emp, g[emp]); }).join('');
     }
 
-    // Quando a fila de pré-venda atravessa mais de um mês, ela é quebrada por
-    // mês (do mais recente para o mais antigo) — senão a lista vira um bolo só
-    // e some a noção de quanto tempo a peça está esperando. Um mês só: direto
-    // por empresa, como sempre foi.
+    // Mais de um mês na fila: agrupa por mês (mais recente primeiro).
     var meses = {};
     itens.forEach(function (it) { (meses[mesChave(it.data)] = meses[mesChave(it.data)] || []).push(it); });
     var chaves = Object.keys(meses).sort().reverse();
@@ -2192,11 +2077,7 @@
   }
 
   /* =========================================================
-     PARTS FINDER — modelos, seções, peças e hotspots
-     ---------------------------------------------------------
-     Três níveis: #finder (modelos) → #finder/modelo/<código>
-     (seções por lado) → #finder/secao/<id> (peças da lista +
-     editor visual de áreas clicáveis sobre o diagrama).
+     PARTS FINDER — #finder → #finder/modelo/<código> → #finder/secao/<id>
      ========================================================= */
   var FND_LADOS = [['chassi', 'Frame (chassi)'], ['engine', 'Engine (motor)']];
 
@@ -2266,9 +2147,7 @@
     });
   }
 
-  // Código do modelo = nome + ano ("FG 125", 2025 → "fg125-2025"). Espelho de
-  // slugModelo em api/src/utils/modelo-moto.js, só para a prévia do modal —
-  // quem grava o código é a API.
+  // Prévia do código (espelho de api/src/utils/modelo-moto.js; quem grava é a API).
   function slugModelo(nome, ano) {
     var base = String(nome || '')
       .normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -2281,8 +2160,7 @@
     return base.slice(0, 40 - sufixo.length).replace(/-+$/, '') + sufixo;
   }
 
-  // `modelos` é a lista já carregada: alimenta as sugestões de marca,
-  // modalidade e categoria, para a árvore não se partir em "Enduro" e "enduro".
+  // `modelos` alimenta as sugestões (evita "Enduro" e "enduro").
   function modalModelo(m, modelos) {
     var novo = !m;
     function val(campo, padrao) { return m && m[campo] ? esc(m[campo]) : (padrao || ''); }
@@ -2568,8 +2446,7 @@
         '<tbody id="fp-tbody"></tbody></table>' +
         '</div></div>' +
 
-        /* ---- diagrama à ESQUERDA + áreas clicáveis à DIREITA com rolagem
-                própria — espelho invertido do que o cliente vê no finder ---- */
+        /* ---- diagrama à esquerda, áreas clicáveis à direita ---- */
         '<div class="adm-card"><div class="c-head">Imagem do diagrama e áreas clicáveis</div><div class="c-body">' +
         '<div class="fnd-add-row">' +
         '<input id="hi-file" type="file" accept="image/*">' +
@@ -2602,8 +2479,7 @@
       /* ----- tabela de peças (linhas com edição inline) ----- */
       var tbody = document.getElementById('fp-tbody');
 
-      // Mesmo princípio de cores da loja: verde = em estoque, amarelo =
-      // pré-venda (com previsão), vermelho = indisponível para compra.
+      // Verde = em estoque, amarelo = pré-venda, vermelho = indisponível.
       function statusPecaAdm(p) {
         if (p.estoque > 0) return '<span class="fnde-status ok">● Em estoque (' + p.estoque + ')</span>';
         if (p.previsao) return '<span class="fnde-status pre">● Pré-venda · ' + esc(p.previsao) + '</span>';
@@ -2718,16 +2594,11 @@
       var hs = sec.hotspots.map(function (h) {
         return { x: h.x, y: h.y, w: h.w, h: h.h, texto: h.texto || '', linkNumero: h.linkNumero || '' };
       });
-      // Preferência do admin (lembrada entre seções): mostrar ou não o número
-      // de POSIÇÃO nas áreas do diagrama. É só um apoio visual da montagem — o
-      // cliente nunca vê esses números.
+      // Mostrar o nº de posição nas áreas (preferência lembrada; o cliente não vê).
       var NUM_KEY = 'fullgas_finder_ha_nums';
       var mostrarNums = localStorage.getItem(NUM_KEY) !== '0';
 
-      // Zoom igual ao finder do cliente: o slider define a largura do canvas
-      // (natW*z); a imagem ocupa 100% do canvas e as caixas se posicionam em %,
-      // então tudo escala junto. escala() usa img.clientWidth (que já reflete o
-      // zoom), logo os cliques/arrastos continuam corretos em qualquer nível.
+      // Zoom: o slider define a largura do canvas; caixas em %.
       function escala() { return natW / (img.clientWidth || 1); }
 
       function aplicarZoom(z) {
@@ -2750,8 +2621,7 @@
         b.style.top = (h.y / natH * 100) + '%';
         b.style.width = (h.w / natW * 100) + '%';
         b.style.height = (h.h / natH * 100) + '%';
-        // O número da área é a POSIÇÃO na lista (começa em 0), não o Link
-        // Number da peça — reordenar a lista renumera as áreas na hora.
+        // Número da área = posição na lista (começa em 0).
         b.innerHTML = '<span>' + i + '</span>';
         return b;
       }
@@ -2762,11 +2632,7 @@
         hs.forEach(function (h, i) { canvas.appendChild(boxHTML(h, i)); });
       }
 
-      // O campo "Texto (opcional)" foi removido da interface (nunca é usado);
-      // o valor que existir no banco é preservado em hs[i].texto ao salvar.
-      // A lista pode ser reordenada arrastando pelo "⠿": mover uma linha
-      // reordena o array hs e, como o número da área é a posição, renumera
-      // tudo automaticamente (canvas + lista).
+      // Arrastar pelo "⠿" reordena e renumera as áreas. O campo texto antigo é preservado em hs[i].texto.
       var dragLista = null; // índice da linha sendo arrastada
       function desenharLista() {
         lista.innerHTML = hs.map(function (h, i) {
@@ -2843,11 +2709,7 @@
         drag = { i: i, px: e.clientX, py: e.clientY, x0: hs[i].x, y0: hs[i].y, moveu: false, box: box };
         box.setPointerCapture && box.setPointerCapture(e.pointerId);
       });
-      // move/solta ficam no canvas, e não no document: com o setPointerCapture
-      // acima, os eventos do arrasto chegam à caixa e sobem até aqui mesmo com
-      // o ponteiro fora da imagem. No document, cada abertura desta tela
-      // somava mais um par de listeners que nunca saía (e segurava a tela
-      // antiga inteira na memória).
+      // Listeners no canvas (com setPointerCapture), não no document, para não acumular.
       canvas.addEventListener('pointermove', function (e) {
         if (!drag) return;
         var k = escala();
@@ -2870,8 +2732,7 @@
         var k = escala();
         var cx = Math.round((e.clientX - r.left) * k);
         var cy = Math.round((e.clientY - r.top) * k);
-        // A nova área herda o tamanho da última já criada (fica prático manter
-        // todas com as mesmas dimensões); 32×32 só quando é a primeira.
+        // Nova área herda o tamanho da última (32×32 se for a primeira).
         var ult = hs[hs.length - 1];
         var nw = ult ? ult.w : 32, nh = ult ? ult.h : 32;
         var nova = { x: Math.max(0, cx - Math.round(nw / 2)), y: Math.max(0, cy - Math.round(nh / 2)), w: nw, h: nh, texto: '', linkNumero: '' };
@@ -2914,14 +2775,9 @@
   }
 
   /* =========================================================
-     TINY ERP — importação, sincronização em lote e log
-     ---------------------------------------------------------
-     O Tiny é a fonte de verdade dos produtos importados dele.
-     Aqui o admin: (1) importa produtos do Tiny para o catálogo,
-     (2) força a sincronização em lote dos já importados e
-     (3) confere o log (cron / importação / lote).
+     TINY ERP — importação, sincronização em lote e avisos
      ========================================================= */
-  var TINY_LOTE = 20; // blocos por requisição — o Tiny limita o ritmo da API
+  var TINY_LOTE = 20; // produtos por requisição (o Tiny limita o ritmo)
 
   function tinyPillLocal(st) {
     if (st === 'importado') return '<span class="pill-status aprovado">Já importado</span>';
@@ -2936,14 +2792,11 @@
       'descrição e foto dos produtos importados são sempre espelho do ERP — pela sincronização automática agendada na API ' +
       '(node-cron, a cada X minutos, evento "cron" no log) ou pelo botão de sincronizar abaixo.</span></div>' +
 
-      // Avisos dos pedidos: erro de exportação, cancelamento que precisa de
-      // ajuste manual, pedido cancelado/excluído direto no Tiny. Antes isso só
-      // aparecia abrindo o detalhe de cada venda, e passava despercebido.
+      // Pedidos com erro, ajuste manual ou cancelados no Tiny.
       '<div class="adm-card"><div class="c-head">Pedidos que precisam de atenção no Tiny</div>' +
       '<div class="c-body" id="ty-alertas"><span class="muted">Carregando…</span></div></div>' +
 
-      // Cadastro das concessionárias no Tiny: a edição feita em "Minha conta"
-      // que não chegou lá (contato duplicado, Tiny fora...) antes era invisível.
+      // Edições de cadastro que não chegaram ao Tiny.
       '<div class="adm-card"><div class="c-head">Cadastros de clientes com problema no Tiny</div>' +
       '<div class="c-body" id="ty-contatos"><span class="muted">Carregando…</span></div></div>' +
 
@@ -2964,8 +2817,6 @@
 
       '<div class="adm-card"><div class="c-head">Produtos sincronizados com o Tiny</div><div class="c-body" id="ty-sync"></div></div>' +
 
-      // O log de sincronização fica no editor de cada produto (Catálogo) e as
-      // exportações de pedido ficam no detalhe de cada venda — sem poluir aqui.
       '<div class="adm-bar"><span class="muted" style="font-size:12px;">ℹ O log de sincronização de cada produto está no ' +
       'seu cadastro (Catálogo → editar) e o status de exportação de cada pedido está no detalhe da venda (Pedidos → Detalhes).</span></div>';
 
@@ -3031,11 +2882,7 @@
       document.getElementById('ty-contatos').innerHTML = '<span class="muted">Não foi possível carregar os cadastros.</span>';
     });
 
-    /* ----- importação (lista paginada do Tiny) -----
-       A API do Tiny devolve 100 produtos por página; para a visualização não
-       ficar gigante, cada página do Tiny vira 5 páginas locais de 20 itens
-       (a última página do Tiny já buscada é cacheada — navegar entre as 5
-       sub-páginas não repete a consulta). */
+    /* ----- importação: cada página do Tiny (100) vira 5 páginas locais de 20 ----- */
     var TINY_POR_PAGINA = 100;
     var IMP_POR_PAGINA = 20;
     var impCache = { pesquisa: null, tinyPagina: 0, dados: null };
@@ -3059,8 +2906,7 @@
       fonte.then(function (r) {
         if (!box.isConnected) return;   // o admin já saiu da tela do Tiny
         var itens = r.produtos.slice(offset, offset + IMP_POR_PAGINA);
-        // Total exato quando estamos na última página do Tiny; senão, estimado
-        // (páginas anteriores do Tiny vêm sempre cheias).
+        // Total exato só na última página do Tiny; senão, estimado.
         var naUltima = r.pagina >= r.totalPaginas;
         var totalView = r.totalPaginas
           ? (r.totalPaginas - 1) * subPorTiny +
@@ -3139,8 +2985,7 @@
         Array.prototype.forEach.call(el.querySelectorAll('.ty-sync-sel'), function (c) { c.checked = todos.checked; });
       });
 
-      // Envia em blocos (a API consulta o Tiny produto a produto, e o Tiny
-      // limita o ritmo — um catálogo grande leva alguns minutos).
+      // Envia em blocos.
       function sincronizar(skus) {
         var fila = skus.slice();
         var soma = { total: 0, sucesso: 0, erros: 0, ignorados: 0 };
@@ -3188,21 +3033,11 @@
 
   /* =========================================================
      SUPORTE TÉCNICO — atendimento dos chamados
-     ---------------------------------------------------------
-     O outro lado do pop-up flutuante que o revendedor usa no portal. Aqui o
-     administrador lê a fila, responde e move o chamado pelos status.
-
-     A lista NÃO passa pelo cache do FG (que carrega junto com a página): ela é
-     buscada ao entrar na aba e guardada só em memória, para os filtros
-     redesenharem sem ir à rede de novo. Conversa envelhece rápido demais para
-     entrar no pacote que a página carrega uma vez e usa a sessão inteira.
+     A lista fica só em memória (não entra no cache do FG).
      ========================================================= */
   var supLista = null;          // último resultado carregado (memória da aba)
 
-  /* Qual chamado está desenhado agora e até onde a conversa já foi
-     desenhada. É o que deixa o batimento (js/ao-vivo.js) colar só as
-     mensagens novas no fim do fio, em vez de redesenhar a tela e apagar a
-     resposta que o atendente está digitando. null = não estamos num chamado. */
+  // Chamado aberto e último id desenhado: o batimento cola só as mensagens novas. null = fora de chamado.
   var supAberto = null;   // { id, ultimoId, status }
 
   function supMaiorId(conversa) {
@@ -3226,10 +3061,7 @@
   var SUP_PRIO = { baixa: 'Baixa', normal: 'Normal', alta: 'Alta' };
   function supPrio(p) { return SUP_PRIO[p] || p || 'Normal'; }
 
-  // Contador da barra lateral: mensagens de revendedor que ninguém leu ainda.
-  // Pintar e buscar são separados porque o batimento (js/ao-vivo.js) já traz
-  // o número pronto de 10 em 10 segundos — pedi-lo de novo seria uma segunda
-  // ida ao servidor para saber o que ele acabou de dizer.
+  // Contador da barra: pintar (número do batimento) e buscar ficam separados.
   function pintarDotSuporte(n) {
     var dot = document.getElementById('adm-sup-dot');
     if (!dot) return;
@@ -3268,8 +3100,7 @@
       return casaBusca('suporte', [c.numero, c.assunto, c.empresa, c.autor, c.categoriaNome]);
     });
 
-    // As categorias do filtro saem dos próprios chamados: sem lista fixa aqui,
-    // nada a corrigir no painel quando o portal ganha uma categoria nova.
+  // Categorias do filtro vêm dos próprios chamados.
     var cats = {};
     todos.forEach(function (c) { if (c.categoria) cats[c.categoria] = c.categoriaNome; });
     var opcoesCat = Object.keys(cats).sort().map(function (k) { return [k, cats[k]]; });
@@ -3322,12 +3153,10 @@
           '<a href="#suporte">Voltar à fila</a>.</div></div>';
         return;
       }
-      // Abrir marcou as mensagens do revendedor como lidas no servidor; a lista
-      // guardada em memória ficou velha e o contador da barra também.
+      // Abrir marcou como lidas: a lista em memória ficou velha.
       supLista = null;
       atualizarDotSuporte();
-      // Abrir o chamado zerou contadores no servidor: o batimento recomeça
-      // deste estado, em vez de anunciar como novidade o que acabou de ser lido.
+      // O batimento recomeça deste estado.
       if (FG.aoVivo) FG.aoVivo.agora();
 
       var fechado = c.status === 'Fechado';
@@ -3408,8 +3237,7 @@
     });
   }
 
-  // Uma mensagem da conversa. 'sistema' (mudança de status) entra como linha
-  // discreta no meio do fio; as outras, em balões separados por lado.
+  // Mensagem: 'sistema' vira linha discreta; as demais, balões por lado.
   function supMensagemHtml(m) {
     if (m.autor === 'sistema') {
       return '<div class="sup-msg de-sistema">' + esc(m.texto) + ' · ' + FG.fmtDateTime(m.criadoEm) + '</div>';
@@ -3420,8 +3248,7 @@
       else if (m.anexoTipo === 'video') anexo = '<video class="sup-anexo-video" data-arquivo="' + esc(m.anexo) + '" controls preload="metadata"></video>';
       else anexo = '<a class="link-action" data-arquivo="' + esc(m.anexo) + '" target="_blank" rel="noopener">📎 Abrir anexo</a>';
     }
-    // Aqui quem lê é o atendente: as respostas do suporte ficam à direita e as
-    // do revendedor à esquerda — o espelho exato do que o portal mostra a ele.
+    // Aqui o atendente lê: suporte à direita, revendedor à esquerda.
     return '<div class="sup-msg de-' + (m.autor === 'admin' ? 'mim' : 'outro') + '">' +
       '<span class="sup-msg-quem">' + esc(m.autor === 'admin'
         ? ('Suporte' + (m.autorNome ? ' · ' + m.autorNome : ''))
@@ -3438,17 +3265,15 @@
   function route() {
     var h = (location.hash || '#dashboard').slice(1);
     var seg = h.split('/');
-    // Sair de um chamado apaga o alvo do batimento; quem continuar num chamado
-    // o preenche de novo ao terminar de desenhar.
+    // Sair do chamado limpa o alvo do batimento.
     supAberto = null;
-    telaSeq++;   // respostas pendentes da tela anterior não desenham mais
+    telaSeq++;   // respostas da tela anterior não desenham mais
 
     switch (seg[0]) {
       case 'dashboard': renderDash(); break;
       case 'clientes': renderClientes(); break;
       case 'administradores': renderAdmins(); break;
-      // #usuarios era a aba única antes da separação. Continua atendendo
-      // links antigos (favoritos, menu do portal) caindo em Clientes.
+      // Links antigos de #usuarios caem em Clientes.
       case 'usuarios': renderClientes(); break;
       case 'chassis': renderChassis(); break;
       case 'notificacoes': renderNotifsAdmin(); break;
@@ -3477,16 +3302,7 @@
   route();
 
   /* =========================================================
-     AO VIVO — o painel acompanha o revendedor sem F5
-     ---------------------------------------------------------
-     Havia aqui um laço próprio de 3 minutos só para o contador da barra
-     lateral. Ele saiu: quem confere agora é o batimento compartilhado
-     (js/ao-vivo.js), a cada 10 segundos e em UMA requisição.
-
-     A regra ao reagir é a mesma do portal: nunca redesenhar o que o atendente
-     está usando. Dentro de um chamado as mensagens novas são COLADAS no fim
-     da conversa — redesenhar apagaria a resposta meio digitada, a cada 10
-     segundos.
+     AO VIVO — reage ao batimento (js/ao-vivo.js) sem redesenhar o que está em uso
      ========================================================= */
 
   // Cola no fim da conversa as mensagens que ainda não estão na tela.
@@ -3513,9 +3329,7 @@
       var fio = view.querySelector('.sup-conversa');
       if (!fio) return;
 
-      // innerHTML num elemento solto e depois append: o innerHTML += no
-      // próprio fio recriaria os balões antigos, e os anexos já resolvidos
-      // (URLs de blob) morreriam junto.
+      // Monta fora e anexa: innerHTML += recriaria os balões e perderia os blobs.
       var caixa = document.createElement('div');
       caixa.innerHTML = novas.map(supMensagemHtml).join('');
       var ultimo = null;
@@ -3525,9 +3339,7 @@
       supAberto.ultimoId = supMaiorId(c.conversa);
       supLista = null;                  // a fila em memória ficou velha
 
-      // Buscar o chamado marcou as mensagens como lidas no servidor: o
-      // contador da barra precisa saber, e o batimento tem que recomeçar do
-      // estado novo em vez de reanunciar o que já foi tratado.
+      // Atualiza o contador e recomeça o batimento do estado novo.
       atualizarDotSuporte();
       if (FG.aoVivo) FG.aoVivo.agora();
 
@@ -3545,21 +3357,17 @@
     if (supAberto) {
       supAnexarNovas();                 // dentro do chamado: cola as novas
     } else if (location.hash === '#suporte') {
-      // Comparação EXATA de propósito: '#suporte/12' é um chamado aberto, e
-      // um `indexOf(...) === 0` o traria para cá e redesenharia a fila por
-      // cima da conversa se o batimento chegasse antes de `supAberto` estar
-      // preenchido.
+      // Comparação exata: '#suporte/12' é um chamado aberto, não a fila.
       renderSuporte(true);              // na fila: redesenhar não perde nada
     }
   });
 
-  // Sem o batimento na página, o contador voltaria a ficar parado. O laço
-  // antigo fica como rede de segurança — e só neste caso.
+  // Sem o batimento, um laço próprio atualiza o contador.
   if (!FG.aoVivo) {
     setInterval(function () {
       if (document.visibilityState === 'visible') atualizarDotSuporte();
     }, 3 * 60 * 1000);
   }
 
-  }); // fim FG.pronto.then — tela montada só após o cache chegar
+  }); // fim FG.pronto.then
 })();

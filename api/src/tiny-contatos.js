@@ -1,35 +1,8 @@
-// ============================================================
-// Sincronização de CADASTRO de clientes com o Tiny ERP (2 vias)
-// ------------------------------------------------------------
-// Regra de negócio: o cadastro da concessionária (razão social,
-// fantasia, IE, e-mail, telefone e endereço) fica ESPELHADO entre
-// o Fullgas e o Tiny, nos dois sentidos:
-//
-//   Fullgas → Tiny
-//     - No cadastro (POST /register): pesquisa o CNPJ no Tiny e
-//       VINCULA ao contato existente; se não existir, CRIA um lá
-//       com os dados capturados (vincularContatoTiny).
-//     - Quando a empresa edita o cadastro (PUT /conta/empresa):
-//       ALTERA o contato correspondente no Tiny
-//       (atualizarContatoTiny → contato.alterar.php).
-//
-//   Tiny → Fullgas
-//     - A cada rodada do cron, relê os contatos vinculados
-//       (contato.obter.php) e aplica no cadastro local o que
-//       tiver mudado no Tiny (sincronizarContatosDoTiny).
-//
-// O CNPJ é a CHAVE do vínculo e nunca é alterado por aqui.
-// Conflito (mudou nos dois lados entre sincronizações): a edição do
-// portal tem prioridade enquanto não chega ao Tiny. Ela marca
-// Empresa.TinyContatoAlterado = 1 (migration 046); o envio que der
-// certo volta a 0. Com a marca ligada o cron RE-TENTA o envio em vez
-// de trazer o contato de lá por cima — antes, um envio que falhasse
-// era desfeito em silêncio pelo pull seguinte (achado de 30/09/2026).
-//
-// Liga/desliga: TINY_SINCRONIZAR_CLIENTES=1 no .env (além do
-// TINY_TOKEN). Desligado, o cadastro funciona normalmente e nada
-// é enviado nem lido do Tiny.
-// ============================================================
+// Cadastro das concessionárias espelhado com o Tiny, nos dois sentidos.
+//   Portal → Tiny: vincula/cria no cadastro; altera ao editar.
+//   Tiny → Portal: o cron relê os contatos vinculados.
+// O CNPJ é a chave e não muda. Edição pendente (TinyContatoAlterado = 1) tem prioridade.
+// Liga com TINY_SINCRONIZAR_CLIENTES=1.
 import 'dotenv/config';
 import { query } from './db.js';
 import {
@@ -41,15 +14,12 @@ export function clientesLigado() {
   return !!process.env.TINY_TOKEN && process.env.TINY_SINCRONIZAR_CLIENTES === '1';
 }
 
-// "12345678000190" → "12.345.678/0001-90" (o Tiny costuma armazenar com
-// máscara; a pesquisa tenta os dois formatos).
+// "12345678000190" → "12.345.678/0001-90"
 function fmtCnpj(dig) {
   return dig.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
 }
 
-// O Tiny devolve o CEP com ponto ("12.327-673", 10 chars); a coluna local é
-// VarChar(9) no formato "12327-673". Normaliza para o formato local — sem isso
-// o valor seria truncado e o pull acharia que "sempre mudou".
+// "12.327-673" (Tiny) → "12327-673" (coluna local)
 function normalizaCep(cep) {
   const d = String(cep || '').replace(/\D/g, '').slice(0, 8);
   return d.length === 8 ? d.slice(0, 5) + '-' + d.slice(5) : d;
@@ -75,12 +45,7 @@ async function carregarEmpresa(empresaId) {
   ))[0] || null;
 }
 
-// Texto que o portal gravava na observação do contato quando ela estava vazia
-// (até 05/10/2026). O contato é o MESMO para o Magento e o Fullgas, e o Tiny
-// leva a observação do contato para os pedidos — então pedidos do MAGENTO
-// apareciam como "Sincronizado pelo portal Fullgas B2B". Não gravamos mais nada
-// nosso na observação, e o texto antigo é retirado sempre que o contato é
-// enviado (e uma vez, em todos, por scripts/limpar-obs-contatos.mjs).
+// Texto antigo que o portal gravava na obs do contato; é removido a cada envio.
 const MARCA_ANTIGA = /\s*Sincronizado pelo portal Fullgas B2B\.?\s*/gi;
 export function semMarcaFullgas(obs) {
   return String(obs || '').replace(MARCA_ANTIGA, '\n').trim();
@@ -89,39 +54,22 @@ export function temMarcaFullgas(obs) {
   return /Sincronizado pelo portal Fullgas B2B/i.test(String(obs || ''));
 }
 
-// Monta o payload de contato para o Tiny.
-//   - incluir (comId=false): só os dados.
-//   - alterar (comId=true):  mais o `id` do contato no Tiny.
-//
-// ATENÇÃO — o contato.alterar.php SUBSTITUI o registro: todo campo NÃO enviado
-// é apagado no Tiny. Por isso o CNPJ vai SEMPRE, inclusive na alteração. Omiti-
-// -lo zerava o CNPJ do contato; sem CNPJ o contato deixava de casar com a
-// empresa e a exportação do próximo pedido criava um contato NOVO — era a
-// origem dos cadastros duplicados a cada edição. (O "CNPJ já cadastrado",
-// código 30, não vem de mandar o próprio CNPJ: vem de já existir uma duplicata
-// segurando esse número — tratado em atualizarContatoTiny.)
+// Payload do contato (comId = alterar).
+// O alterar SUBSTITUI o registro: campo não enviado é apagado. Por isso o CNPJ vai sempre.
 export function montarContato(emp, comId = false) {
   const dig = String(emp.Cnpj || '').replace(/\D/g, '');
   const c = {
-    // `sequencia` numera o registro dentro do lote enviado. Mandamos um contato
-    // por chamada, então é sempre '1' — mas ele é obrigatório TAMBÉM na
-    // inclusão, não só na alteração. Enquanto só ia no alterar, todo
-    // contato.incluir.php voltava "O número de sequência deve ser informado" e
-    // nenhuma empresa nova conseguia ser vinculada ao Tiny.
+    // Obrigatório também na inclusão.
     sequencia: '1',
     nome: emp.RazaoSocial,
     tipo_pessoa: dig.length === 11 ? 'F' : 'J',
     situacao: 'A',
-    // Só a observação que já existe no Tiny, sem o texto antigo do portal. Vai
-    // SEMPRE (vazia, se for o caso): o alterar substitui o registro, e mandar
-    // '' é o que apaga a marca antiga de um contato que só tinha ela.
+    // Vai sempre (vazia apaga o texto antigo).
     obs: semMarcaFullgas(emp.ObsTiny)
   };
   if (dig) c.cpf_cnpj = dig;
   if (comId && emp.TinyContatoId) c.id = String(emp.TinyContatoId);
-  // Lista de preço que o contato JÁ tem no Tiny (lida antes do alterar).
-  // O alterar substitui o registro e o portal nunca escolhe a lista de lá —
-  // reenviar a atual é o que evita que uma edição do cadastro a apague.
+  // Reenvia a lista atual, senão o alterar a apaga.
   if (emp.ListaTiny) c.id_lista_preco = String(emp.ListaTiny);
   if (emp.NomeFantasia) c.fantasia = emp.NomeFantasia;
   if (emp.InscricaoEstadual) c.ie = emp.InscricaoEstadual;
@@ -139,14 +87,9 @@ export function montarContato(emp, comId = false) {
   return c;
 }
 
-/* ============================================================
-   Fullgas → Tiny
-   ============================================================ */
+// ---- Portal → Tiny ----
 
-// Vincula UMA empresa: pesquisa o CNPJ no Tiny; achou → grava o id do
-// contato existente; não achou → cria o contato com os dados do cadastro.
-// Falha não propaga (devolve null): a empresa segue pendente e o cron
-// re-tenta. Chamada após o commit do /register e pelo cron.
+// Vincula a empresa ao contato do CNPJ (ou cria). Não lança: devolve null e o cron re-tenta.
 export async function vincularContatoTiny(empresaId) {
   if (!clientesLigado()) return null;
 
@@ -176,8 +119,7 @@ export async function vincularContatoTiny(empresaId) {
         contato = await incluirContato(montarContato(emp));
         acao = 'contato criado no Tiny';
       } catch (e) {
-        // Corrida/formatação: o Tiny recusou por CNPJ duplicado — então o
-        // contato existe; pesquisa de novo e vincula.
+        // CNPJ duplicado = o contato existe: pesquisa de novo.
         if (!/j[áa] (existe|cadastrad)/i.test(e.message)) throw e;
         contato = await pesquisarContatoPorCpfCnpj(fmtCnpj(dig))
           || await pesquisarContatoPorCpfCnpj(dig);
@@ -193,10 +135,7 @@ export async function vincularContatoTiny(empresaId) {
     );
     await registrarLog(contato.id, null, 'contato', 'ok',
       `Empresa "${emp.RazaoSocial}" (CNPJ ${fmtCnpj(dig)}): ${acao}.`);
-    // Contato que já existia: traz a lista de preço que ele tem no Tiny.
-    // Contato criado agora não tem lista — a empresa fica em vermelho no
-    // painel até alguém escolher uma. Falha aqui não desfaz o vínculo: o
-    // cron lê o contato de novo na próxima rodada.
+    // Contato existente: traz a lista de preço dele.
     if (acao !== 'contato criado no Tiny') {
       try {
         const c = await obterContato(contato.id);
@@ -205,8 +144,7 @@ export async function vincularContatoTiny(empresaId) {
         console.warn(`⚠ Lista de preço do contato ${contato.id} não lida: ${e.message}`);
       }
     }
-    // Vinculou a um contato que JÁ existia: o que foi editado no portal ainda
-    // precisa ir para lá. (Contato criado agora já nasceu com os dados atuais.)
+    // Contato existente: envia o que foi editado no portal.
     if (acao !== 'contato criado no Tiny') {
       const alt = (await query('SELECT TinyContatoAlterado FROM dbo.Empresa WHERE EmpresaId = @eid',
         { eid: empresaId }))[0];
@@ -224,10 +162,7 @@ export async function vincularContatoTiny(empresaId) {
   }
 }
 
-// Empurra para o Tiny uma edição do cadastro feita no portal. Se a empresa
-// ainda não tem contato vinculado, cai no fluxo de vínculo/criação. Falha não
-// propaga (fire-and-forget a partir da rota): o cron reconcilia depois.
-// Chamada após o commit de PUT /conta/empresa.
+// Envia ao Tiny a edição do cadastro. Sem vínculo, vincula. Não lança.
 export async function atualizarContatoTiny(empresaId) {
   if (!clientesLigado()) return null;
 
@@ -237,10 +172,7 @@ export async function atualizarContatoTiny(empresaId) {
 
   const dig = String(emp.Cnpj || '').replace(/\D/g, '');
   try {
-    // O CNPJ é a chave do vínculo: quem o detém no Tiny é o contato CANÔNICO
-    // (é nele que a exportação de pedidos vai casar). Se for outro registro —
-    // porque uma duplicata nasceu antes desta correção —, re-aponta o vínculo
-    // para ele em vez de continuar editando o órfão.
+    // Se outro contato detém o CNPJ no Tiny, ele é o canônico: re-aponta o vínculo.
     let alvo = String(emp.TinyContatoId);
     if (dig) {
       const dono = await pesquisarContatoPorCpfCnpj(fmtCnpj(dig))
@@ -248,11 +180,7 @@ export async function atualizarContatoTiny(empresaId) {
       if (dono && String(dono.id) !== alvo) alvo = await revincular(emp, dono.id);
     }
 
-    // O contato.alterar SUBSTITUI o registro: a observação escrita por quem
-    // usa o Tiny seria apagada. Lê a atual e preserva (30/09/2026), tirando só
-    // o texto antigo do portal. Mesma coisa com a lista de preço do contato
-    // (ver montarContato). Sem conseguir ler, NÃO altera — apagaria a
-    // observação de lá; o erro cai no catch de fora e o cron tenta de novo.
+    // O alterar substitui o registro: lê e preserva obs e lista de preço. Sem conseguir ler, não altera.
     const atual = await obterContato(alvo);
     if (atual?.obs) emp = { ...emp, ObsTiny: atual.obs };
     if (Number(atual?.id_lista_preco) > 0) emp = { ...emp, ListaTiny: atual.id_lista_preco };
@@ -260,10 +188,7 @@ export async function atualizarContatoTiny(empresaId) {
     try {
       await alterarContato(montarContato({ ...emp, TinyContatoId: alvo }, true));
     } catch (e) {
-      // Código 30 = "CNPJ já cadastrado": entre a pesquisa acima e o alter,
-      // OUTRO contato ficou com o CNPJ (o Tiny cria um por conta própria ao
-      // receber um pedido quando o vinculado está sem o número). Re-pesquisa,
-      // move o vínculo para o novo dono e tenta de novo — uma vez só.
+      // Código 30 = CNPJ já cadastrado em outro contato: re-vincula e tenta de novo, uma vez.
       if (e.codigo !== '30' || !dig) throw e;
       const dono = await pesquisarContatoPorCpfCnpj(fmtCnpj(dig))
         || await pesquisarContatoPorCpfCnpj(dig);
@@ -285,8 +210,7 @@ export async function atualizarContatoTiny(empresaId) {
   }
 }
 
-// Re-aponta o vínculo da empresa para outro contato do Tiny (o que está com o
-// CNPJ). Devolve o novo id, já como string.
+// Re-aponta o vínculo para outro contato. Devolve o novo id (string).
 async function revincular(emp, novoId) {
   const id = String(novoId);
   await query(
@@ -308,8 +232,7 @@ async function desmarcarPendente(empresaId) {
   ).catch(() => { });
 }
 
-// Re-tenta os vínculos que ficaram pendentes (Tiny fora do ar na hora do
-// cadastro, chave desligada, etc.). Chamada pelo cron a cada rodada.
+// Re-tenta os vínculos pendentes (chamada pelo cron).
 export async function processarContatosPendentes() {
   if (!clientesLigado()) return;
   try {
@@ -324,13 +247,9 @@ export async function processarContatosPendentes() {
   }
 }
 
-/* ============================================================
-   Tiny → Fullgas
-   ============================================================ */
+// ---- Tiny → Portal ----
 
-// Aplica no cadastro local o que mudou no contato do Tiny. Só grava campos que
-// o Tiny devolveu preenchidos E diferentes do atual (não apaga dado local com
-// campo vazio nem gera escrita à toa). Devolve true se algo mudou.
+// Aplica o que mudou no Tiny (só campos preenchidos e diferentes). Devolve true se mudou.
 async function aplicarContatoLocal(emp, c) {
   let mudou = false;
   if (c.cep) c = { ...c, cep: normalizaCep(c.cep) };  // CEP do Tiny → formato local
@@ -400,10 +319,7 @@ async function aplicarContatoLocal(emp, c) {
   return mudou;
 }
 
-// Relê os contatos vinculados no Tiny e reflete no cadastro local o que mudou
-// lá. Chamada pelo cron a cada rodada. Cada empresa custa 1 requisição ao Tiny
-// (a fila do tiny.js espaça as chamadas) — como concessionárias são poucas
-// (bem menos que produtos), o custo é baixo.
+// Relê os contatos vinculados e aplica as mudanças (chamada pelo cron).
 export async function sincronizarContatosDoTiny() {
   if (!clientesLigado()) return;
 
@@ -431,10 +347,7 @@ export async function sincronizarContatosDoTiny() {
   }
 
   for (const emp of empresas) {
-    // Edição do portal que ainda não chegou ao Tiny: trazer o contato de lá
-    // agora APAGARIA a edição (achado de 30/09/2026 — o cliente via "salvo" e
-    // o cron desfazia em até 30 min). Re-tenta o envio; o pull volta a valer
-    // quando o envio der certo.
+    // Edição do portal pendente: re-tenta o envio em vez de trazer o contato por cima.
     if (emp.TinyContatoAlterado) {
       await atualizarContatoTiny(emp.EmpresaId);
       continue;
@@ -443,10 +356,7 @@ export async function sincronizarContatosDoTiny() {
       let c = await obterContato(emp.TinyContatoId);
       if (!c) continue;
 
-      // Guarda de identidade: só espelha um contato cujo CNPJ bate com o da
-      // empresa. Se o vinculado perdeu o CNPJ (duplicata antiga), o dono do
-      // número é o registro bom — re-aponta e lê ele, em vez de trazer para
-      // cá os dados velhos do órfão.
+      // Só espelha contato cujo CNPJ bate; senão re-aponta para o dono do CNPJ.
       const dig = String(emp.Cnpj || '').replace(/\D/g, '');
       const digTiny = String(c.cpf_cnpj || '').replace(/\D/g, '');
       if (dig && digTiny !== dig) {
@@ -459,8 +369,7 @@ export async function sincronizarContatosDoTiny() {
       }
 
       await aplicarContatoLocal(emp, c);
-      // Lista de preço do contato: o Tiny manda. Contato sem lista não apaga
-      // a escolhida à mão no painel (ver aplicarListaDoTiny).
+      // Lista do contato (sem lista no Tiny, a manual é mantida).
       await aplicarListaDoTiny(emp.EmpresaId, c.id_lista_preco, emp.TinyContatoId);
     } catch (e) {
       await registrarLog(emp.TinyContatoId, null, 'contato', 'erro',

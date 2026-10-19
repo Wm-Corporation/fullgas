@@ -1,18 +1,5 @@
-// Regressão: o RETORNO de identidade assinava uma sessão que já nascia morta.
-//
-// O admin assumia a identidade de um cliente, voltava para a própria conta e
-// perdia o acesso a tudo — painel, Tiny, banco. A causa não estava na sessão
-// nova em si: a consulta do POST /api/auth/identidade/voltar não trazia
-// u.TokenVersion, então o signToken assinava tv = 0 (o `?? 0` de auth.js) e o
-// revalidarSessao comparava esse 0 com o TokenVersion real do banco. Diferente
-// = sessão morta + cookies apagados, na PRIMEIRA requisição depois da volta.
-//
-// Só acontecia com admin que já tivesse trocado a senha ou saído de todos os
-// dispositivos alguma vez — é o que empurra o TokenVersion para 1.
-//
-// O teste é estático de propósito: o erro não estava na lógica (que já tem
-// cobertura em revalidacao-sessao.test.js), e sim numa COLUNA que faltou na
-// consulta. É isso que precisa ficar travado.
+// Regressão: a volta da identidade assumida precisa ler u.TokenVersion,
+// senão a sessão nova nasce com tv = 0 e cai na primeira requisição. Teste estático da consulta.
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,8 +26,7 @@ describe('retorno de identidade assumida', () => {
   it('toda emissão de sessão parte de uma consulta com TokenVersion', () => {
     for (const rel of ['routes/auth.routes.js', 'routes/usuarios.routes.js']) {
       const src = fonte(rel);
-      // Uma consulta de usuário que alimenta signToken sem TokenVersion é o
-      // bug de novo, em outra rota.
+      // Consulta de usuário que alimenta signToken sem TokenVersion = o bug de volta.
       for (const m of src.matchAll(/await query\(\s*`SELECT[^`]*FROM dbo\.Usuario[^`]*`/g)) {
         const consulta = m[0];
         if (/u\.Papel|u\.Permissoes/.test(consulta)) {

@@ -1,18 +1,8 @@
-// ============================================================
-// Listas de preço (painel admin) — ver src/lista-preco.js
-//   - GET  /listas-preco              espelho local das listas do Tiny
-//   - POST /listas-preco/sincronizar  traz as listas do Tiny agora
-//   - PUT  /empresas/:id/lista-preco  escolhe à mão a lista de uma empresa
-//                                     cujo contato NÃO tem lista no Tiny
-//                                     { listaPrecoId: number }
-//   - POST /empresas/:id/lista-preco/tiny
-//                                     relê o contato no Tiny agora e aplica
-//                                     a lista que ele tiver lá
-// A escolha NA APROVAÇÃO do cadastro vai junto no PATCH /usuarios/:id.
-// Lista vinda do Tiny (origem 'tiny') não se troca aqui: muda-se no contato
-// lá — senão o cron desfaria a troca na rodada seguinte.
-// Só administradores.
-// ============================================================
+// ---- Listas de preço (admin) — regras em src/lista-preco.js ----
+//   GET  /listas-preco                  espelho das listas do Tiny
+//   POST /listas-preco/sincronizar      atualiza do Tiny
+//   PUT  /empresas/:id/lista-preco      escolhe à mão (só se o contato não tem lista no Tiny)
+//   POST /empresas/:id/lista-preco/tiny relê o contato no Tiny e aplica
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
@@ -35,8 +25,7 @@ router.post('/listas-preco/sincronizar', requireAuth, requireAdmin, async (_req,
   let resumo;
   try { resumo = await sincronizarListasPreco(); }
   catch (e) {
-    // Tiny fora do ar / token ausente: 502 com o motivo, e o painel segue
-    // com as listas que já estavam no espelho.
+    // Tiny fora: 502 com o motivo; o painel segue com o espelho.
     return res.status(502).json({ erro: 'Não foi possível ler as listas do Tiny: ' + e.message });
   }
   try { res.json({ resumo, listas: await listarListas() }); }
@@ -86,8 +75,7 @@ router.post('/empresas/:id/lista-preco/tiny', requireAuth, requireAdmin, async (
 
     let emp = (await query('SELECT TinyContatoId FROM dbo.Empresa WHERE EmpresaId = @eid', { eid: empresaId }))[0];
     if (!emp) return res.status(404).json({ erro: 'Empresa não encontrada.' });
-    // Ainda sem contato vinculado (Tiny fora na hora do cadastro): tenta agora.
-    // O vínculo com contato existente já aplica a lista dele.
+    // Sem contato vinculado ainda: tenta vincular agora.
     if (!emp.TinyContatoId) {
       await vincularContatoTiny(empresaId);
       emp = (await query('SELECT TinyContatoId FROM dbo.Empresa WHERE EmpresaId = @eid', { eid: empresaId }))[0];

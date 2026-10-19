@@ -1,14 +1,5 @@
-// Listas de preço do Tiny por cliente (migration 048, 02/10/2026).
-//  - % do Tiny: negativo = desconto (-20 → paga 80%).
-//  - O espelho local acompanha o Tiny (novas, alteradas, sumidas).
-//  - O checkout precifica pela lista da EMPRESA e grava lista/% no pedido.
-//  - O pedido vai ao Tiny com id_lista_preco (só se a lista ainda existe).
-//  - A lista vem do CONTATO no Tiny (id_lista_preco): no cadastro, no cron e
-//    no botão "Buscar no Tiny". Sem lista lá, escolhe-se à mão uma das
-//    listas existentes (origem 'manual'); "preço cheio" não é escolha.
-//  - Aprovar exige que a empresa saia com lista.
-//
-// db.js é um dublê só: cada bloco troca o `responder`.
+// Listas de preço: % do Tiny, espelho local, preço no checkout, id_lista_preco no pedido,
+// lista vinda do contato e escolha manual. db.js é um dublê (cada bloco troca o `responder`).
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';

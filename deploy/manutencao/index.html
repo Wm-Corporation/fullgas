@@ -6,18 +6,10 @@
 <title>FULLGAS B2B — Em manutenção</title>
 <meta name="robots" content="noindex, nofollow">
 
-<!-- Recarrega sozinho a cada 60s: quando o site voltar, quem estiver com a
-     aba aberta entra de novo sem precisar apertar nada.
-     É <meta refresh> DE PROPÓSITO, e não JavaScript: o front do Fullgas não
-     usa NENHUM script inline (é o que sustenta o `script-src 'self'` sem
-     'unsafe-inline' na CSP do Nginx). Um <script> aqui seria bloqueado pelo
-     navegador, e a página ficaria sem recarregar. -->
+<!-- Recarrega a cada 60 s. Meta refresh, e não script: a CSP bloqueia script inline. -->
 <meta http-equiv="refresh" content="60">
 
-<!-- TUDO embutido neste arquivo: nenhum CSS, fonte, imagem ou script de fora.
-     Durante a manutenção os assets do site respondem 503 junto com o resto —
-     uma página que dependesse de css/styles.css apareceria quebrada, sem
-     estilo, justamente no momento em que ela é a única coisa que o cliente vê. -->
+<!-- Tudo embutido: durante a manutenção os assets do site respondem 503. -->
 <style>
   :root {
     --gold: #e5b100;
@@ -31,8 +23,7 @@
     --font: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
 
-  /* O painel do cliente é claro. Ainda assim respeitamos quem usa o sistema
-     em modo escuro: só os tokens mudam, o desenho é o mesmo. */
+  /* Modo escuro: só os tokens mudam. */
   @media (prefers-color-scheme: dark) {
     :root {
       --ink: #f2f0ed;
@@ -79,9 +70,7 @@
 
   .inner { padding: 34px 30px 30px; }
 
-  /* Marca reconstruída em CSS puro — mesma fórmula do .brand/.g-badge do
-     css/styles.css (itálico, 900, caixa alta, "F" num quadrado de borda
-     dourada). Em CSS e não em <img> para o arquivo continuar autossuficiente. */
+  /* Marca em CSS puro (mesma do .brand do styles.css), para o arquivo ser autossuficiente. */
   .brand {
     display: inline-flex;
     align-items: center;

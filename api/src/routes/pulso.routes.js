@@ -1,36 +1,6 @@
-// ============================================================
-// GET /api/pulso — o batimento que deixa o portal "ao vivo"
-// ------------------------------------------------------------
-// O front pergunta por esta rota a cada 10 segundos (ver frontend/js/ao-vivo.js)
-// só para saber se ALGUMA COISA mudou. Antes dela, a única forma de o
-// revendedor descobrir que o suporte havia respondido era recarregar a página:
-// a carta ✉️ do topo e o badge 🎧 do pop-up eram calculados uma vez, na
-// abertura, e ficavam parados.
-//
-// O que ela devolve é DELIBERADAMENTE minúsculo — quatro números:
-//
-//   notificacoes      não lidas na caixa ✉️ de quem perguntou
-//   suporteAbertos    chamados ainda em andamento
-//   suporteNaoLidas   mensagens do outro lado ainda não vistas (badge 🎧)
-//   ultimaMensagem    maior MensagemId que este usuário alcança
-//
-// Por que quatro números e não a lista inteira: esta é a requisição mais
-// frequente do sistema (uma a cada 10s por aba aberta). Se ela trouxesse as
-// notificações e os chamados, o portal estaria baixando o mesmo conteúdo 360
-// vezes por hora para descobrir que nada mudou. Aqui o corpo tem ~80 bytes e
-// tudo cabe em UMA ida ao banco; a lista só é buscada QUANDO um dos números
-// se mexe.
-//
-// `ultimaMensagem` existe porque os contadores não bastam: uma mudança de
-// status entra na conversa como mensagem do 'sistema', e uma mensagem que o
-// próprio usuário mandou de outra aba já nasce lida. Nos dois casos os
-// contadores não mexem, mas o fio da conversa mudou — e a tela aberta precisa
-// saber. Ele é um NÚMERO QUE SÓ CRESCE: o front guarda o anterior e compara.
-//
-// Nenhuma condição de visibilidade é reescrita aqui. VISIVEL_PARA, escopo e
-// ladosDa são importados de quem já é dono deles; um contador que discordasse
-// da tela que ele anuncia seria pior do que não ter contador.
-// ============================================================
+// GET /api/pulso — batimento do portal "ao vivo" (a cada 10 s, ver frontend/js/ao-vivo.js).
+// Devolve só 4 números; o front busca a lista quando algum muda.
+// ultimaMensagem só cresce: pega mensagens que não mexem nos contadores.
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth } from '../auth.js';
@@ -42,15 +12,10 @@ const router = Router();
 router.get('/pulso', requireAuth, async (req, res, next) => {
   try {
     const lado = ladosDa(req.user);
-    // O escopo das NOTIFICAÇÕES é por empresa (@eid); o dos CHAMADOS é por
-    // dono (@dono, de escopoSuporte) — um chamado é da pessoa que o abriu, não
-    // da concessionária dela. São dois recortes diferentes e cada consulta usa
-    // o seu.
+    // Notificações: escopo por empresa. Chamados: por dono.
     const esc = escopo(req.user);
 
-    // Não lida = NÃO EXISTE linha em NotificacaoLida para este usuário. É como
-    // o PATCH .../lida trabalha (marcar insere a linha, desmarcar a APAGA), e
-    // não como um LEFT JOIN em LidaEm faria supor.
+    // Não lida = não existe linha em NotificacaoLida para o usuário.
     const rows = await query(
       `SELECT
          (SELECT COUNT(*)

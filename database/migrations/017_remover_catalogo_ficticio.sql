@@ -1,33 +1,10 @@
-/* ============================================================================
-   MIGRAÇÃO 017 — Remove o catálogo fictício (produtos de demonstração)
-   ----------------------------------------------------------------------------
-   Com a integração Tiny no ar, o catálogo real vem do ERP. Esta migração
-   apaga todos os produtos SEM vínculo com o Tiny (TinyId IS NULL) — o
-   "estoque fictício" criado nas cargas de demonstração — e, por arrasto de
-   chave estrangeira, os dados demo que dependiam deles:
-
-   - PecaSecao: vínculos de peças nas seções do Parts Finder (o admin
-     re-monta as seções com os produtos reais importados do Tiny);
-   - PedidoItem + Pedido: itens e pedidos de demonstração que ficarem vazios;
-   - Entrega/RastreioEntrega e Fatura órfãs desses pedidos (inclusive as
-     faturas avulsas da carga demo, que nunca tiveram pedido).
-
-   O que NÃO é tocado:
-   - Produtos com TinyId (catálogo real);
-   - Faturas com ReferenciaReivindicacao (notas de crédito de garantia);
-   - Reivindicações, veículos, usuários, categorias e modelos do finder
-     (as seções ficam sem peças, mas continuam existindo).
-
-   Idempotente: re-executar sem produtos fictícios não apaga nada.
-   Rodar como administrador (fullgas_app não tem permissão p/ estes DELETEs):
-     sqlcmd -E -S <servidor> -i 017_remover_catalogo_ficticio.sql
-   ============================================================================ */
+-- 017 - Remove produtos sem vinculo com o Tiny (catalogo de demonstracao) e o que dependia deles.
+-- Preserva: produtos do Tiny, notas de credito, reivindicacoes, veiculos, usuarios e modelos. Idempotente.
 
 USE FullgasB2B;
 GO
 
--- DML em tabela com índice filtrado (UX_Produto_TinyId) exige QUOTED_IDENTIFIER
--- ON; o sqlcmd roda OFF por padrão.
+-- Indice filtrado exige QUOTED_IDENTIFIER ON.
 SET QUOTED_IDENTIFIER ON;
 GO
 

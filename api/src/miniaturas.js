@@ -1,23 +1,5 @@
-// ============================================================
-// Miniaturas das fotos de produto (e, desde 06/10/2026, da foto de cada
-// modelo de moto, que aparece em toda linha da lista de chassis).
-// ------------------------------------------------------------
-// As fotos vêm do Tiny (≈665×500 px, ≈73 KB cada) e as telas as exibiam
-// inteiras em caixinhas de 48 px (Catálogo do admin) ou 170 px (loja). Pior:
-// as que ficam em anexos.tiny.com.br respondem com `Cache-Control: no-store`,
-// então o navegador baixava tudo de novo a cada abertura da página — no
-// Catálogo, 44 fotos e 3,2 MB, ~20 s numa internet de 1,5 Mbps (medido em
-// 17/09/2026).
-//
-// Aqui cada foto ganha uma cópia pequena (até 320 px, WebP, ≈4 KB), servida
-// por nós em /uploads/miniaturas/ com cache longo. O nome do arquivo é o hash
-// da URL de origem: foto trocada = URL nova = arquivo novo, então o cache
-// longo nunca mostra uma imagem velha.
-//
-// A geração roda em segundo plano (início da API, fim de cada sync do Tiny e
-// depois de um upload no admin) e NUNCA derruba nada: se falhar, a tela
-// continua usando a foto original.
-// ============================================================
+// Miniaturas (320 px, WebP) das fotos de produto e de modelo de moto, com cache longo.
+// O nome é o hash da URL de origem. Roda em segundo plano e nunca derruba nada.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,20 +7,13 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { query } from './db.js';
 
-// Só JPEG, PNG e WebP são decodificados — é o que o Tiny e o upload do admin
-// entregam. Os demais leitores do libvips (GIF, TIFF, HEIF, SVG, PDF...) ficam
-// desligados: é neles que costumam aparecer as falhas de segurança (ex.:
-// GHSA-f88m-g3jw-g9cj, corrigida no sharp 0.35), e um formato que não é lido
-// não pode ser explorado. Vale para o processo inteiro; hoje só este módulo
-// usa o sharp.
+// Só JPEG, PNG e WebP são lidos; os outros decodificadores ficam desligados (segurança).
 sharp.block({ operation: ['VipsForeignLoad'] });
 sharp.unblock({ operation: ['VipsForeignLoadJpeg', 'VipsForeignLoadPng', 'VipsForeignLoadWebp'] });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS = path.join(__dirname, '..', 'uploads');
-// FULLGAS_MINIATURAS_DIR existe para os testes: a limpeza de órfãs apaga
-// tudo que não está no catálogo, então teste nenhum pode apontar para a
-// pasta de verdade.
+// Pasta configurável para os testes (a limpeza de órfãs apaga o que não está no catálogo).
 export const PASTA_MINIATURAS = process.env.FULLGAS_MINIATURAS_DIR || path.join(UPLOADS, 'miniaturas');
 const URL_BASE = '/uploads/miniaturas/';
 fs.mkdirSync(PASTA_MINIATURAS, { recursive: true });
@@ -47,9 +22,7 @@ const LADO_MAX = 320;
 const LIMITE_ORIGEM = 15 * 1024 * 1024;   // foto de origem maior que isto é ignorada
 const TEMPO_MAX_MS = 20000;
 
-// Só buscamos imagens de onde o catálogo realmente guarda fotos. Sem esta
-// lista, uma ImagemUrl adulterada faria a API baixar qualquer endereço
-// (inclusive da rede interna) — o clássico SSRF.
+// Origens permitidas (evita SSRF).
 const ORIGENS_OK = [
   (u) => u.protocol === 'https:' && u.hostname === 'anexos.tiny.com.br',
   (u) => u.protocol === 'https:' && u.hostname === 's3.amazonaws.com' && u.pathname.startsWith('/tiny-anexos-us/')
@@ -62,17 +35,14 @@ function nomeDe(origem) {
   return crypto.createHash('sha256').update(origem).digest('hex').slice(0, 32) + '.webp';
 }
 
-// URL relativa da miniatura (/uploads/miniaturas/...), ou null se ainda não
-// existe — aí o front usa a foto original.
+// URL da miniatura, ou null se ainda não existe (o front usa a original).
 export function miniaturaDe(origem) {
   if (!origem) return null;
   const nome = nomeDe(origem);
   return prontas.has(nome) ? URL_BASE + nome : null;
 }
 
-// Lê os bytes da foto de origem: upload local (/uploads/produtos/... ou a
-// foto do modelo em /uploads/finder/...) ou uma das origens permitidas.
-// Qualquer outra coisa é recusada.
+// Lê a foto de origem: upload local ou origem permitida.
 async function lerOrigem(origem) {
   const local = /^\/uploads\/(produtos|finder)\/([A-Za-z0-9._-]+)$/.exec(origem);
   if (local) return fs.promises.readFile(path.join(UPLOADS, local[1], local[2]));
@@ -106,8 +76,7 @@ export async function gerarMiniatura(origem) {
   return URL_BASE + nome;
 }
 
-// Apaga miniaturas de fotos que saíram do catálogo (produto excluído, foto
-// trocada) e temporários esquecidos por uma queda no meio da gravação.
+// Apaga miniaturas que saíram do catálogo e temporários.
 async function limparOrfas(emUso) {
   for (const f of await fs.promises.readdir(PASTA_MINIATURAS)) {
     const orfa = f.endsWith('.tmp') || (f.endsWith('.webp') && !emUso.has(f));
@@ -116,8 +85,7 @@ async function limparOrfas(emUso) {
   }
 }
 
-// Gera o que falta para o catálogo inteiro. Uma rodada por vez; chamadas
-// durante uma rodada só pedem que ela seja repetida ao terminar.
+// Gera o que falta. Uma rodada por vez; chamada durante a rodada pede repetição.
 let rodando = null;
 let repetir = false;
 export function prepararMiniaturas() {
@@ -125,8 +93,7 @@ export function prepararMiniaturas() {
   rodando = (async () => {
     do {
       repetir = false;
-      // Fotos de produto + foto de cada modelo de moto. Os diagramas do
-      // Localizador (SecaoModelo) ficam de fora: são vistos em tamanho cheio.
+      // Fotos de produto e de modelo (diagramas do Localizador ficam de fora).
       const rows = await query(
         `SELECT DISTINCT ImagemUrl FROM (
            SELECT ImagemUrl FROM dbo.Produto

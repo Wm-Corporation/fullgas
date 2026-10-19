@@ -1,39 +1,12 @@
-/* ============================================================================
-   FULLGAS B2B - Dados de teste (seeds) para SQL Server
-   ----------------------------------------------------------------------------
-   *** SOMENTE DESENVOLVIMENTO. NUNCA RODE ISTO EM PRODUCAO. ***
-
-   Duas razoes, ambas destrutivas:
-     1. O script COMECA apagando as tabelas (DELETE FROM em cascata, mais
-        abaixo). Rodar num banco com dado real apaga pedidos, faturas,
-        reivindicacoes e cadastros de cliente.
-     2. Ele cria contas com SENHA CONHECIDA E PUBLICADA neste arquivo, que e'
-        versionado no Git. Uma delas e' ADMIN aprovado. Num banco exposto,
-        isso e' takeover de administrador em um passo.
-
-   Por isso ha DUAS travas logo abaixo: um opt-in explicito (-v ALLOW_SEEDS=1)
-   e uma checagem de que o banco esta mesmo vazio de dado transacional. O
-   deploy.sh nao chama este arquivo (roda so database/migrations/), mas nada
-   impedia alguem executa-lo a mao no servidor errado.
-
-   Pre-requisito: rode antes o fullgas_schema_sqlserver.sql.
-
-   COMO RODAR (em desenvolvimento):
-     sqlcmd -S localhost -E -C -d FullgasB2B -v ALLOW_SEEDS=1 \
-            -i database/fullgas_seeds.sql
-
-   Logins de teste (senhas fracas de proposito — so existem aqui):
-     admin@fullgas.com.br   / admin123     (admin, aprovado)
-     cliente@exemplo.com    / cliente123   (cliente, aprovado)
-     maria@silvaracing.com  / maria123     (cliente, PENDENTE)
-
-   Para criar o PRIMEIRO ADMIN DE VERDADE (producao), nao use este arquivo:
-     node api/scripts/criar-admin.mjs
-
-   Estrategia: sem GO entre os blocos; os relacionamentos sao resolvidos por
-   subconsulta usando as chaves naturais (RazaoSocial, Sku, Email, Codigo, Niv).
-   Datas usam DATEADD a partir de SYSUTCDATETIME() para ficarem sempre recentes.
-   ============================================================================ */
+-- FULLGAS B2B - Dados de teste. SOMENTE DESENVOLVIMENTO: apaga as tabelas e cria contas com senha conhecida.
+-- Travas: opt-in (-v ALLOW_SEEDS=1) e banco sem dado transacional.
+-- Rodar (depois do schema):
+--   sqlcmd -S localhost -E -C -d FullgasB2B -v ALLOW_SEEDS=1 -i database/fullgas_seeds.sql
+-- Logins de teste:
+--   admin@fullgas.com.br   / admin123     (admin, aprovado)
+--   cliente@exemplo.com    / cliente123   (cliente, aprovado)
+--   maria@silvaracing.com  / maria123     (cliente, PENDENTE)
+-- Primeiro admin de producao: node api/scripts/criar-admin.mjs
 
 USE FullgasB2B;
 GO
@@ -41,15 +14,7 @@ GO
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-/* ----------------------------------------------------------------------------
-   TRAVA 1 — opt-in explicito.
-   Sem -v ALLOW_SEEDS=1 na linha de comando, o sqlcmd nem substitui a variavel
-   e o lote inteiro e' abortado. Rodar o arquivo "sem querer" nao apaga nada.
-
-   O SET NOEXEC ON e' o que faz o RESTO DO ARQUIVO ser apenas compilado, sem
-   executar — inclusive os DELETE. Ele fica ligado ate o SET NOEXEC OFF no
-   final, entao nao ha caminho em que a limpeza rode com a trava fechada.
-   ---------------------------------------------------------------------------- */
+-- Trava 1: sem -v ALLOW_SEEDS=1 o lote aborta e o NOEXEC ON so compila o resto (ate o NOEXEC OFF no fim).
 :setvar ALLOW_SEEDS "0"
 IF '$(ALLOW_SEEDS)' <> '1'
 BEGIN
@@ -58,16 +23,7 @@ BEGIN
 END
 GO
 
-/* ----------------------------------------------------------------------------
-   TRAVA 2 — o banco parece producao?
-   Dado transacional (pedido, fatura, reivindicacao) nunca existe num banco
-   recem-criado de desenvolvimento. Se houver qualquer linha nessas tabelas,
-   este e' um banco em uso e a limpeza abaixo seria uma perda de dados.
-
-   Deliberadamente NAO olhamos dbo.Usuario nem dbo.Produto: um dev pode ter
-   criado um usuario de teste ou importado o catalogo do Tiny, e travar por
-   causa disso tornaria a trava irritante o bastante para alguem remove-la.
-   ---------------------------------------------------------------------------- */
+-- Trava 2: qualquer pedido, fatura ou reivindicacao indica banco em uso.
 IF EXISTS (SELECT 1 FROM dbo.Pedido)
    OR EXISTS (SELECT 1 FROM dbo.Fatura)
    OR EXISTS (SELECT 1 FROM dbo.Reivindicacao)
@@ -436,11 +392,7 @@ INSERT INTO dbo.Entrega (NumeroEntrega, EmpresaId, DataEntrega, FaturaId) VALUES
 INSERT INTO dbo.RastreioEntrega (EntregaId, Codigo, Transportadora) VALUES ((SELECT EntregaId FROM dbo.Entrega WHERE NumeroEntrega=N'0050731002'), N'000521104', N'Transportadora Fullgas');
 INSERT INTO dbo.EntregaPedido (EntregaId, PedidoId) VALUES ((SELECT EntregaId FROM dbo.Entrega WHERE NumeroEntrega=N'0050731002'), (SELECT PedidoId FROM dbo.Pedido WHERE NumeroPedido=N'0005041100'));
 
-/* ===== Reivindicacoes (garantia) =====
-   Sem reivindicações de exemplo: o quadro de reivindicações é dinâmico e mostra
-   apenas os casos reais criados pelos clientes. Antes havia 6 registros de
-   demonstração presos a concessionárias "fantasma" (removidos — ver
-   migrations/025_remover_dados_demo_reivindicacoes.sql). */
+-- ===== Reivindicacoes: sem exemplos (o quadro mostra so casos reais) =====
 
 /* ===== Notificacoes (globais) ===== */
 INSERT INTO dbo.Notificacao (EmpresaId, Tipo, Titulo, Texto, Lida, DataEnvio) VALUES (NULL, N'critica', N'Campanha técnica FG 300 2026', N'Verificar torque dos parafusos da mesa superior nos chassis VBFGC309... antes da entrega ao cliente final.', 0, DATEADD(HOUR, -14, SYSUTCDATETIME()));
@@ -477,8 +429,6 @@ UNION ALL SELECT 'Reivindicacao', COUNT(*) FROM dbo.Reivindicacao
 UNION ALL SELECT 'Notificacao', COUNT(*) FROM dbo.Notificacao;
 GO
 
-/* Desliga o NOEXEC das travas do topo. Sem isto a sessao do sqlcmd continuaria
-   sem executar nada depois deste arquivo — e um script encadeado logo em
-   seguida falharia em silencio, parecendo ter rodado. */
+-- Desliga o NOEXEC das travas (senao a sessao segue sem executar nada).
 SET NOEXEC OFF;
 GO

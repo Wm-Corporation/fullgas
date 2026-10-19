@@ -1,6 +1,4 @@
-// Testes do filtro de upload. Esta é a barreira que impede um arquivo
-// executável no navegador (HTML, SVG com script) de ser gravado no servidor e
-// depois servido na mesma origem do portal.
+// Filtro de upload: impede HTML/SVG com script de ser gravado e servido no portal.
 import { describe, it, expect } from 'vitest';
 import { filtroImagem, filtroMidia, filtroAnexo, nomeArquivo, EXT_IMAGEM } from '../src/middlewares/upload-comum.js';
 
@@ -28,8 +26,7 @@ describe('filtroImagem', () => {
   });
 
   it('RECUSA html disfarcado de imagem no mimetype', () => {
-    // Era exatamente isto que o filtro antigo deixava passar: o mimetype
-    // dizia "image/png" e o OU aceitava, mesmo com extensao .html.
+    // Mimetype image/png com extensão .html não passa.
     expect(aceita(filtroImagem(), 'payload.html', 'image/png')).toBe(false);
   });
 

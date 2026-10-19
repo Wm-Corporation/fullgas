@@ -1,7 +1,6 @@
-// Lote 3 (30/09/2026): cadastro da concessionária no Tiny.
-//   E2  edição do portal que não chegou ao Tiny não é desfeita pelo cron —
-//       o cron re-tenta o envio;
-//   E3  o painel mostra só o problema ATUAL (último registro, e erro recente).
+// Cadastro no Tiny:
+//   E2  edição pendente não é desfeita pelo cron (ele reenvia)
+//   E3  o painel mostra só o problema atual
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
@@ -77,8 +76,7 @@ describe('E2 — edição do portal não é desfeita pelo cron', () => {
   it('com edição pendente, o cron ENVIA de novo e não traz o contato do Tiny', async () => {
     empresas = [{ ...EMP, TinyContatoAlterado: true }];
     await sincronizarContatosDoTiny();
-    // Lê o contato só para preservar a observação, e ENVIA — o último passo é
-    // o alterar; nada do Tiny é aplicado no cadastro local.
+    // Lê só para preservar a obs, e envia.
     expect(chamadas).toEqual(['obter:714643632', 'alterar:714643632']);
   });
 

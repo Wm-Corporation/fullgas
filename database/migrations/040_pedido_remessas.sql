@@ -1,34 +1,10 @@
 USE FullgasB2B;
 GO
 
--- ============================================================
--- 040 - Remessas: o pedido passa a ser exportado ao Tiny NO ENVIO.
---
--- Antes: o pedido ia inteiro ao Tiny na APROVACAO (ao sair de 'Pendente'),
--- e escolher a quantidade enviada de cada peca nao exportava nada.
--- Agora: o admin decide o que vai nesta remessa e confirma; so entao as
--- pecas daquela remessa viram um pedido no Tiny. Envio parcial deixa o
--- pedido em 'Parcial' e a fatura segue em aberto.
---
--- O que muda no banco:
---   1. Pedido.Status aceita 'Parcial'.
---   2. TinyPedidoExport.Escopo aceita 'remessa'.
---   3. PedidoItem.QuantidadeExportada: quanto de cada item JA foi para o
---      Tiny. A remessa exporta a diferenca para QuantidadeEnviada.
---
--- Pedidos ANTIGOS ja exportados na regra velha nao podem ir de novo (o
--- estoque do Tiny baixaria duas vezes): por isso o preenchimento do passo 4
--- marca os itens deles como ja exportados.
---
--- Idempotente (pode rodar em todo deploy). ASCII puro: "Em separacao" (com
--- cedilha e til) e montado com NCHAR, como na migration 028 - o sqlcmd do
--- deploy nao le UTF-8.
---
--- ATENCAO ao formato: cada passo fica em SEU PROPRIO LOTE (GO). O SQL Server
--- compila o lote inteiro antes de executar, entao usar a coluna nova no mesmo
--- lote do ALTER TABLE daria "Invalid column name" - e o deploy NAO para em
--- erro de SQL, o que esconderia a falha.
--- ============================================================
+-- 040 - Remessas: pedido vai ao Tiny no envio. Status 'Parcial', escopo 'remessa' e PedidoItem.QuantidadeExportada.
+-- Itens ja exportados na regra antiga sao marcados para nao ir de novo.
+-- Cada passo em seu proprio lote (GO): coluna nova no mesmo lote do ALTER falha, e o deploy nao para em erro.
+-- Idempotente. ASCII (NCHAR para acentos).
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 SET XACT_ABORT ON;
@@ -71,13 +47,9 @@ ELSE
 GO
 
 /* ---- 4. Quem JA foi ao Tiny -------------------------------------------- */
--- Lote proprio: a coluna do passo 3 so pode ser usada depois que o lote dela
--- termina. Roda sempre; o resultado e o mesmo em toda execucao (atribuicao
--- deterministica sobre dados que nao mudam), entao repetir nao estraga nada.
+-- Lote proprio (usa a coluna do passo 3). Repetir da o mesmo resultado.
 
--- 4a. Pedidos com exportacao 'normal' (regra antiga): o Tiny ja recebeu TODAS
--- as pecas em estoque desses pedidos. Marcar impede que uma remessa futura
--- mande a mesma peca de novo. Exportacao 'cancelado' nao conta - nada chegou la.
+-- 4a. Exportacao 'normal' ja levou todas as pecas em estoque (cancelada nao conta).
 UPDATE pi
    SET pi.QuantidadeExportada = pi.Quantidade
   FROM dbo.PedidoItem pi
@@ -88,8 +60,7 @@ UPDATE pi
                   AND e.Escopo = 'normal' AND e.Status <> 'cancelado');
 PRINT '040 [4/4]: itens de pedidos ja exportados marcados (regra antiga preservada).';
 
--- 4b. Pre-venda continua com fluxo proprio (escopo 'backorder', sufixo -PV):
--- o que ja foi liberado ja foi ao Tiny.
+-- 4b. Pre-venda liberada ja foi ao Tiny.
 UPDATE pi
    SET pi.QuantidadeExportada = pi.QuantidadeEnviada
   FROM dbo.PedidoItem pi

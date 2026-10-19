@@ -1,21 +1,6 @@
-/* ============================================================
-   Cria o PRIMEIRO administrador do portal.
-   ------------------------------------------------------------
-   Por que existe: em instalação limpa (banco criado só pelas migrações, sem
-   os seeds de demonstração) não há usuário nenhum. E o cadastro pela tela
-   nasce com Status='pendente', esperando aprovação de um admin — que também
-   não existe. Sem este script o portal fica trancado por fora.
-
-   Uso, dentro de api/ e com o .env já configurado:
-
-     node scripts/criar-admin.mjs "Nome do Admin" email@empresa.com.br "SenhaForte123"
-
-   A senha vem por argumento e NÃO fica gravada em lugar nenhum além do hash
-   bcrypt no banco. Depois de rodar, limpe o histórico do shell se quiser:
-     history -d $(history 1)
-
-   Rodar de novo com o mesmo e-mail apenas ATUALIZA a senha e reativa o acesso.
-   ============================================================ */
+// Cria o PRIMEIRO administrador (banco novo não tem nenhum). Rode dentro de api/, com o .env:
+//   node scripts/criar-admin.mjs "Nome do Admin" email@empresa.com.br "SenhaForte123"
+// Mesmo e-mail de novo: atualiza a senha e reativa.
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { query, getPool, sql } from '../src/db.js';
@@ -38,8 +23,7 @@ if (!/^\S+@\S+\.\S+$/.test(email)) {
 const EMPRESA = 'FULLGAS MOTOS';   // a matriz; o admin é pendurado nela
 
 try {
-  // A empresa é obrigatória (Usuario.EmpresaId é NOT NULL). Se a matriz ainda
-  // não existe — caso normal em banco novo — ela é criada aqui.
+  // A empresa é obrigatória; cria a matriz se não existir.
   let emp = (await query('SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial = @r', { r: EMPRESA }))[0];
   if (!emp) {
     emp = (await query(

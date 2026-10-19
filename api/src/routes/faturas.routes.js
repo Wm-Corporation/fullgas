@@ -1,23 +1,12 @@
-// ============================================================
-// Rotas de faturas — superfície da "Conta financeira".
-// Devolve apenas faturas reais de cobrança (Tipo 'Fatura'): a fatura do
-// pedido, com valor cheio = todas as peças. A antiga 'Nota de crédito' saiu
-// do fluxo (garantia aprovada vira pedido de garantia, não crédito) e não é
-// mais listada. A pré-venda NÃO é fatura — vive no rastreador (/api/prevenda).
-//
-// Cada fatura vem ENRIQUECIDA para o PDF detalhado do portal:
-//   - itens[]   linhas dos pedidos ligados (sku, nome, preço, qtd, subtotal)
-//   - pedidos[] números dos pedidos que a fatura cobre
-//   - empresa   razão social + cnpj + país + endereço principal (destinatário)
-// ============================================================
+// ---- Faturas (Conta financeira) ----
+// Só Tipo 'Fatura', com itens, pedidos e dados da empresa para o PDF.
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireArea } from '../auth.js';
 
 const router = Router();
 
-// Agrupa as linhas de pedido (PedidoItem) por FaturaId, para todas as faturas
-// da lista de uma vez (evita N+1). Devolve Map<FaturaId, item[]>.
+// Itens de todas as faturas de uma vez (evita N+1): Map<FaturaId, item[]>.
 async function itensPorFatura(faturaIds) {
   const map = new Map();
   if (!faturaIds.length) return map;
@@ -63,8 +52,7 @@ async function empresasPorId(empresaIds) {
   return map;
 }
 
-// GET /api/faturas — cliente vê as da própria empresa; admin vê todas.
-// Conta interna (sub-dealer) sem a área 'financeiro' recebe 403.
+// GET /api/faturas — cliente vê as da empresa; admin vê todas. Exige a área 'financeiro'.
 router.get('/faturas', requireAuth, requireArea('financeiro'), async (req, res, next) => {
   try {
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;

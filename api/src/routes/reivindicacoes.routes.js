@@ -1,11 +1,6 @@
-// ============================================================
-// Rotas de reivindicações (garantia) — versão expandida (Frente 2).
-// Cliente vê/abre apenas as da própria empresa; admin vê todas, muda status e
-// pode DEVOLVER ao revendedor (com o que falta). Rascunhos ("Esboço") NÃO ficam
-// no banco — vivem no navegador do cliente; o POST só cria reivindicações
-// enviadas ("Em processo"), com todos os campos obrigatórios.
-// Campos: data do ocorrido, duração (horas/km), peças (com quantidade) e fotos.
-// ============================================================
+// ---- Reivindicações (garantia) ----
+// Cliente vê/abre as da empresa; admin vê todas, muda status e pode devolver.
+// Rascunhos ficam no navegador; o POST só recebe reivindicação completa.
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'node:path';
@@ -30,8 +25,7 @@ const STATUS_TERMINAIS = ['Aprovada', 'Recusada'];
 // Mínimo de fotos/vídeos para APROVAR qualquer garantia (30/09/2026).
 export const FOTOS_MINIMAS = 3;
 const TIPOS_VALIDOS = ['Manufacturer', 'Implícito'];
-// Prazo da garantia do VEÍCULO (90 dias a partir da venda): GARANTIA_DIAS e
-// fimDaGarantia em utils/garantia.js, compartilhados com a ficha do veículo.
+// Prazo da garantia: utils/garantia.js.
 
 // ---- Upload de fotos (multer → disco) -----------------------------------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -39,15 +33,9 @@ const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'reivindicacoes')
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const URL_BASE = '/uploads/reivindicacoes/';
 
-// Antes eram 200 MB por arquivo — número que nunca valeu na prática: o Nginx
-// da produção corta o corpo em 64 MB, então o revendedor levava um 413 seco do
-// servidor em vez de uma mensagem explicando. 60 MB alinha os dois e ainda
-// limita o estrago de um envio abusivo (5 arquivos = 300 MB no pior caso).
+// Abaixo do limite do Nginx (64 MB).
 const LIMITE_BYTES = 60 * 1024 * 1024;
-// Fotos/vídeos por envio (veículo e varejo). Eram 10; 5 bastam para mostrar a
-// peça, e é o mesmo teto do formulário (MAX_MIDIA em frontend/js/portal.js).
-// Vale por envio: se a reivindicação for devolvida pedindo mais imagens, o
-// reenvio pode trazer outras 5.
+// Por envio; igual ao MAX_MIDIA do portal.js.
 const MAX_ANEXOS_POR_ENVIO = 5;
 
 const storage = multer.diskStorage({
@@ -91,8 +79,7 @@ function urlAbs(req, rel) {
   return req.protocol + '://' + req.get('host') + rel;
 }
 
-// Normaliza/valida o array de peças. Cada item: { sku, quantidade }. Mescla
-// SKUs repetidos somando a quantidade.
+// Valida as peças ({ sku, quantidade }); SKU repetido soma.
 function lerPecas(body) {
   const bruto = Array.isArray(body?.pecas) ? body.pecas
     : (body?.numeroPeca ? [{ sku: body.numeroPeca, quantidade: 1 }] : []);
@@ -107,10 +94,7 @@ function lerPecas(body) {
   return { pecas: Array.from(mapa, ([sku, quantidade]) => ({ sku, quantidade })) };
 }
 
-// Valida o corpo de criação/edição. Todos os campos são obrigatórios (rascunho
-// incompleto não chega aqui — fica no navegador). Devolve { dados } ou { erro }.
-// opts.comTipo=false (edição) NÃO valida/retorna o tipo — o tipo é imutável
-// após o 1º envio e permanece o original no banco.
+// Valida o corpo: { dados } ou { erro }. Na edição (comTipo=false) o tipo não muda.
 function parseReiv(body, opts) {
   const comTipo = !opts || opts.comTipo !== false;
   const tipo = String(body?.tipo || '').trim();
@@ -152,34 +136,15 @@ async function resolverPecas(tx, pecas) {
   return { pecasResolvidas };
 }
 
-/* ------------------------------------------------------------------
-   GARANTIA DE PRÉ-ENTREGA
-   ------------------------------------------------------------------
-   O defeito achado na inspeção que antecede a entrega, com a moto ainda no
-   estoque. As regras são o espelho da garantia comum:
-
-     comum      → exige venda registrada (é ela que ativa a garantia)
-     pré-entrega→ exige que a venda NÃO tenha sido registrada
-
-   Duas condições a mais, que a garantia comum não tem:
-
-   • O chassi precisa ser DA EMPRESA que abre. "Pré-entrega" quer dizer "está
-     no meu estoque, eu inspecionei" — reclamar da moto que está no pátio de
-     outro revendedor não faria sentido. (O administrador é exceção: ele abre
-     em nome de qualquer concessionária, como faz no resto do painel.)
-
-   • Não há prazo a verificar. O relógio dos 90 dias começa na entrega ao
-     consumidor; enquanto a moto está no estoque ele nem partiu. E abrir esta
-     reivindicação NÃO ativa a garantia: se ativasse, o prazo do comprador
-     começaria a correr antes de ele receber a moto.
-   ------------------------------------------------------------------ */
+// ---- Garantia de pré-entrega ----
+// Defeito achado na inspeção antes da venda: exige chassi da empresa e venda NÃO registrada.
+// Sem prazo, e não ativa a garantia.
 async function resolverVeicPreEntrega(tx, niv, pecas, user) {
   const veic = await new sql.Request(tx).input('niv', sql.VarChar(30), niv)
     .query(`SELECT VeiculoId, VendaData, Status, EmpresaId
               FROM dbo.Veiculo WHERE Niv = @niv`);
   const v = veic.recordset[0];
-  // Chassi de outra concessionária responde IGUAL a chassi inexistente: a
-  // mensagem diferente deixava descobrir quais NIVs existem na rede.
+  // Chassi de outra empresa responde igual a inexistente.
   if (!v || !chassiDaEmpresa(v, user)) return { erro: erroChassiNaoEncontrado(niv) };
 
   if (v.VendaData || v.Status === 'Vendido')
@@ -200,13 +165,7 @@ function erroChassiNaoEncontrado(niv) {
   return 'Veículo não encontrado no estoque da sua concessionária: ' + niv;
 }
 
-// Resolve o veículo (NIV) e valida cada peça no catálogo (dentro de uma tx).
-// Aplica o prazo de garantia: 90 dias a partir de GarantiaAtivaEm. Sem garantia
-// ativada, ou com o prazo vencido, a abertura é barrada.
-//
-// O chassi precisa ser DA EMPRESA que abre (achado de 30/09/2026): antes
-// qualquer concessionária que soubesse o NIV de uma moto de outra abria
-// garantia nela — e, aprovada, recebia as peças. A pré-entrega já conferia.
+// Resolve o chassi (precisa ser da empresa) e valida as peças. Exige garantia ativa e no prazo.
 async function resolverVeicPecas(tx, niv, pecas, user) {
   const veic = await new sql.Request(tx).input('niv', sql.VarChar(30), niv)
     .query('SELECT VeiculoId, GarantiaAtivaEm, EmpresaId FROM dbo.Veiculo WHERE Niv = @niv');
@@ -222,9 +181,7 @@ async function resolverVeicPecas(tx, niv, pecas, user) {
   return { veiculoId: VeiculoId, pecasResolvidas };
 }
 
-// Varejo: valida o corpo (número do pedido, descrição e peças). Sem NIV/data/
-// horas/km — esses campos não se aplicam à garantia de peça. Devolve { dados }
-// ou { erro }.
+// Varejo: valida pedido, descrição e peças. { dados } ou { erro }.
 function parseReivVarejo(body) {
   const numeroPedido = String(body?.numeroPedido || '').trim();
   const descricao = String(body?.descricao || '').trim();
@@ -236,18 +193,9 @@ function parseReivVarejo(body) {
   return { dados: { numeroPedido, descricao, pecas } };
 }
 
-// Resolve o pedido (dentro do escopo da empresa) e valida que CADA peça está
-// entre os itens daquele pedido. Pedidos de garantia (reposição) não abrem nova
-// garantia. Devolve o PedidoId e as peças com o nome do snapshot do item.
-//
-// Regras de 30/09/2026 (antes nenhuma existia — dava para reclamar peça de
-// pedido que nem tinha saído, de pedido cancelado, e reclamar as mesmas peças
-// quantas vezes quisesse):
-//   • pedido CANCELADO não abre garantia;
-//   • o teto de cada peça é a quantidade ENVIADA, menos o que já está em
-//     outras reivindicações do mesmo pedido (exceto as recusadas).
-// `reivIdAtual`: na edição/reenvio, a própria reivindicação não conta contra
-// ela mesma.
+// Resolve o pedido da empresa e valida as peças contra os itens dele.
+// Regras: pedido cancelado ou de garantia não abre; teto = quantidade enviada menos outras reivindicações.
+// `reivIdAtual`: na edição, a própria não conta.
 async function resolverPedidoPecas(tx, numeroPedido, user, pecas, reivIdAtual = null) {
   const eid = user.papel === 'admin' ? null : user.empresaId;
   const ped = await new sql.Request(tx)
@@ -357,8 +305,7 @@ function montar(r, extras, req) {
     tipo: r.Tipo,
     origem: r.Origem || 'veiculo',
     numeroPedido: r.NumeroPedido || '',
-    // Status do pedido de origem (varejo): o admin precisa ver, ao decidir,
-    // se o pedido foi cancelado depois da abertura (decisão de 30/09/2026).
+    // Status do pedido de origem, para o admin decidir.
     pedidoStatus: r.PedidoStatus || null,
     niv: r.Niv || '',
     status: r.Status,
@@ -418,17 +365,12 @@ router.get('/reivindicacoes/:numero', requireAuth, requireArea('reivindicacoes')
   } catch (e) { next(e); }
 });
 
-// POST /api/reivindicacoes — cria (sempre "Em processo", tudo obrigatório).
-// origem='varejo' abre garantia de peça de um PEDIDO (sem NIV/prazo); o padrão
-// 'veiculo' mantém o fluxo por NIV, agora com o prazo de 90 dias.
+// POST /api/reivindicacoes — cria ("Em processo"). origem: 'veiculo' (padrão, por NIV) ou 'varejo' (por pedido).
 router.post('/reivindicacoes', requireAuth, requireArea('reivindicacoes'), async (req, res, next) => {
   const origem = String(req.body?.origem || '').trim();
   const varejo = origem === 'varejo';
   const preEntrega = origem === 'preentrega';
-  // Pré-entrega não tem Tipo a escolher: o defeito visto na inspeção de uma
-  // moto zero é, por definição, de fábrica ou de transporte. Forçamos
-  // 'Manufacturer' para satisfazer a coluna NOT NULL sem pedir ao cliente uma
-  // classificação que ele não teria como fazer.
+  // Pré-entrega não escolhe Tipo: grava 'Manufacturer'.
   const { dados, erro } = varejo
     ? parseReivVarejo(req.body)
     : parseReiv(preEntrega ? { ...req.body, tipo: 'Manufacturer' } : req.body);
@@ -464,8 +406,7 @@ router.post('/reivindicacoes', requireAuth, requireArea('reivindicacoes'), async
       .input('vid', sql.Int, varejo ? null : rv.veiculoId)
       .input('pid', sql.Int, varejo ? rv.pedidoId : null)
       .input('origem', sql.VarChar(10), varejo ? 'varejo' : preEntrega ? 'preentrega' : 'veiculo')
-      // Varejo e pré-entrega não têm "Tipo" de garantia a escolher: gravam o
-      // padrão aceito pelo CHECK só para satisfazer a coluna NOT NULL.
+      // Varejo e pré-entrega gravam o Tipo padrão (coluna NOT NULL).
       .input('tipo', sql.VarChar(16), varejo ? 'Manufacturer' : dados.tipo)
       .input('desc', sql.NVarChar(1000), dados.descricao)
       .input('peca', sql.VarChar(40), rv.pecasResolvidas[0]?.sku || null)
@@ -491,9 +432,7 @@ router.post('/reivindicacoes', requireAuth, requireArea('reivindicacoes'), async
       });
     }
 
-    // Reivindicação de VEÍCULO entra no histórico do chassi. A de varejo é
-    // sobre uma peça de pedido, sem chassi a que se ligar. Fica FORA da
-    // transação de propósito: o histórico não pode desfazer uma abertura.
+    // Garantia de veículo entra no histórico do chassi (fora da transação).
     if (!varejo && rv.veiculoId) {
       await registrarEvento({
         veiculoId: rv.veiculoId, tipo: 'reivindicacao',
@@ -511,9 +450,7 @@ router.post('/reivindicacoes', requireAuth, requireArea('reivindicacoes'), async
   }
 });
 
-// PUT /api/reivindicacoes/:numero — edita/reenvia (cliente da própria empresa ou
-// admin). Usado quando a reivindicação foi DEVOLVIDA: o revendedor completa e
-// reenvia, o que limpa o estado "devolvido". Bloqueado se já estiver terminal.
+// PUT /api/reivindicacoes/:numero — edita/reenvia uma reivindicação devolvida.
 router.put('/reivindicacoes/:numero', requireAuth, requireArea('reivindicacoes'), async (req, res, next) => {
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
@@ -533,9 +470,7 @@ router.put('/reivindicacoes/:numero', requireAuth, requireArea('reivindicacoes')
     const reivId = cur.recordset[0].ReivindicacaoId;
     // Reenvio em resposta a uma devolução → sinaliza ao admin que foi atualizada.
     const reenviada = cur.recordset[0].Devolvido ? 1 : 0;
-    // A ORIGEM não vem do corpo: é a que está gravada. Aceitá-la do cliente
-    // deixaria uma garantia comum virar pré-entrega no reenvio, contornando a
-    // regra de "sem venda registrada" que vale na abertura.
+    // A origem vem do banco, nunca do corpo.
     const varejo = cur.recordset[0].Origem === 'varejo';
     const preEntrega = cur.recordset[0].Origem === 'preentrega';
 
@@ -622,19 +557,9 @@ router.post('/reivindicacoes/:numero/anexos', requireAuth, requireArea('reivindi
   } catch (e) { limparArquivos(files); next(e); }
 });
 
-// ---- Pedido de garantia (reposição) ----------------------------------------
-// Reivindicação APROVADA não desconta mais da fatura do cliente (o modelo de
-// nota de crédito foi aposentado): a aprovação cria um PEDIDO DE GARANTIA —
-// as peças reclamadas, com preço R$ 0 e SEM fatura — que segue o fluxo normal
-// de pedidos: aparece na área de pedidos (pill "Garantia"), nasce 'Aprovado'
-// e vai ao Tiny UMA vez (baixa o estoque lá) e, se faltar estoque, o item entra
-// em pré-venda e sai pelo rastreador quando repor. Roda dentro da transação da
-// aprovação.
-//
-// Os itens com estoque já nascem com QuantidadeExportada = Quantidade e o
-// snapshot vai em ItensJson. Antes de 30/09/2026 nenhum dos dois acontecia: o
-// envio posterior (remessa) mandava as MESMAS peças ao Tiny de novo e o
-// estoque de lá baixava duas vezes.
+// ---- Pedido de garantia (reposição) ----
+// Aprovar cria um pedido com as peças a R$ 0, sem fatura, que vai ao Tiny uma vez.
+// Sem estoque, o item vira pré-venda. Itens com estoque já nascem exportados.
 async function criarPedidoGarantia(tx, reiv) {
   const pecas = (await new sql.Request(tx).input('rid', sql.Int, reiv.ReivindicacaoId)
     .query('SELECT Sku, NomeProduto, Quantidade FROM dbo.ReivindicacaoPeca WHERE ReivindicacaoId = @rid')).recordset;
@@ -655,10 +580,9 @@ async function criarPedidoGarantia(tx, reiv) {
             VALUES (@num, @uid, @eid, @data, N'Aprovado', 0, 'garantia')`);
   const pedidoId = insPed.recordset[0].PedidoId;
 
-  const exportar = [];   // snapshot das peças com estoque (vão ao Tiny agora)
+  const exportar = [];   // peças com estoque (vão ao Tiny agora)
   for (const p of pecas) {
-    // Baixa atômica. Sem estoque, o item entra em PRÉ-VENDA mesmo sem previsão
-    // de chegada — garantia aprovada não é recusada por falta de estoque.
+    // Sem estoque vira pré-venda: garantia aprovada não é recusada.
     const dec = await new sql.Request(tx)
       .input('sku', sql.VarChar(40), p.Sku).input('qtd', sql.Int, p.Quantidade)
       .query(`UPDATE dbo.Produto SET Estoque = Estoque - @qtd, AtualizadoEm = SYSUTCDATETIME()
@@ -684,24 +608,18 @@ async function criarPedidoGarantia(tx, reiv) {
               VALUES (@pid, @prod, @sku, @nome, 0, @qtd, @back, @exp)`);
   }
 
-  // Sem fatura (garantia não cobra). Exporta ao Tiny o que tem estoque; a
-  // pré-venda vira exportação própria quando o admin liberar.
+  // Sem fatura. Exporta ao Tiny o que tem estoque.
   if (exportacaoLigada() && exportar.length) await inserirExportacao(tx, pedidoId, 'normal', exportar);
   return NumeroPedido;
 }
 
-// PUT /api/reivindicacoes/:numero/status (admin) — muda o status.
-// Terminais (Aprovada/Recusada) não voltam a mudar. Ao APROVAR, cria o pedido
-// de garantia (ver criarPedidoGarantia) — não há mais nota de crédito.
+// PUT /api/reivindicacoes/:numero/status (admin) — Aprovada/Recusada são finais. Aprovar cria o pedido de garantia.
 router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (req, res, next) => {
   const status = String(req.body?.status || '').trim();
   if (!STATUS_VALIDOS.includes(status))
     return res.status(400).json({ erro: 'Status inválido.' });
 
-  // Toda garantia precisa de no mínimo 3 fotos/vídeos para ser APROVADA
-  // (decisão de 30/09/2026 — varejo, moto e pré-entrega). As fotos sobem
-  // depois da abertura, então a trava fica aqui, na aprovação: sem elas o
-  // admin devolve ao revendedor pedindo o que falta.
+  // Aprovar exige no mínimo 3 fotos/vídeos.
   if (status === 'Aprovada') {
     const nFotos = (await query(
       `SELECT COUNT(*) AS n FROM dbo.ReivindicacaoAnexo a
@@ -714,8 +632,7 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
       });
   }
 
-  // Aprovação mexe em estoque: atualiza o espelho local com o saldo real do
-  // Tiny antes (mesma checagem do checkout). Falha não bloqueia a aprovação.
+  // Atualiza o estoque com o saldo do Tiny antes (falha não bloqueia).
   if (status === 'Aprovada') {
     try {
       const skus = await query(
@@ -742,8 +659,7 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
     let valorGarantia = null;
     let pedidoGarantia = null;
     if (status === 'Aprovada') {
-      // Valor informativo (Σ preço × qtd das peças) — fica no registro da
-      // reivindicação; o cliente NÃO é mais creditado por ele.
+      // Valor só informativo (não gera crédito).
       const val = await new sql.Request(tx).input('rid', sql.Int, reiv.ReivindicacaoId)
         .query(`SELECT ISNULL(SUM(rp.Quantidade * pr.Preco), 0) AS Total
                   FROM dbo.ReivindicacaoPeca rp
@@ -752,8 +668,7 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
       valorGarantia = Number(val.recordset[0].Total) || 0;
       pedidoGarantia = await criarPedidoGarantia(tx, reiv);
 
-      // Varejo: registra no PEDIDO ORIGINAL quais peças tiveram garantia
-      // aprovada (grava o nº da reivindicação em cada item reclamado).
+      // Varejo: marca no pedido original as peças com garantia aprovada.
       if (reiv.Origem === 'varejo' && reiv.PedidoId) {
         await new sql.Request(tx)
           .input('num', sql.VarChar(20), reiv.Numero)
@@ -795,8 +710,7 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
       });
     }
 
-    // O desfecho da garantia é o que mais importa no histórico do chassi:
-    // é ele que conta se aquele defeito foi coberto ou não.
+    // Desfecho vai para o histórico do chassi.
     if (reiv.VeiculoId) {
       await registrarEvento({
         veiculoId: reiv.VeiculoId, tipo: 'reivindicacao',
@@ -818,8 +732,7 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
   }
 });
 
-// PUT /api/reivindicacoes/:numero/devolver (admin) — devolve ao revendedor,
-// marcando Devolvido=1 e gravando o que falta (obrigatório).
+// PUT /api/reivindicacoes/:numero/devolver (admin) — devolve ao revendedor com o que falta.
 router.put('/reivindicacoes/:numero/devolver', requireAuth, requireAdmin, async (req, res, next) => {
   const falta = String(req.body?.faltaInformacao || '').trim();
   if (!falta) return res.status(400).json({ erro: 'Descreva o que falta antes de devolver.' });
