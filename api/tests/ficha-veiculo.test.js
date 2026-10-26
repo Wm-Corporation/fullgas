@@ -69,6 +69,13 @@ describe('ficha do veículo — GET /api/veiculos/:niv', () => {
     expect(r.body.miniatura).toBeNull();
   });
 
+  it('devolve o nome do modelo sem ano e o ano da unidade separado do ano do modelo', async () => {
+    responder = () => [linha({ Ano: 2028, ModeloAno: 2027 })];
+    const r = await request(app()).get('/api/veiculos/VBKGAM231TM245234');
+    expect(r.body.modeloNome).toBe('MC 250');
+    expect(r.body.ano).toBe(2028);
+  });
+
   it('mostra a concessionária com o endereço principal montado', async () => {
     responder = () => [linha()];
     const r = await request(app()).get('/api/veiculos/VBKGAM231TM245234');
