@@ -181,15 +181,21 @@ app.use((req, res) => {
 });
 
 // Tratador central de erros
+const ERROS_DE_CORPO = {
+  'entity.parse.failed': [400, 'JSON inválido no corpo da requisição.'],
+  'entity.too.large': [413, 'Conteúdo grande demais.'],
+  'encoding.unsupported': [415, 'Codificação do corpo não suportada.'],
+  'charset.unsupported': [415, 'Charset do corpo não suportado.'],
+  'request.size.invalid': [400, 'Tamanho do corpo inválido.']
+};
 app.use((err, _req, res, _next) => {
   // AppError (marca `publica`) pode ir ao cliente; qualquer outro erro vira 500 genérico.
   if (err && err.publica) {
     return res.status(err.status || 400).json({ erro: err.message });
   }
-  // Corpo acima do limite do express.json(): erro do cliente (413), não 500.
-  if (err && err.type === 'entity.too.large') {
-    return res.status(413).json({ erro: 'Conteúdo grande demais.' });
-  }
+  // Corpo recusado pelo express.json(): erro do cliente (4xx), não 500.
+  const doCorpo = err && ERROS_DE_CORPO[err.type];
+  if (doCorpo) return res.status(doCorpo[0]).json({ erro: doCorpo[1] });
   console.error('ERRO:', err.message);
   res.status(500).json({ erro: 'Erro interno do servidor.' });
 });
