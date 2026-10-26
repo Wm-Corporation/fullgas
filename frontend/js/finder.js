@@ -301,22 +301,15 @@
       var outro = s.lado === 'chassi' ? 'engine' : 'chassi';
 
 
-      // Verde = em estoque, amarelo = pré-venda, vermelho = indisponível (quantidade trava).
-      function statusPeca(p) {
-        if (p.estoque > 0) return '<span class="pt-status ok">● Em estoque</span>';
-        if (p.previsao) return '<span class="pt-status pre">● Pré-venda · ' + esc(p.previsao) + '</span>';
-        return '<span class="pt-status out">● Indisponível</span>';
-      }
+      // Bolinha pela quantidade (FG.nivelEstoque). Sem estoque a peça ainda é pedida: vira black order.
+      function statusPeca(p) { return '<span class="pt-status">' + FG.seloEstoque(p) + '</span>'; }
 
       var linhas = s.pecas.map(function (p, i) {
         // Número = "nº na imagem" do admin (liga a peça ao diagrama); "—" se não houver.
         var num = (p.numeroImagem === null || p.numeroImagem === undefined || p.numeroImagem === '')
           ? '—' : String(p.numeroImagem);
         var marcada = p.quantidadePadrao > 0;
-        var indisp = !(p.estoque > 0) && !p.previsao;
-        // Em estoque: limitado ao saldo. Pré-venda não limita.
-        var max = p.estoque > 0 ? p.estoque : null;
-        var vIni = indisp ? 0 : (max ? Math.min(p.quantidadePadrao, max) : p.quantidadePadrao);
+        var vIni = p.quantidadePadrao;
         // Ver a peça na loja abre em NOVA aba: o cliente não perde o finder.
         var link = '/loja#/produto/' + encodeURIComponent(p.sku);
         // Texto da busca, montado uma vez.
@@ -340,9 +333,8 @@
             '<span class="pr-acao">' +
               '<label class="pr-sel"><input type="checkbox" class="pr-chk" data-row="' + i + '"' +
                 (marcada ? ' checked' : '') + '> Selecionar</label>' +
-              '<input class="qn" type="number" min="0"' + (max ? ' max="' + max + '"' : '') + ' value="' + vIni + '"' +
-              ' aria-label="Quantidade" data-art="' + esc(p.sku) + '"' +
-              (indisp ? ' disabled title="Peça indisponível para compra"' : '') + '>' +
+              '<input class="qn" type="number" min="0" step="1" value="' + vIni + '"' +
+              ' aria-label="Quantidade" data-art="' + esc(p.sku) + '">' +
             '</span>' +
           '</div>' +
           '</div>';
@@ -425,9 +417,9 @@
         });
       });
 
-      /* adiciona as marcadas à cesta, sem passar do estoque (conta o que já está na cesta) */
+      /* adiciona as marcadas à cesta; o que passar do estoque vira black order no pedido */
       document.getElementById('fa-cart').addEventListener('click', function () {
-        var add = 0, recusadas = 0, ajustadas = 0;
+        var add = 0, recusadas = 0, ajustadas = 0, black = 0;
         Array.prototype.forEach.call(fdView.querySelectorAll('.part-row.sel .qn'), function (qn) {
           var qtd = Math.max(0, Number(qn.value) || 0);
           if (qtd <= 0) return;
@@ -438,13 +430,15 @@
           var cabia = Math.max(0, Math.min(qtd, lim - ja));
           if (cabia < qtd) ajustadas++;
           add += cabia;
+          if (FG.divisaoCesta(art, ja + cabia).black > 0) black++;
         });
         if (add) FG.toast(add + ' item(ns) enviados à cesta da loja.' +
-          (ajustadas ? ' ' + ajustadas + ' ajustado(s) ao estoque disponível.' : '') +
+          (black ? ' ' + black + ' peça(s) sem estoque suficiente: o que faltar entra em black order.' : '') +
+          (ajustadas ? ' ' + ajustadas + ' ajustado(s) ao máximo por item.' : '') +
           (recusadas ? ' ' + recusadas + ' indisponível(is).' : ''),
           (ajustadas || recusadas) ? 'erro' : undefined);
-        else if (ajustadas) FG.toast('A cesta já tem todo o estoque disponível dessa(s) peça(s).', 'erro');
-        else if (recusadas) FG.toast('Peça(s) indisponível(is) no momento — sem estoque e sem previsão.', 'erro');
+        else if (ajustadas) FG.toast('A cesta já tem a quantidade máxima dessa(s) peça(s).', 'erro');
+        else if (recusadas) FG.toast('Peça(s) fora do catálogo da loja.', 'erro');
         else FG.toast('Marque ao menos uma peça com quantidade.');
         refreshCart();
       });

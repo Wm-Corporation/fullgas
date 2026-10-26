@@ -82,8 +82,9 @@ function toNotif(req, r) {
     anexoTipo: r.AnexoTipo || null,
     empresaId: r.EmpresaId || null,
     empresa: r.EmpresaNome || null,                // null = todas
-    origem: r.Origem || 'admin',                   // 'admin' (à mão) | 'suporte'
-    chamadoId: r.ChamadoId || null                 // preenchido: veio de um chamado
+    origem: r.Origem || 'admin',                   // 'admin' (à mão) | 'suporte' | 'blackorder'
+    chamadoId: r.ChamadoId || null,                // preenchido: veio de um chamado
+    link: r.Link || null                           // rota do portal (ex.: carrinho da black order)
   };
 }
 
@@ -112,7 +113,7 @@ router.get('/notificacoes', requireAuth, async (req, res, next) => {
   try {
     const rows = await query(
       `SELECT n.NotificacaoId, n.EmpresaId, n.Titulo, n.Texto, n.Tipo,
-              n.AnexoUrl, n.AnexoTipo, n.CriadoEm, n.Origem, n.ChamadoId,
+              n.AnexoUrl, n.AnexoTipo, n.CriadoEm, n.Origem, n.ChamadoId, n.Link,
               e.RazaoSocial AS EmpresaNome, l.LidaEm
          FROM dbo.Notificacao n
          LEFT JOIN dbo.Empresa e ON e.EmpresaId = n.EmpresaId

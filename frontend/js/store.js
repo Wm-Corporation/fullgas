@@ -410,16 +410,31 @@
     /* ---- carrinho ---- */
     cart: function () { return read(CART_KEY, []); },
     cartCount: function () { return FG.cart().reduce(function (n, i) { return n + i.qtd; }, 0); },
-    // Indisponível = sem estoque e sem previsão.
-    compravel: function (artigo) {
+    // Qualquer peça pode ser comprada: o que faltar no estoque vira black order.
+    compravel: function (artigo) { return !!FG.product(artigo); },
+    // Mesmo teto da API (QTD_MAX), só contra número digitado por engano.
+    limiteCompra: function () { return 100000; },
+    // Divisão de uma linha da cesta: { envio: sai agora (cobrado), black: vira black order }.
+    divisaoCesta: function (artigo, qtd) {
       var p = FG.product(artigo);
-      if (!p) return false;
-      return p.estoque > 0 || !!p.previsao;
+      var envio = Math.min(qtd, Math.max(0, (p && p.estoque) || 0));
+      return { envio: envio, black: qtd - envio };
     },
-    // Máximo comprável: o estoque; pré-venda não limita.
-    limiteCompra: function (artigo) {
-      var p = FG.product(artigo);
-      return (p && p.estoque > 0) ? p.estoque : Infinity;
+    // Bolinha do estoque: > 20 verde; 10 a 20 amarela; < 10 vermelha; 0 = black order.
+    nivelEstoque: function (p) {
+      var e = Math.max(0, Number(p && p.estoque) || 0);
+      if (e > 20) return { cls: 'verde', txt: 'Em estoque' };
+      if (e >= 10) return { cls: 'amarela', txt: 'Estoque baixo' };
+      if (e > 0) return { cls: 'vermelha', txt: 'Últimas unidades' };
+      return { cls: 'vermelha', txt: 'Black order', black: true };
+    },
+    // HTML da bolinha + texto (loja, Localizador, admin). Sem estoque, mostra a previsão se houver.
+    seloEstoque: function (p) {
+      var n = FG.nivelEstoque(p);
+      return '<span class="nivel-est ' + n.cls + '" title="' + esc(n.black
+        ? 'Sem estoque: o que você pedir entra em black order (sem cobrança agora)'
+        : n.txt) + '"><i class="nivel-dot"></i>' + esc(n.txt) +
+        (n.black && p && p.previsao ? ' <small>· previsão ' + esc(p.previsao) + '</small>' : '') + '</span>';
     },
     cartAdd: function (artigo, qtd) {
       var p = FG.product(artigo); if (!p) return false;
@@ -443,6 +458,12 @@
     cartTotal: function () {
       return FG.cart().reduce(function (t, i) {
         var p = FG.product(i.artigo); return t + (p ? p.preco * i.qtd : 0);
+      }, 0);
+    },
+    // Só o que sai agora (o que a fatura cobra); a black order não entra.
+    cartTotalEnvio: function () {
+      return FG.cart().reduce(function (t, i) {
+        var p = FG.product(i.artigo); return t + (p ? p.preco * FG.divisaoCesta(i.artigo, i.qtd).envio : 0);
       }, 0);
     },
 

@@ -10,6 +10,7 @@ import {
 } from '../tiny-pedidos.js';
 import { registrarEventoPedido, historicoDoPedido, resumoPecas } from '../historico-pedido.js';
 import { listaDaEmpresa, aplicarPercentual } from '../lista-preco.js';
+import { criarBlackOrders } from '../black-order.js';
 
 const router = Router();
 
@@ -19,6 +20,8 @@ const STATUS_VALIDOS = ['Pendente', 'Aprovado', 'Enviado', 'Entregue', 'Cancelad
 const STATUS_FINAIS = ['Entregue', 'Cancelado'];
 // Escopos de envio aceitos.
 const ESCOPOS = ['normal', 'backorder', 'tudo'];
+// Teto por linha da cesta (evita número absurdo digitado por engano).
+const QTD_MAX = 100000;
 
 function toIso(d) {
   return d instanceof Date ? d.toISOString() : (d || null);
@@ -42,7 +45,7 @@ function montarItem(r) {
 }
 
 // Valores só para quem tem a área 'financeiro' (ou admin, gestor, acesso total).
-function podeVerFinanceiro(u) {
+export function podeVerFinanceiro(u) {
   return u.papel === 'admin' || u.gestor || !Array.isArray(u.perm) || u.perm.includes('financeiro');
 }
 
@@ -56,7 +59,8 @@ function semValores(pedido) {
 }
 
 // Lista de pedidos no formato do store.js + progresso de envio por pedido.
-function montarPedidos(pedidoRows, itemRows) {
+// boGeradas: Map<PedidoId, { n, pecas }>; daBlackOrder: Set<PedidoId> (comprados pelo carrinho da black order).
+function montarPedidos(pedidoRows, itemRows, boGeradas = new Map(), daBlackOrder = new Set()) {
   const porPedido = new Map();
   for (const r of itemRows) {
     if (!porPedido.has(r.PedidoId)) porPedido.set(r.PedidoId, []);
@@ -81,7 +85,9 @@ function montarPedidos(pedidoRows, itemRows) {
         pct: somaQtd ? Math.round((somaEnv / somaQtd) * 100) : 0,
         parcial: somaEnv > 0 && somaEnv < somaQtd
       },
-      temBackorder: itens.some(i => i.backorder)
+      temBackorder: itens.some(i => i.backorder),
+      blackOrders: boGeradas.get(p.PedidoId) || null,
+      daBlackOrder: daBlackOrder.has(p.PedidoId)
     };
   });
 }
@@ -98,7 +104,7 @@ const SELECT_ITENS =
           pi.Quantidade, pi.QuantidadeEnviada, pi.QuantidadeExportada,
           pi.EmBackorder, pi.GarantiaNumero`;
 
-// Fatura única do pedido, com valor cheio (inclui pré-venda).
+// Fatura do pedido. Pedidos antigos com pré-venda (EmBackorder) foram faturados cheios.
 async function gerarFaturaPedido(tx, pedidoId, empresaId, total) {
   const fat = await new sql.Request(tx)
     .input('eid', sql.Int, empresaId)
@@ -205,7 +211,23 @@ router.get('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async (
          ORDER BY pi.PedidoItemId`,
       { eid }
     );
-    const pedidos = montarPedidos(pedidoRows, itemRows);
+    const boRows = await query(
+      `SELECT PedidoId, COUNT(*) AS n, SUM(Quantidade) AS pecas
+         FROM dbo.BlackOrder
+        WHERE PedidoId IS NOT NULL AND (@eid IS NULL OR EmpresaId = @eid)
+        GROUP BY PedidoId`,
+      { eid }
+    );
+    const atendRows = await query(
+      `SELECT DISTINCT a.PedidoId
+         FROM dbo.BlackOrderAtendimento a
+         JOIN dbo.BlackOrder bo ON bo.BlackOrderId = a.BlackOrderId
+        WHERE (@eid IS NULL OR bo.EmpresaId = @eid)`,
+      { eid }
+    );
+    const pedidos = montarPedidos(pedidoRows, itemRows,
+      new Map(boRows.map(r => [r.PedidoId, { n: r.n, pecas: r.pecas }])),
+      new Set(atendRows.map(r => r.PedidoId)));
     res.json(podeVerFinanceiro(req.user) ? pedidos : pedidos.map(semValores));
   } catch (e) { next(e); }
 });
@@ -273,6 +295,29 @@ router.get('/pedidos/:numero', requireAuth, requireAreaAny(['loja', 'pedidos']),
       },
       temBackorder: itens.some(i => i.backorder)
     };
+    // Black orders que esta compra gerou, e a black order que este pedido atendeu (se veio do carrinho dela).
+    const boRows = await query(
+      `SELECT BlackOrderId, Sku, NomeProduto, Quantidade, QuantidadeReservada, QuantidadeAtendida,
+              QuantidadeDescartada, Status
+         FROM dbo.BlackOrder WHERE PedidoId = @pid ORDER BY BlackOrderId`,
+      { pid: p.PedidoId }
+    );
+    detalhe.blackOrders = boRows.map(b => ({
+      id: b.BlackOrderId, artigo: b.Sku, nome: b.NomeProduto, qtd: b.Quantidade,
+      reservada: b.QuantidadeReservada, atendida: b.QuantidadeAtendida, descartada: b.QuantidadeDescartada,
+      pendente: b.Quantidade - b.QuantidadeAtendida - b.QuantidadeDescartada, status: b.Status
+    }));
+    const origemRows = await query(
+      `SELECT bo.BlackOrderId, bo.NumeroPedido, bo.Sku, bo.NomeProduto, a.Quantidade
+         FROM dbo.BlackOrderAtendimento a
+         JOIN dbo.BlackOrder bo ON bo.BlackOrderId = a.BlackOrderId
+        WHERE a.PedidoId = @pid ORDER BY bo.BlackOrderId`,
+      { pid: p.PedidoId }
+    );
+    detalhe.daBlackOrder = origemRows.map(o => ({
+      id: o.BlackOrderId, compra: o.NumeroPedido, artigo: o.Sku, nome: o.NomeProduto, qtd: o.Quantidade
+    }));
+
     // Linha do tempo (migration 047); sem 'financeiro', eventos com valor saem sem detalhe.
     const verValores = podeVerFinanceiro(req.user);
     detalhe.historico = (await historicoDoPedido(p.PedidoId)).map(ev =>
@@ -283,8 +328,53 @@ router.get('/pedidos/:numero', requireAuth, requireAreaAny(['loja', 'pedidos']),
   } catch (e) { next(e); }
 });
 
+// Número da compra por SEQUENCE ('0005' + 6 dígitos). Pedido e black order da compra usam o mesmo.
+export async function novoNumeroPedido(tx) {
+  const num = await new sql.Request(tx).query(`
+    SELECT
+      '0005' + RIGHT('000000' + CAST(NEXT VALUE FOR dbo.Seq_NumeroPedido AS VARCHAR(20)), 6) AS NumeroPedido,
+      SYSUTCDATETIME() AS Agora;`);
+  return num.recordset[0];
+}
+
+// Grava pedido 'Pendente' + itens (todos em estoque) + fatura com o total. Roda na transação de quem chama.
+// itens: [{ produtoId, sku, nome, preco, qtd }] com o preço já da lista.
+export async function gravarPedido(tx, { numero, agora, user, lista, itens }) {
+  const total = Math.round(itens.reduce((s, i) => s + i.preco * i.qtd, 0) * 100) / 100;
+  const insPed = await new sql.Request(tx)
+    .input('num', sql.VarChar(20), numero)
+    .input('uid', sql.Int, user.id)
+    .input('eid', sql.Int, user.empresaId)
+    .input('data', sql.DateTime2, agora)
+    .input('total', sql.Decimal(12, 2), total)
+    .input('lid', sql.Int, lista?.id ?? null)
+    .input('lpct', sql.Decimal(7, 2), lista ? lista.percentual : null)
+    .query(`INSERT INTO dbo.Pedido (NumeroPedido, UsuarioId, EmpresaId, DataPedido, Status, Total,
+                                    ListaPrecoId, ListaPrecoPercentual)
+            OUTPUT inserted.PedidoId
+            VALUES (@num, @uid, @eid, @data, 'Pendente', @total, @lid, @lpct)`);
+  const pedidoId = insPed.recordset[0].PedidoId;
+
+  for (const it of itens) {
+    await new sql.Request(tx)
+      .input('pid', sql.Int, pedidoId)
+      .input('prod', sql.Int, it.produtoId)
+      .input('sku', sql.VarChar(40), it.sku)
+      .input('nome', sql.NVarChar(200), it.nome)
+      .input('preco', sql.Decimal(12, 2), it.preco)
+      .input('qtd', sql.Int, it.qtd)
+      .query(`INSERT INTO dbo.PedidoItem (PedidoId, ProdutoId, Sku, NomeProduto, PrecoUnitario, Quantidade, EmBackorder)
+              VALUES (@pid, @prod, @sku, @nome, @preco, @qtd, 0)`);
+  }
+
+  // A fatura cobra só o que tem estoque (a black order não entra).
+  const fatura = await gerarFaturaPedido(tx, pedidoId, user.empresaId, total);
+  return { pedidoId, total, fatura };
+}
+
 // POST /api/pedidos — cria a partir da cesta: { itens: [{ sku, quantidade }] }.
-// Sem estoque, o item entra em pré-venda (não baixa estoque). Tudo em transação.
+// Cada peça leva o que houver em estoque (pedido + fatura); o que faltar vira black order
+// (sem fatura, sem Tiny), ligada ao mesmo número. Nada tem estoque = só black order, sem pedido.
 router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async (req, res, next) => {
   const itensReq = Array.isArray(req.body?.itens) ? req.body.itens : [];
   if (!itensReq.length) return res.status(400).json({ erro: 'A cesta está vazia.' });
@@ -294,7 +384,7 @@ router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async 
   for (const it of itensReq) {
     const skuItem = String(it?.sku || '').trim();
     const qtd = Number(it?.quantidade);
-    if (!skuItem || !Number.isInteger(qtd) || qtd <= 0)
+    if (!skuItem || !Number.isInteger(qtd) || qtd <= 0 || qtd > QTD_MAX)
       return res.status(400).json({ erro: 'Item inválido na cesta.' });
     merged.set(skuItem, (merged.get(skuItem) || 0) + qtd);
   }
@@ -314,117 +404,64 @@ router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async 
   try {
     await tx.begin();
 
-    const itensSnap = [];
-    let total = 0;
+    const itensSnap = [];   // vão no pedido (tinham estoque)
+    const faltas = [];      // viram black order
     for (const [skuItem, qtd] of merged) {
-      // Tenta a baixa atômica. Se houver estoque, decrementa e o item é normal.
+      // Baixa atômica do que houver, até a quantidade pedida.
       const upd = await new sql.Request(tx)
         .input('sku', sql.VarChar(40), skuItem)
         .input('qtd', sql.Int, qtd)
         .query(`UPDATE dbo.Produto
-                   SET Estoque = Estoque - @qtd, AtualizadoEm = SYSUTCDATETIME()
-                OUTPUT inserted.ProdutoId, inserted.Nome, inserted.Preco
-                 WHERE Sku = @sku AND Estoque >= @qtd`);
-
-      let row, backorder;
-      if (upd.recordset.length) {
-        row = upd.recordset[0];
-        backorder = false;
-      } else {
-        // A baixa falhou: produto inexistente OU estoque insuficiente.
-        const prod = await new sql.Request(tx)
-          .input('sku', sql.VarChar(40), skuItem)
-          .query('SELECT ProdutoId, Nome, Preco, Estoque, PrevisaoChegada FROM dbo.Produto WHERE Sku = @sku');
-        if (!prod.recordset.length) {
-          await tx.rollback();
-          return res.status(400).json({ erro: 'Produto não encontrado: ' + skuItem });
-        }
-        row = prod.recordset[0];
-        // Em estoque: só até a quantidade disponível.
-        if (row.Estoque > 0) {
-          await tx.rollback();
-          return res.status(409).json({
-            erro: 'Estoque insuficiente para ' + row.Nome + ' (' + skuItem + '): ' +
-              'disponível ' + row.Estoque + ' un.',
-            sku: skuItem, disponivel: row.Estoque
-          });
-        }
-        // Sem estoque: sem previsão = indisponível; com previsão = pré-venda.
-        if (!row.PrevisaoChegada) {
-          await tx.rollback();
-          return res.status(409).json({
-            erro: 'Produto indisponível para compra: ' + row.Nome + ' (' + skuItem + ').',
-            sku: skuItem, indisponivel: true
-          });
-        }
-        backorder = true;
+                   SET Estoque = Estoque - CASE WHEN Estoque >= @qtd THEN @qtd
+                                                WHEN Estoque > 0 THEN Estoque ELSE 0 END,
+                       AtualizadoEm = SYSUTCDATETIME()
+                OUTPUT inserted.ProdutoId, inserted.Nome, inserted.Preco, deleted.Estoque AS EstoqueAntes
+                 WHERE Sku = @sku`);
+      if (!upd.recordset.length) {
+        await tx.rollback();
+        return res.status(400).json({ erro: 'Produto não encontrado: ' + skuItem });
       }
-
-      const preco = aplicarPercentual(row.Preco, pct);
-      itensSnap.push({ produtoId: row.ProdutoId, sku: skuItem, nome: row.Nome, preco, qtd, backorder });
-      total += preco * qtd;
-    }
-    total = Math.round(total * 100) / 100;
-
-    // NumeroPedido por SEQUENCE ('0005' + 6 dígitos).
-    const num = await new sql.Request(tx).query(`
-      SELECT
-        '0005' + RIGHT('000000' + CAST(NEXT VALUE FOR dbo.Seq_NumeroPedido AS VARCHAR(20)), 6) AS NumeroPedido,
-        SYSUTCDATETIME() AS Agora;`);
-    const { NumeroPedido, Agora } = num.recordset[0];
-
-    const insPed = await new sql.Request(tx)
-      .input('num', sql.VarChar(20), NumeroPedido)
-      .input('uid', sql.Int, req.user.id)
-      .input('eid', sql.Int, req.user.empresaId)
-      .input('data', sql.DateTime2, Agora)
-      .input('total', sql.Decimal(12, 2), total)
-      .input('lid', sql.Int, lista?.id ?? null)
-      .input('lpct', sql.Decimal(7, 2), lista ? lista.percentual : null)
-      .query(`INSERT INTO dbo.Pedido (NumeroPedido, UsuarioId, EmpresaId, DataPedido, Status, Total,
-                                      ListaPrecoId, ListaPrecoPercentual)
-              OUTPUT inserted.PedidoId
-              VALUES (@num, @uid, @eid, @data, 'Pendente', @total, @lid, @lpct)`);
-    const pedidoId = insPed.recordset[0].PedidoId;
-
-    for (const it of itensSnap) {
-      await new sql.Request(tx)
-        .input('pid', sql.Int, pedidoId)
-        .input('prod', sql.Int, it.produtoId)
-        .input('sku', sql.VarChar(40), it.sku)
-        .input('nome', sql.NVarChar(200), it.nome)
-        .input('preco', sql.Decimal(12, 2), it.preco)
-        .input('qtd', sql.Int, it.qtd)
-        .input('back', sql.Bit, it.backorder ? 1 : 0)
-        .query(`INSERT INTO dbo.PedidoItem (PedidoId, ProdutoId, Sku, NomeProduto, PrecoUnitario, Quantidade, EmBackorder)
-                VALUES (@pid, @prod, @sku, @nome, @preco, @qtd, @back)`);
+      const row = upd.recordset[0];
+      const sai = Math.min(qtd, Math.max(0, Number(row.EstoqueAntes) || 0));
+      if (sai > 0) {
+        itensSnap.push({ produtoId: row.ProdutoId, sku: skuItem, nome: row.Nome, preco: aplicarPercentual(row.Preco, pct), qtd: sai });
+      }
+      if (qtd > sai) faltas.push({ produtoId: row.ProdutoId, sku: skuItem, nome: row.Nome, qtd: qtd - sai });
     }
 
-    // Fatura do pedido com valor cheio.
-    await gerarFaturaPedido(tx, pedidoId, req.user.empresaId, total);
+    const { NumeroPedido, Agora } = await novoNumeroPedido(tx);
+    let pedidoId = null, total = 0;
+    if (itensSnap.length) {
+      ({ pedidoId, total } = await gravarPedido(tx, { numero: NumeroPedido, agora: Agora, user: req.user, lista, itens: itensSnap }));
+    }
+    const blackOrders = faltas.length
+      ? await criarBlackOrders(tx, {
+        numeroPedido: NumeroPedido, pedidoId, empresaId: req.user.empresaId, usuarioId: req.user.id, itens: faltas
+      })
+      : [];
 
-    // Não exporta ao Tiny aqui: só na remessa. Até lá vale a reserva (tiny.js → reservaPendente).
+    // Não exporta ao Tiny aqui: só na remessa. Até lá valem as reservas (pedidos e fila).
     await tx.commit();
 
     const emp = await query('SELECT RazaoSocial FROM dbo.Empresa WHERE EmpresaId = @id', { id: req.user.empresaId });
-    const itensEmBackorder = itensSnap.filter(i => i.backorder)
-      .map(i => ({ sku: i.sku, nome: i.nome, quantidade: i.qtd }));
-
-    await registrarEventoPedido({
-      pedidoId, tipo: 'criado', titulo: 'Pedido criado', user: req.user,
-      detalhe: resumoPecas(itensSnap) +
-        (itensEmBackorder.length ? ` · ${itensEmBackorder.length} item(ns) em pré-venda` : '')
-    });
+    if (pedidoId) {
+      await registrarEventoPedido({
+        pedidoId, tipo: 'criado', titulo: 'Pedido criado', user: req.user,
+        detalhe: resumoPecas(itensSnap) +
+          (blackOrders.length ? ` · ${blackOrders.length} peça(s) em black order (sem cobrança)` : '')
+      });
+    }
 
     res.status(201).json({
       id: NumeroPedido,
+      pedidoCriado: !!pedidoId,
       data: toIso(Agora),
       usuario: req.user.email,
       empresa: emp[0]?.RazaoSocial || '',
-      itens: itensSnap.map(i => ({ artigo: i.sku, nome: i.nome, preco: i.preco, qtd: i.qtd, backorder: i.backorder })),
-      itensEmBackorder,
+      itens: itensSnap.map(i => ({ artigo: i.sku, nome: i.nome, preco: i.preco, qtd: i.qtd })),
+      blackOrders: blackOrders.map(b => ({ id: b.id, sku: b.sku, nome: b.nome, quantidade: b.quantidade })),
       total,
-      status: 'Pendente'
+      status: pedidoId ? 'Pendente' : null
     });
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }

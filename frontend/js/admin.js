@@ -69,6 +69,7 @@
   var filtros = {
     pedidos:  { status: '', busca: '' },
     prevenda: { status: '', busca: '' },
+    blackorder: { status: '', busca: '' },
     produtos: { cat: '', estoque: '', busca: '' },
     chassis:  { status: '', modelo: '', atrib: '', busca: '' },
     clientes: { status: '', tipo: '', lista: '', busca: '' },
@@ -1225,12 +1226,7 @@
           (p.tinyAtivo ? ' <span class="pill-status Tiny" title="Gerenciado pelo Tiny ERP">Tiny</span>' : '') +
           '</td><td>' + esc(c ? c.nome : p.cat) + '</td>' +
           '<td class="r">' + FG.fmtMoney(p.preco) + '</td>' +
-          '<td class="r">' + (p.estoque > 0
-            ? p.estoque
-            : '<span style="color:#b91c1c;font-weight:700;">Fora de estoque</span>' +
-              (p.previsao
-                ? '<div style="color:#92600a;font-weight:600;font-size:12px;margin-top:2px;">⏳ Chega em ' + esc(p.previsao) + '</div>'
-                : '<div style="color:#92600a;font-size:12px;margin-top:2px;">sem previsão</div>')) + '</td>' +
+          '<td class="r"><b>' + (p.estoque > 0 ? p.estoque : 0) + '</b><div style="margin-top:2px;">' + FG.seloEstoque(p) + '</div></td>' +
           '<td><button class="btn-line btn-mini" data-ac="edit" data-art="' + p.artigo + '">Editar</button> ' +
           '<button class="btn-line btn-mini" data-ac="del" data-art="' + p.artigo + '">Excluir</button></td></tr>';
       }).join('') : vazioFiltro(7, 'Nenhum produto com esse filtro.')) + '</tbody></table></div></div>';
@@ -2077,6 +2073,157 @@
   }
 
   /* =========================================================
+     BLACK ORDER — fila do que faltou no estoque (sem fatura, sem Tiny)
+     ========================================================= */
+  // Mesmas opções que a API aceita (blackorders.routes.js → SITUACOES).
+  var BO_SITUACOES = [
+    'Aguardando pedido à fábrica', 'Pedida à Europa', 'Em produção na fábrica',
+    'Em trânsito', 'Em desembaraço aduaneiro', 'Chegou — em conferência'
+  ];
+  var BO_ROTULO_ADM = { Fila: 'Aguardando chegada', Disponivel: 'Chegou — aguardando o cliente', Atendida: 'Concluída', Cancelada: 'Cancelada' };
+  var boSel = {};   // BlackOrderId → true (seleção para atualizar em lote)
+
+  function renderBlackOrderAdm() {
+    h1.textContent = 'Black order'; setOn('blackorder');
+    var todos = FG.all('blackorders');
+    var f = filtros.blackorder;
+    var aberta = function (b) { return b.status === 'Fila' || b.status === 'Disponivel'; };
+    var lista = todos.filter(function (b) {
+      if (!f.status && !aberta(b)) return false;
+      if (f.status && f.status !== 'todas' && b.status !== f.status) return false;
+      return casaBusca('blackorder', [b.artigo, b.nome, b.empresa, b.compra, b.situacao]);
+    });
+    Object.keys(boSel).forEach(function (id) {
+      if (!todos.some(function (b) { return String(b.id) === id && aberta(b); })) delete boSel[id];
+    });
+
+    // Resumo por peça (só abertas): quanto a fila espera e quanto já está separado.
+    var porPeca = {};
+    todos.filter(aberta).forEach(function (b) {
+      var p = porPeca[b.artigo] || (porPeca[b.artigo] = { artigo: b.artigo, nome: b.nome, ids: [], clientes: {}, espera: 0, reservada: 0, situacoes: {}, previsoes: {} });
+      p.ids.push(b.id); p.clientes[b.empresa] = 1;
+      p.espera += b.pendente - b.reservada; p.reservada += b.reservada;
+      if (b.situacao) p.situacoes[b.situacao] = 1;
+      if (b.previsao) p.previsoes[b.previsao] = 1;
+    });
+    var pecas = Object.keys(porPeca).sort().map(function (k) { return porPeca[k]; });
+
+    var resumo = pecas.length
+      ? '<table class="tbl"><thead><tr><th></th><th>Artigo</th><th>Peça</th><th class="r">Clientes</th>' +
+        '<th class="r">Aguardando chegada</th><th class="r">Já separadas</th><th>Situação</th><th>Previsão</th></tr></thead><tbody>' +
+        pecas.map(function (p) {
+          var todasSel = p.ids.every(function (id) { return boSel[id]; });
+          return '<tr><td><input type="checkbox" class="bo-sel-peca" data-ids="' + p.ids.join(',') + '"' + (todasSel ? ' checked' : '') +
+            ' title="Selecionar todas as black orders desta peça"></td>' +
+            '<td>' + esc(p.artigo) + '</td><td>' + esc(p.nome) + '</td>' +
+            '<td class="r">' + Object.keys(p.clientes).length + '</td>' +
+            '<td class="r"><b>' + p.espera + '</b></td><td class="r">' + p.reservada + '</td>' +
+            '<td>' + esc(Object.keys(p.situacoes).join(' / ') || '—') + '</td>' +
+            '<td>' + esc(Object.keys(p.previsoes).join(' / ') || '—') + '</td></tr>';
+        }).join('') + '</tbody></table>'
+      : '<p class="muted">Nenhuma black order aberta. Elas nascem no checkout quando o cliente pede mais do que há em estoque.</p>';
+
+    var nSel = Object.keys(boSel).length;
+    var painel =
+      '<div class="bo-painel">' +
+      '<div class="field"><label for="bo-sit">Situação do envio</label><select id="bo-sit"><option value="">(manter)</option>' +
+      BO_SITUACOES.map(function (s) { return '<option>' + esc(s) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="field"><label for="bo-prev">Previsão de chegada</label><input id="bo-prev" type="text" maxlength="20" placeholder="dd/mm/aa (vazio = manter)"></div>' +
+      '<div class="field bo-obs-campo"><label for="bo-obs">Observação para o cliente</label><input id="bo-obs" type="text" maxlength="500" placeholder="vazio = manter"></div>' +
+      '<label class="bo-avisar"><input type="checkbox" id="bo-avisar" checked> Avisar os clientes</label>' +
+      '<button class="btn-orange" id="bo-aplicar"' + (nSel ? '' : ' disabled') + '>Aplicar em ' + nSel + ' selecionada(s)</button>' +
+      '</div>';
+
+    var linhas = lista.map(function (b) {
+      var podeSel = aberta(b);
+      return '<tr' + (b.status === 'Disponivel' ? ' class="bo-linha-disp"' : '') + '>' +
+        '<td>' + (podeSel ? '<input type="checkbox" class="bo-sel" data-id="' + b.id + '"' + (boSel[b.id] ? ' checked' : '') + '>' : '') + '</td>' +
+        '<td>' + esc(b.empresa) + '<div class="muted" style="font-size:11px;">' + esc(b.usuario || '') + '</div></td>' +
+        '<td>' + esc(b.compra) + '<div class="muted" style="font-size:11px;">' + FG.fmtDate(b.data) + '</div></td>' +
+        '<td>' + esc(b.artigo) + '<div style="font-size:12px;">' + esc(b.nome) + '</div></td>' +
+        '<td class="r">' + b.qtd + '</td><td class="r">' + b.reservada + '</td><td class="r">' + b.atendida + '</td>' +
+        '<td class="r"><b>' + b.pendente + '</b></td>' +
+        '<td><span class="pill-status bo-' + esc(b.status) + '">' + esc(BO_ROTULO_ADM[b.status] || b.status) + '</span>' +
+        (b.status === 'Disponivel' && b.avisadoEm ? '<div class="muted" style="font-size:11px;">avisado ' + FG.fmtDateTime(b.avisadoEm) + '</div>' : '') + '</td>' +
+        '<td>' + esc(b.situacao || '—') + (b.previsao ? '<div class="muted" style="font-size:11px;">previsão ' + esc(b.previsao) + '</div>' : '') +
+        (b.observacao ? '<div class="muted" style="font-size:11px;">' + esc(b.observacao) + '</div>' : '') + '</td>' +
+        '<td class="bo-acao" data-id="' + b.id + '">' + (podeSel ? '<button class="btn-line btn-mini bo-cancelar">Cancelar</button>' : '') + '</td></tr>';
+    }).join('');
+
+    view.innerHTML =
+      '<div class="adm-card"><div class="c-head">Fila por peça</div><div class="c-body">' +
+      '<p class="muted" style="margin-top:0;">A fila vem antes da loja: quando o saldo do Tiny sobe, as peças são separadas ' +
+      'por ordem de chegada e o cliente é avisado para comprar pelo carrinho da black order (aí vira pedido com fatura).</p>' +
+      resumo + '</div></div>' +
+      '<div class="adm-card"><div class="c-head">Atualizar o envio da Europa</div><div class="c-body">' + painel + '</div></div>' +
+      '<div class="adm-card"><div class="c-head">Black orders (' + contagem('blackorder', lista.length, todos.length) + ')</div><div class="c-body">' +
+      barraFiltro('blackorder', [
+        { k: 'status', rotulo: 'Situação', todos: 'Abertas', opcoes: [
+          ['Fila', 'Aguardando chegada'], ['Disponivel', 'Chegou — aguardando o cliente'],
+          ['Atendida', 'Concluídas'], ['Cancelada', 'Canceladas'], ['todas', 'Todas']] }
+      ], 'Buscar por artigo, peça, cliente, compra ou situação') +
+      '<div class="tbl-scroll"><table class="tbl"><thead><tr><th></th><th>Cliente</th><th>Compra</th><th>Peça</th>' +
+      '<th class="r">Pedida</th><th class="r">Separada</th><th class="r">Comprada</th><th class="r">Pendente</th>' +
+      '<th>Status</th><th>Envio</th><th></th></tr></thead><tbody>' +
+      (linhas || vazioFiltro(11, todos.length ? 'Nenhuma black order com esse filtro.' : 'Nenhuma black order ainda.')) +
+      '</tbody></table></div></div></div>';
+
+    bindFiltro(renderBlackOrderAdm);
+
+    Array.prototype.forEach.call(view.querySelectorAll('.bo-sel'), function (c) {
+      c.addEventListener('change', function () {
+        if (c.checked) boSel[c.getAttribute('data-id')] = true; else delete boSel[c.getAttribute('data-id')];
+        renderBlackOrderAdm();
+      });
+    });
+    Array.prototype.forEach.call(view.querySelectorAll('.bo-sel-peca'), function (c) {
+      c.addEventListener('change', function () {
+        c.getAttribute('data-ids').split(',').forEach(function (id) { if (c.checked) boSel[id] = true; else delete boSel[id]; });
+        renderBlackOrderAdm();
+      });
+    });
+
+    document.getElementById('bo-aplicar').addEventListener('click', function () {
+      var btn = this;
+      var dados = { ids: Object.keys(boSel).map(Number), avisar: document.getElementById('bo-avisar').checked };
+      var sit = document.getElementById('bo-sit').value;
+      var prev = document.getElementById('bo-prev').value.trim();
+      var obs = document.getElementById('bo-obs').value.trim();
+      if (sit) dados.situacao = sit;
+      if (prev) dados.previsao = prev;
+      if (obs) dados.observacao = obs;
+      if (!sit && !prev && !obs) { FG.toast('Escolha a situação, a previsão ou escreva uma observação.', 'erro'); return; }
+      btn.disabled = true;
+      FG.boAtualizar(dados).then(function (r) {
+        if (!r.ok) { FG.toast(r.msg, 'erro'); btn.disabled = false; return; }
+        FG.toast(r.alteradas + ' black order(s) atualizada(s)' + (dados.avisar ? ' e clientes avisados.' : '.'));
+        boSel = {};
+        renderBlackOrderAdm();
+      });
+    });
+
+    // Cancelar: o primeiro clique abre o motivo; o segundo confirma.
+    Array.prototype.forEach.call(view.querySelectorAll('.bo-cancelar'), function (b) {
+      b.addEventListener('click', function () {
+        var td = b.parentNode;
+        var id = td.getAttribute('data-id');
+        td.innerHTML = '<input class="bo-motivo" type="text" maxlength="300" placeholder="Motivo (vai para o cliente)">' +
+          '<button class="btn-orange btn-mini bo-conf">Confirmar cancelamento</button>';
+        var inp = td.querySelector('.bo-motivo');
+        inp.focus();
+        td.querySelector('.bo-conf').addEventListener('click', function () {
+          this.disabled = true;
+          FG.boDesistir(id, inp.value.trim()).then(function (r) {
+            if (!r.ok) FG.toast(r.msg, 'erro');
+            else FG.toast('Black order cancelada; o cliente foi avisado.');
+            renderBlackOrderAdm();
+          });
+        });
+      });
+    });
+  }
+
+  /* =========================================================
      PARTS FINDER — #finder → #finder/modelo/<código> → #finder/secao/<id>
      ========================================================= */
   var FND_LADOS = [['chassi', 'Frame (chassi)'], ['engine', 'Engine (motor)']];
@@ -2479,11 +2626,9 @@
       /* ----- tabela de peças (linhas com edição inline) ----- */
       var tbody = document.getElementById('fp-tbody');
 
-      // Verde = em estoque, amarelo = pré-venda, vermelho = indisponível.
+      // Mesma bolinha da loja (FG.nivelEstoque), com a quantidade.
       function statusPecaAdm(p) {
-        if (p.estoque > 0) return '<span class="fnde-status ok">● Em estoque (' + p.estoque + ')</span>';
-        if (p.previsao) return '<span class="fnde-status pre">● Pré-venda · ' + esc(p.previsao) + '</span>';
-        return '<span class="fnde-status out">● Indisponível</span>';
+        return '<span class="fnde-status">' + FG.seloEstoque(p) + (p.estoque > 0 ? ' (' + p.estoque + ')' : '') + '</span>';
       }
 
       function linhasPecas() {
@@ -3284,6 +3429,7 @@
       case 'produtos': renderProdutos(); break;
       case 'pedidos': renderPedidos(); break;
       case 'prevenda': renderPreVenda(); break;
+      case 'blackorder': renderBlackOrderAdm(); break;
       case 'reivindicacoes': renderClaims(); break;
       case 'tiny': renderTiny(); break;
       case 'finder':

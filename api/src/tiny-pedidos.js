@@ -12,6 +12,7 @@ import {
 } from './tiny.js';
 import { atualizarContatoTiny, clientesLigado } from './tiny-contatos.js';
 import { registrarEventoPedido } from './historico-pedido.js';
+import { reservaBlackOrders, alocarBlackOrders } from './black-order.js';
 
 // Depois disso, só o botão Reexportar.
 const MAX_TENTATIVAS = 5;
@@ -40,12 +41,14 @@ export async function atualizarEstoqueCesta(skus) {
     try {
       const saldo = await obterSaldoAtual(p.TinyId);
       const reserva = await reservaPendente(p.ProdutoId);
+      const fila = await reservaBlackOrders(p.ProdutoId);
       await query(
         `UPDATE dbo.Produto
             SET Estoque = @e, TinySincronizadoEm = SYSUTCDATETIME(), AtualizadoEm = SYSUTCDATETIME()
           WHERE ProdutoId = @pid`,
-        { e: Math.max(0, saldo - reserva), pid: p.ProdutoId }
+        { e: Math.max(0, saldo - reserva - fila), pid: p.ProdutoId }
       );
+      if (fila > 0) await alocarBlackOrders(p.ProdutoId, saldo - reserva);
     } catch (e) {
       console.warn(`⚠ Checagem de estoque no Tiny falhou para ${p.Sku}: ${e.message} — seguindo com o estoque local.`);
     }

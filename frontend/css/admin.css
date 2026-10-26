@@ -372,3 +372,13 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 @media (max-width: 700px) { .nt-form { grid-template-columns: 1fr; } }
 .nt-form .field, .adm-card .c-body > .field { margin-bottom: 10px; }
 .adm-card textarea { width: 100%; border: 1px solid #ccc; padding: 8px 10px; font-size: 13px; font-family: inherit; resize: vertical; }
+
+/* Black order (admin): painel de atualização em lote e tabela */
+.tbl-scroll { overflow-x: auto; }
+.bo-painel { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
+.bo-painel .field { margin: 0; }
+.bo-painel .bo-obs-campo { flex: 1 1 260px; }
+.bo-painel .bo-obs-campo input { width: 100%; }
+.bo-avisar { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding-bottom: 8px; }
+.tbl tr.bo-linha-disp td { background: #f0fdf4; }
+.bo-acao .bo-motivo { width: 190px; margin-bottom: 4px; display: block; }

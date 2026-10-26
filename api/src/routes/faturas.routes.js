@@ -1,5 +1,6 @@
 // ---- Faturas (Conta financeira) ----
-// Só Tipo 'Fatura', com itens, pedidos e dados da empresa para o PDF.
+// Só Tipo 'Fatura', com itens, pedidos, dados da empresa e do comprador para o PDF.
+// Cobra só o que tinha estoque; as peças em black order vêm à parte, só para informar.
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireArea } from '../auth.js';
@@ -29,6 +30,51 @@ async function itensPorFatura(faturaIds) {
   return map;
 }
 
+// Pedido(s) de cada fatura: data, comprador e lista de preço. Map<FaturaId, linha[]>.
+async function pedidosPorFatura(faturaIds) {
+  const map = new Map();
+  if (!faturaIds.length) return map;
+  const params = {};
+  const marks = faturaIds.map((id, i) => { params['f' + i] = id; return '@f' + i; });
+  const rows = await query(
+    `SELECT pf.FaturaId, p.NumeroPedido, p.DataPedido, p.ListaPrecoPercentual,
+            lp.Descricao AS ListaNome, u.Nome AS CompradorNome, u.Email AS CompradorEmail
+       FROM dbo.PedidoFatura pf
+       JOIN dbo.Pedido p ON p.PedidoId = pf.PedidoId
+       JOIN dbo.Usuario u ON u.UsuarioId = p.UsuarioId
+       LEFT JOIN dbo.ListaPreco lp ON lp.ListaPrecoId = p.ListaPrecoId
+      WHERE pf.FaturaId IN (${marks.join(',')})
+      ORDER BY pf.FaturaId, p.PedidoId`,
+    params
+  );
+  for (const r of rows) {
+    if (!map.has(r.FaturaId)) map.set(r.FaturaId, []);
+    map.get(r.FaturaId).push(r);
+  }
+  return map;
+}
+
+// Peças da compra que ficaram em black order (não cobradas nesta fatura). Map<FaturaId, linha[]>.
+async function blackOrdersPorFatura(faturaIds) {
+  const map = new Map();
+  if (!faturaIds.length) return map;
+  const params = {};
+  const marks = faturaIds.map((id, i) => { params['f' + i] = id; return '@f' + i; });
+  const rows = await query(
+    `SELECT pf.FaturaId, bo.Sku, bo.NomeProduto, bo.Quantidade
+       FROM dbo.PedidoFatura pf
+       JOIN dbo.BlackOrder bo ON bo.PedidoId = pf.PedidoId
+      WHERE pf.FaturaId IN (${marks.join(',')})
+      ORDER BY pf.FaturaId, bo.BlackOrderId`,
+    params
+  );
+  for (const r of rows) {
+    if (!map.has(r.FaturaId)) map.set(r.FaturaId, []);
+    map.get(r.FaturaId).push(r);
+  }
+  return map;
+}
+
 // Dados do destinatário (empresa + endereço principal) por EmpresaId, em lote.
 async function empresasPorId(empresaIds) {
   const map = new Map();
@@ -37,6 +83,7 @@ async function empresasPorId(empresaIds) {
   const marks = empresaIds.map((id, i) => { params['e' + i] = id; return '@e' + i; });
   const rows = await query(
     `SELECT e.EmpresaId, e.RazaoSocial, e.NomeFantasia, e.Cnpj, e.Pais,
+            e.InscricaoEstadual, e.Telefone, e.Email,
             en.Logradouro, en.Numero, en.Complemento, en.Bairro,
             en.Cidade, en.Uf, en.Cep, en.Pais AS EnderecoPais
        FROM dbo.Empresa e
@@ -66,15 +113,19 @@ router.get('/faturas', requireAuth, requireArea('financeiro'), async (req, res, 
       { eid }
     );
 
-    const [itens, empresas] = await Promise.all([
-      itensPorFatura(faturas.map(f => f.FaturaId)),
-      empresasPorId([...new Set(faturas.map(f => f.EmpresaId))])
+    const ids = faturas.map(f => f.FaturaId);
+    const [itens, empresas, pedidosFat, blackOrders] = await Promise.all([
+      itensPorFatura(ids),
+      empresasPorId([...new Set(faturas.map(f => f.EmpresaId))]),
+      pedidosPorFatura(ids),
+      blackOrdersPorFatura(ids)
     ]);
 
     res.json(faturas.map(f => {
       const linhas = itens.get(f.FaturaId) || [];
       const emp = empresas.get(f.EmpresaId) || {};
       const pedidos = [...new Set(linhas.map(l => l.NumeroPedido))];
+      const ped = (pedidosFat.get(f.FaturaId) || [])[0] || null;
       return {
         id: f.NumeroFatura,
         numero: f.NumeroFatura,
@@ -88,7 +139,21 @@ router.get('/faturas', requireAuth, requireArea('financeiro'), async (req, res, 
         empresaId: f.EmpresaId,
         cnpj: emp.Cnpj || '',
         pais: emp.Pais || '',
+        fantasia: emp.NomeFantasia || '',
+        ie: emp.InscricaoEstadual || '',
+        telefone: emp.Telefone || '',
+        email: emp.Email || '',
         pedidos,
+        compra: ped ? {
+          data: ped.DataPedido instanceof Date ? ped.DataPedido.toISOString() : ped.DataPedido,
+          comprador: ped.CompradorNome || '',
+          compradorEmail: ped.CompradorEmail || '',
+          lista: ped.ListaNome || '',
+          listaPercentual: ped.ListaPrecoPercentual == null ? null : Number(ped.ListaPrecoPercentual)
+        } : null,
+        blackOrders: (blackOrders.get(f.FaturaId) || []).map(b => ({
+          sku: b.Sku, nome: b.NomeProduto, qtd: b.Quantidade
+        })),
         endereco: emp.Logradouro ? {
           logradouro: emp.Logradouro, numero: emp.Numero || '', complemento: emp.Complemento || '',
           bairro: emp.Bairro || '', cidade: emp.Cidade || '', uf: emp.Uf || '',

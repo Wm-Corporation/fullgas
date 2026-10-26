@@ -1,5 +1,7 @@
 # Adendo ao Lote 1 — Pré-venda e itens em backorder
 
+> **Substituído em 26/10/2026 pela black order — ver `docs/12-black-order.md`.** Pedidos antigos com pré-venda seguem este fluxo até saírem.
+
 > **Audiência**: Claude Code.
 > Este adendo **estende o Item 4** de `docs/05-mudancas-lote-1.md` (detalhe
 > expandido do pedido). Aplique como parte do mesmo branch
