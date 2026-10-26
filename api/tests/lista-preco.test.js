@@ -117,7 +117,7 @@ describe('checkout pela lista da empresa', () => {
   function banco(lista) {
     return (t, p) => {
       if (/JOIN dbo\.ListaPreco l ON l\.ListaPrecoId = e\.ListaPrecoId/.test(t)) return lista ? [lista] : [];
-      if (/UPDATE dbo\.Produto/.test(t)) return [{ ProdutoId: 100, Nome: 'PECA A', Preco: 199.9 }];
+      if (/UPDATE dbo\.Produto/.test(t)) return [{ ProdutoId: 100, Nome: 'PECA A', Preco: 199.9, EstoqueAntes: 10 }];
       if (/Seq_NumeroPedido/.test(t)) return [{ NumeroPedido: '0005041999', Agora: new Date('2026-10-02T12:00:00Z') }];
       if (/INSERT INTO dbo\.Pedido /.test(t)) { pedidoIns = p; return [{ PedidoId: 55 }]; }
       if (/INSERT INTO dbo\.PedidoItem/.test(t)) { itensIns.push(p); return []; }

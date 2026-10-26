@@ -211,7 +211,7 @@
   // Cache em memória que espelha o antigo "db".
   var CACHE = { products: [], categories: [], models: [], vehicles: [],
                 orders: [], claims: [], invoices: [], deliveries: [],
-                notifications: [], users: [], searches: [], prevenda: [] };
+                notifications: [], users: [], searches: [], prevenda: [], blackorders: [] };
 
   // De onde vem cada lista do cache.
   var FONTES = [
@@ -222,6 +222,7 @@
     ['vehicles', '/veiculos'],
     ['invoices', '/faturas'],
     ['prevenda', '/prevenda'],
+    ['blackorders', '/blackorders'],
     ['claims', '/reivindicacoes'],
     ['users', '/usuarios'],   // só admin recebe; cliente resolve null
     ['notifications', '/notificacoes']
@@ -256,6 +257,11 @@
     return apiGet('/prevenda').then(function (l) { if (l) CACHE.prevenda = l; return l; });
   }
   FG.recarregarPreVenda = recarregarPreVenda;
+
+  function recarregarBlackOrders() {
+    return apiGet('/blackorders').then(function (l) { if (l) CACHE.blackorders = l; return l; });
+  }
+  FG.recarregarBlackOrders = recarregarBlackOrders;
 
   function recarregarVeiculos() {
     return apiGet('/veiculos').then(function (l) { if (l) CACHE.vehicles = l; return l; });
@@ -657,10 +663,31 @@
     var itens = cart.map(function (i) { return { sku: i.artigo, quantidade: i.qtd }; });
     return api('/pedidos', { method: 'POST', body: { itens: itens } }).then(function (data) {
       FG.cartClear();
-      return Promise.all([recarregarPedidos(), recarregarProdutos()]).then(function () { return data; });
+      return Promise.all([recarregarPedidos(), recarregarProdutos(), recarregarBlackOrders()]).then(function () { return data; });
     }, function (e) {
       FG.toast((e && e.message) || 'Não foi possível finalizar o pedido.');
       return null;
+    });
+  };
+
+  // ---- Black order ----
+  // Carrinho da black order: [{ id, quantidade }] → Promise<{ ok, id, total, itens, liberadas } | { ok:false, msg }>.
+  FG.boComprar = function (itens) {
+    return req('POST', '/blackorders/comprar', { itens: itens }).then(function (r) {
+      return Promise.all([recarregarBlackOrders(), recarregarPedidos(), recarregarFaturas()])
+        .then(function () { return r; }, function () { return r; });
+    });
+  };
+  // Cliente desiste do que falta; admin cancela (com motivo).
+  FG.boDesistir = function (id, motivo) {
+    return req('POST', '/blackorders/' + encodeURIComponent(id) + '/desistir', { motivo: motivo || '' }).then(function (r) {
+      return recarregarBlackOrders().then(function () { return r; }, function () { return r; });
+    });
+  };
+  // Admin: { ids, situacao?, previsao?, observacao?, avisar? }.
+  FG.boAtualizar = function (dados) {
+    return req('PATCH', '/blackorders', dados).then(function (r) {
+      return recarregarBlackOrders().then(function () { return r; }, function () { return r; });
     });
   };
 

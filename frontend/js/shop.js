@@ -94,10 +94,13 @@
     });
   }
 
-  function stockHTML(p) {
-    if (p.estoque > 0) return '<span class="stock-ok">Em estoque</span>';
-    if (p.previsao) return '<span class="stock-date">' + esc(p.previsao) + '</span>';
-    return '<span class="stock-out">Indisponível</span>';
+  function stockHTML(p) { return FG.seloEstoque(p); }
+
+  // Abaixo da quantidade na cesta: quanto sai agora e quanto vira black order.
+  function divisaoHTML(p, qtd) {
+    var d = FG.divisaoCesta(p.artigo, qtd);
+    if (!d.black) return '';
+    return '<small class="ct-div">' + (d.envio ? d.envio + ' agora · ' : '') + '<b>' + d.black + ' black order</b></small>';
   }
 
   // Foto do produto (miniatura na lista; `inteira` = original); sem foto, o desenho da categoria.
@@ -195,7 +198,7 @@
     if (termoBusca != null) FG.logSearch(termoBusca, todos.length);
 
     // Disponíveis primeiro.
-    todos.sort(function (a, b) { return (FG.compravel(b.artigo) ? 1 : 0) - (FG.compravel(a.artigo) ? 1 : 0); });
+    todos.sort(function (a, b) { return (b.estoque > 0 ? 1 : 0) - (a.estoque > 0 ? 1 : 0); });
     var totalPag = Math.max(1, Math.ceil(todos.length / POR_PAGINA));
     if (pagina > totalPag) pagina = totalPag;
     var lista = todos.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
@@ -258,7 +261,7 @@
         '<div class="m"><b>Estoque</b>' + stockHTML(p) + '</div>' +
         '<div class="m"><b>Preço</b>' + FG.fmtMoney(p.preco) + '</div>' +
         (FG.compravel(p.artigo)
-          ? '<div class="prod-buy"><input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + esc(p.artigo) + '">' +
+          ? '<div class="prod-buy"><input class="qty-in" type="number" min="1" step="1" value="1" data-art="' + esc(p.artigo) + '">' +
             '<button class="btn dark add-cart" data-art="' + esc(p.artigo) + '">🛒 Adicionar</button></div>'
           : '<div class="prod-buy"><button class="btn dark" disabled style="opacity:.55;cursor:not-allowed;">Indisponível</button></div>') +
         '</div></div></div>';
@@ -317,7 +320,11 @@
           if (!FG.compravel(art)) FG.toast('Produto indisponível para compra.', 'erro');
           return;
         }
-        if (ajustou) FG.toast('Estoque disponível: ' + lim + ' un. Quantidade ajustada.', 'erro');
+        var noCarro = (FG.cart().find(function (i) { return i.artigo === art; }) || {}).qtd || 0;
+        var div = FG.divisaoCesta(art, noCarro);
+        if (ajustou) FG.toast('Quantidade máxima por item: ' + lim + ' un. Quantidade ajustada.', 'erro');
+        else if (div.black) FG.toast(qtd + '× adicionado. ' + (div.envio ? div.envio + ' sai(em) agora e ' : '') +
+          div.black + ' entra(m) em black order (sem cobrança agora).');
         else FG.toast(qtd + '× adicionado à cesta.');
         refreshCart();
       });
@@ -346,7 +353,7 @@
       '<p><b>Estoque:</b> ' + stockHTML(p) + (p.estoque > 0 ? ' <span class="muted">(' + p.estoque + ' un.)</span>' : '') + '</p>' +
       (FG.compravel(p.artigo)
         ? '<div class="prod-buy" style="margin:0 0 18px;justify-content:flex-start;">' +
-          '<input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + esc(p.artigo) + '">' +
+          '<input class="qty-in" type="number" min="1" step="1" value="1" data-art="' + esc(p.artigo) + '">' +
           '<button class="btn dark add-cart" data-art="' + esc(p.artigo) + '">🛒 Adicionar ao carrinho</button></div>'
         : '<div class="prod-buy" style="margin:0 0 18px;justify-content:flex-start;">' +
           '<button class="btn dark" disabled style="opacity:.55;cursor:not-allowed;">Indisponível</button>' +
@@ -450,38 +457,37 @@
         '<span><b><a href="#/produto/' + esc(p.artigo) + '">' + esc(p.nome) + '</a></b><br><span class="muted">' + esc(p.artigo) + '</span>' +
         '<br>' + stockHTML(p) + '</span>' +
         '<span>' + FG.fmtMoney(p.preco) + '</span>' +
-        '<span><input class="qty-in ct-qty" data-art="' + esc(p.artigo) + '" type="number" min="0"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' value="' + i.qtd + '"></span>' +
+        '<span><input class="qty-in ct-qty" data-art="' + esc(p.artigo) + '" type="number" min="0" step="1" value="' + i.qtd + '">' +
+        divisaoHTML(p, i.qtd) + '</span>' +
         '<span class="right"><b>' + FG.fmtMoney(p.preco * i.qtd) + '</b></span>' +
         '<button class="del link-action ct-del" data-art="' + esc(p.artigo) + '" title="Remover">✕</button></div>';
     });
-    // Indisponíveis bloqueiam o envio; pré-venda entra em backorder.
-    var indispItens = cart.filter(function (i) { return !FG.compravel(i.artigo); });
-    var preVenda = cart.filter(function (i) { var p = FG.product(i.artigo); return p && p.estoque < i.qtd && FG.compravel(i.artigo); });
+    // O que faltar no estoque vira black order: não é cobrado agora, entra na fila e você é avisado quando chegar.
+    var blacks = cart.filter(function (i) { return FG.product(i.artigo) && FG.divisaoCesta(i.artigo, i.qtd).black > 0; });
     var avisoHTML = '';
-    if (indispItens.length) {
-      avisoHTML += '<div class="backorder-aviso" style="background:#fef2f2;border-color:#fecaca;">' +
-        '<b>⛔ Indisponível:</b> remova para enviar o pedido — ' +
-        indispItens.length + ' item(ns) sem estoque e sem previsão de chegada.<ul>' +
-        indispItens.map(function (i) {
-          var p = FG.product(i.artigo);
-          return '<li>' + esc(p.nome) + ' <span class="muted">(' + esc(p.artigo) + ')</span></li>';
-        }).join('') + '</ul></div>';
-    }
-    if (preVenda.length) {
-      avisoHTML += '<div class="backorder-aviso"><b>⚠ Aviso:</b> ' + preVenda.length +
-        ' item(ns) será(ão) enviado(s) em <b>pré-venda</b>. Prazo de envio depende de reposição.<ul>' +
-        preVenda.map(function (i) {
-          var p = FG.product(i.artigo);
-          return '<li>' + esc(p.nome) + ' <span class="muted">(' + esc(p.artigo) + ')</span> — ' + i.qtd + ' un.' +
-            (p.previsao ? ' · previsão: ' + esc(p.previsao) : '') + '</li>';
+    if (blacks.length) {
+      avisoHTML += '<div class="backorder-aviso bo-aviso"><b>Black order:</b> o estoque não cobre ' + blacks.length +
+        ' item(ns). O que estiver em estoque sai neste pedido; o restante entra em <b>black order</b> — ' +
+        'não é cobrado agora, entra na fila de chegada e você é avisado nas Notificações quando chegar.<ul>' +
+        blacks.map(function (i) {
+          var p = FG.product(i.artigo); var d = FG.divisaoCesta(i.artigo, i.qtd);
+          return '<li>' + esc(p.nome) + ' <span class="muted">(' + esc(p.artigo) + ')</span> — ' +
+            (d.envio ? d.envio + ' agora + ' : '') + '<b>' + d.black + ' em black order</b>' +
+            (p.previsao ? ' · previsão ' + esc(p.previsao) : '') + '</li>';
         }).join('') + '</ul></div>';
     }
 
-    html += '<div class="cart-tot"><span>Total da cesta</span><span class="v">' + FG.fmtMoney(FG.cartTotal()) + '</span></div>' +
+    var totalEnvio = FG.cartTotalEnvio();
+    var totalBlack = FG.cartTotal() - totalEnvio;
+    html += '<div class="cart-tot"><span>Total cobrado agora</span><span class="v">' + FG.fmtMoney(totalEnvio) + '</span></div>' +
+      (totalBlack > 0.004
+        ? '<div class="cart-tot cart-tot-bo"><span>Em black order (estimativa pelo preço de hoje; cobrado só quando chegar e você comprar)</span>' +
+          '<span class="v">' + FG.fmtMoney(totalBlack) + '</span></div>'
+        : '') +
       avisoHTML +
       '<div style="display:flex;justify-content:flex-end;gap:10px;">' +
       '<button class="btn" id="ct-limpar">Limpar cesta</button>' +
-      '<button class="btn red" id="ct-enviar"' + (indispItens.length ? ' disabled style="opacity:.55;cursor:not-allowed;"' : '') + '>Enviar pedido</button></div>';
+      '<button class="btn red" id="ct-enviar">Enviar pedido</button></div>';
     view.innerHTML = html;
 
     Array.prototype.forEach.call(view.querySelectorAll('.ct-qty'), function (inp) {
@@ -490,7 +496,7 @@
         var pedido = Math.max(0, Math.floor(Number(inp.value)) || 0);
         var lim = FG.limiteCompra(art);
         FG.cartSet(art, pedido);
-        if (pedido > lim) FG.toast('Estoque disponível: ' + lim + ' un. Quantidade ajustada.', 'erro');
+        if (pedido > lim) FG.toast('Quantidade máxima por item: ' + lim + ' un. Quantidade ajustada.', 'erro');
         refreshCart(); renderCarrinho();
       });
     });
@@ -506,17 +512,22 @@
       var o = await FG.createOrder();
       refreshCart();
       if (!o) { btn.disabled = false; btn.textContent = 'Enviar pedido'; return; }
-      var backHTML = (o.itensEmBackorder && o.itensEmBackorder.length) ?
-        '<div class="backorder-aviso" style="max-width:540px;margin:14px auto;text-align:left;">' +
-        '<b>⚠ Itens em pré-venda:</b> serão enviados quando o estoque for reposto.<ul>' +
-        o.itensEmBackorder.map(function (b) {
-          return '<li>' + esc(b.nome) + ' <span class="muted">(' + b.sku + ')</span> — ' + b.quantidade + ' un.</li>';
-        }).join('') + '</ul></div>' : '';
-      view.innerHTML = '<div class="empty-box"><h2 style="color:var(--green);">✔ Pedido enviado!</h2>' +
-        '<p>Número do pedido: <b>' + o.id + '</b></p>' +
-        backHTML +
+      var bos = o.blackOrders || [];
+      var boHTML = bos.length ?
+        '<div class="backorder-aviso bo-aviso" style="max-width:560px;margin:14px auto;text-align:left;">' +
+        '<b>Black order criada</b> (não cobrada agora). Você será avisado nas Notificações quando chegar:<ul>' +
+        bos.map(function (b) {
+          return '<li>' + esc(b.nome) + ' <span class="muted">(' + esc(b.sku) + ')</span> — ' + b.quantidade + ' un.</li>';
+        }).join('') + '</ul>Acompanhe em <a href="/portal#blackorder">Pedidos › Blackorder</a>.</div>' : '';
+      view.innerHTML = '<div class="empty-box"><h2 style="color:var(--green);">✔ ' +
+        (o.pedidoCriado ? 'Pedido enviado!' : 'Black order registrada!') + '</h2>' +
+        (o.pedidoCriado
+          ? '<p>Número do pedido: <b>' + esc(o.id) + '</b> · cobrado agora: <b>' + FG.fmtMoney(o.total) + '</b></p>'
+          : '<p>Compra nº <b>' + esc(o.id) + '</b>: nada estava em estoque, então nada foi cobrado.</p>') +
+        boHTML +
         '<p class="muted">Acompanhe o andamento no histórico de pedidos.</p>' +
-        '<a class="btn red" href="#/pedidos">Ver histórico</a> <a class="btn" href="#/">Continuar comprando</a></div>';
+        '<a class="btn red" href="' + (o.pedidoCriado ? '#/pedidos' : '/portal#blackorder') + '">' +
+        (o.pedidoCriado ? 'Ver histórico' : 'Ver black orders') + '</a> <a class="btn" href="#/">Continuar comprando</a></div>';
     });
   }
 
