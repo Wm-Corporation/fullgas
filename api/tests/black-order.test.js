@@ -68,8 +68,16 @@ beforeEach(() => { chamadas = []; transacoes = []; recalculados = []; responder 
 
 describe('distribuir — fila por ordem de chegada', () => {
   const fila = [{ BlackOrderId: 1, pendente: 5 }, { BlackOrderId: 2, pendente: 3 }, { BlackOrderId: 3, pendente: 4 }];
-  it('o primeiro da fila é atendido inteiro antes do segundo', () => {
-    expect(bo.distribuir(fila, 6).map(x => x.reservada)).toEqual([5, 1, 0]);
+  it('tudo ou nada: reserva só a quantidade inteira de cada um', () => {
+    expect(bo.distribuir(fila, 8).map(x => x.reservada)).toEqual([5, 3, 0]);
+  });
+  it('o primeiro da fila trava: sem a quantidade dele, ninguém atrás recebe', () => {
+    // 4 chegaram: não cobrem os 5 do primeiro; o segundo (3) cabia, mas espera.
+    expect(bo.distribuir(fila, 4).map(x => x.reservada)).toEqual([0, 0, 0]);
+    expect(bo.distribuir(fila, 6).map(x => x.reservada)).toEqual([5, 0, 0]);
+  });
+  it('linha sem pendência não trava a fila', () => {
+    expect(bo.distribuir([{ BlackOrderId: 1, pendente: 0 }, { BlackOrderId: 2, pendente: 2 }], 2).map(x => x.reservada)).toEqual([0, 2]);
   });
   it('sem saldo ninguém recebe; saldo de sobra atende todos', () => {
     expect(bo.distribuir(fila, 0).map(x => x.reservada)).toEqual([0, 0, 0]);
@@ -96,21 +104,21 @@ function filaProduto100() {
 }
 
 describe('alocarBlackOrders', () => {
-  it('reserva na ordem, grava só quem mudou e avisa só quem passou a ter peça', async () => {
+  it('reserva a quantidade inteira na ordem e avisa só quem foi completado', async () => {
     const linhas = filaProduto100();
     responder = (t, p) => {
       if (/FROM dbo\.BlackOrder\s+WHERE ProdutoId = @pid AND Status IN/.test(t)) return linhas;
       if (/UPDATE dbo\.BlackOrder/.test(t)) return [{ BlackOrderId: p.id }];
       return [];
     };
-    const avisos = await bo.alocarBlackOrders(100, 6);
+    const avisos = await bo.alocarBlackOrders(100, 7);   // 5 do primeiro; 2 não completam os 4 do segundo
     const upds = achar(/UPDATE dbo\.BlackOrder/);
-    expect(upds.map(u => [u.p.id, u.p.res, u.p.st])).toEqual([[1, 5, 'Disponivel'], [2, 1, 'Disponivel']]);
+    expect(upds.map(u => [u.p.id, u.p.res, u.p.st])).toEqual([[1, 5, 'Disponivel']]);
     // Condição otimista: só grava se nada mudou desde a leitura.
     expect(upds[0].texto).toMatch(/QuantidadeReservada = @resAntes/);
-    expect(avisos.map(a => a.BlackOrderId)).toEqual([1, 2]);
+    expect(avisos.map(a => a.BlackOrderId)).toEqual([1]);
     const notifs = achar(/INSERT INTO dbo\.Notificacao/);
-    expect(notifs).toHaveLength(2);                       // uma por empresa
+    expect(notifs).toHaveLength(1);                       // só o dono da black order completada
     expect(notifs[0].p).toMatchObject({ eid: 7, origem: 'blackorder', link: '#blackorder/carrinho', publico: 'cliente' });
     expect(notifs[0].p.texto).toMatch(/PECA A \(A1\): 5 un\./);
   });
@@ -123,8 +131,8 @@ describe('alocarBlackOrders', () => {
       if (/UPDATE dbo\.BlackOrder/.test(t)) return [{ BlackOrderId: p.id }];
       return [];
     };
-    await bo.alocarBlackOrders(100, 2);
-    expect(achar(/UPDATE dbo\.BlackOrder/).map(u => [u.p.id, u.p.res])).toEqual([[1, 2]]);
+    await bo.alocarBlackOrders(100, 2);                   // não cobre mais os 5: a reserva sai inteira
+    expect(achar(/UPDATE dbo\.BlackOrder/).map(u => [u.p.id, u.p.res, u.p.st])).toEqual([[1, 0, 'Fila']]);
     expect(achar(/INSERT INTO dbo\.Notificacao/)).toHaveLength(0);
   });
 
@@ -149,8 +157,8 @@ describe('sincronização do Tiny (aplicarAtualizacao)', () => {
     await tiny.aplicarAtualizacao('T1', { estoque: 10 }, 'cron');
     const upProd = achar(/UPDATE dbo\.Produto SET/)[0];
     expect(upProd.p.est).toBe(0);                          // 10 − 2 − 9 → 0 (nada para a loja)
-    // 8 livres (10 − 2): BO 1 leva 5, BO 2 leva 3.
-    expect(achar(/UPDATE dbo\.BlackOrder/).map(u => [u.p.id, u.p.res])).toEqual([[1, 5], [2, 3]]);
+    // 8 livres (10 − 2): BO 1 leva os 5 dele; os 3 que sobram não completam os 4 do BO 2 (ficam guardados).
+    expect(achar(/UPDATE dbo\.BlackOrder/).map(u => [u.p.id, u.p.res])).toEqual([[1, 5]]);
   });
 
   it('sem fila, nada muda: estoque = saldo − pedidos e ninguém é chamado', async () => {
@@ -167,7 +175,7 @@ describe('sincronização do Tiny (aplicarAtualizacao)', () => {
   });
 });
 
-describe('checkout: estoque vira pedido com fatura; o que falta vira black order', () => {
+describe('checkout: estoque vira pedido (fatura só na remessa); o que falta vira black order', () => {
   let estoque, pedidoIns, itensIns, boIns, fatura;
   beforeEach(() => { pedidoIns = null; itensIns = []; boIns = []; fatura = null; });
   function banco() {
@@ -189,7 +197,7 @@ describe('checkout: estoque vira pedido com fatura; o que falta vira black order
   }
   const comprar = (itens) => request(app(rotasPedidos, CLIENTE)).post('/api/pedidos').send({ itens });
 
-  it('pede 10 com 4 em estoque: pedido e fatura de 4, black order de 6 com o mesmo número', async () => {
+  it('pede 10 com 4 em estoque: pedido de 4 sem fatura ainda, black order de 6 com o mesmo número', async () => {
     estoque = { A1: 4 };
     responder = banco();
     const r = await comprar([{ sku: 'A1', quantidade: 10 }]);
@@ -198,7 +206,9 @@ describe('checkout: estoque vira pedido com fatura; o que falta vira black order
     expect(r.body.itens).toEqual([{ artigo: 'A1', nome: 'PECA A1', preco: 10, qtd: 4 }]);
     expect(r.body.blackOrders).toEqual([{ id: 901, sku: 'A1', nome: 'PECA A1', quantidade: 6 }]);
     expect(itensIns.map(i => i.qtd)).toEqual([4]);
-    expect(fatura.val).toBe(40);                           // só o que tinha estoque
+    expect(fatura).toBeNull();                             // a fatura sai na remessa exportada ao Tiny
+    expect(pedidoIns).toMatchObject({ total: 40 });
+    expect(achar(/INSERT INTO dbo\.Pedido /)[0].texto).toMatch(/FaturaNaRemessa\)[\s\S]*, 1\)/);
     expect(boIns[0]).toMatchObject({ num: '0005041999', pid: 55, eid: 7, uid: 3, prod: 100, qtd: 6 });
     expect(transacoes).toEqual(['begin', 'commit']);
   });
@@ -220,7 +230,8 @@ describe('checkout: estoque vira pedido com fatura; o que falta vira black order
     const r = await comprar([{ sku: 'A1', quantidade: 5 }, { sku: 'B2', quantidade: 1 }]);
     expect(r.body.blackOrders).toEqual([]);
     expect(itensIns.map(i => [i.sku, i.qtd])).toEqual([['A1', 5], ['B2', 1]]);
-    expect(fatura.val).toBe(60);
+    expect(pedidoIns).toMatchObject({ total: 60 });
+    expect(fatura).toBeNull();
   });
 
   it('a baixa leva só o que houver, numa instrução só (sem corrida entre ler e baixar)', async () => {
@@ -272,14 +283,15 @@ describe('carrinho da black order (POST /api/blackorders/comprar)', () => {
   }
   const comprar = (itens, user = CLIENTE) => request(app(rotasBO, user)).post('/api/blackorders/comprar').send({ itens });
 
-  it('compra tudo o que chegou (4 de 4): pedido + fatura no preço de hoje; o que não chegou segue na fila', async () => {
+  it('compra tudo o que chegou (4 de 4): pedido no preço de hoje (fatura na remessa); o que não chegou segue na fila', async () => {
     responder = banco([linhaBO()]);
     const r = await comprar([{ id: 901, quantidade: 4 }]);
     expect(r.status).toBe(201);
     expect(r.body).toMatchObject({ id: '0005042000', total: 50, liberadas: [] });
     // 6 pedidas: 4 compradas, 2 seguem na fila.
     expect(boUpd[0]).toMatchObject({ id: 901, atd: 4, desc: 0, st: 'Fila', res: 4 });
-    expect(fatura.val).toBe(50);
+    expect(pedidoIns).toMatchObject({ total: 50 });
+    expect(fatura).toBeNull();
     expect(atendIns[0]).toMatchObject({ bo: 901, pid: 77, q: 4 });
     expect(recalculados).toEqual(['A1']);                 // só a checagem do Tiny antes de vender
   });

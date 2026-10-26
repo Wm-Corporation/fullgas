@@ -1461,3 +1461,5 @@ body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
   .tabs { flex-wrap: wrap; }
 }
 .bo-encerra { display: block; margin-top: 4px; font-size: 11px; color: #b45309; max-width: 220px; margin-left: auto; text-align: right; }
+.nf-info { margin-top: 3px; font-size: 11px; color: #b45309; }
+.cart-fat { text-align: right; font-size: 12px; margin: 2px 0 8px; }

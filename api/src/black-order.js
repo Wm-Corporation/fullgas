@@ -1,5 +1,5 @@
 // Black order: o que faltou no estoque no checkout vira fila por peça (sem fatura, sem Tiny).
-// A fila segura o saldo do Tiny antes da loja, na ordem de chegada; quem recebe peça é avisado
+// A fila segura o saldo do Tiny antes da loja, na ordem de chegada; quem recebe a quantidade inteira é avisado
 // e compra pelo carrinho da black order (POST /api/blackorders/comprar), que vira pedido normal.
 import { query, sql } from './db.js';
 import { criarNotificacao } from './notificacoes.js';
@@ -28,13 +28,27 @@ export async function reservaBlackOrders(produtoId) {
 }
 
 // Distribui `livre` pela fila em ordem de chegada. linhas: [{ BlackOrderId, pendente }] já ordenadas.
+// Tudo ou nada, e o primeiro da fila sempre antes: só reserva quando chegou a quantidade inteira
+// dele; enquanto não chega, as peças ficam guardadas (fora da loja) e quem vem atrás espera.
 export function distribuir(linhas, livre) {
   let resto = Math.max(0, Math.floor(Number(livre) || 0));
+  let travada = false;
   return linhas.map(l => {
-    const reservada = Math.min(l.pendente, resto);
-    resto -= reservada;
-    return { id: l.BlackOrderId, reservada };
+    if (!travada && l.pendente > 0 && resto >= l.pendente) {
+      resto -= l.pendente;
+      return { id: l.BlackOrderId, reservada: l.pendente };
+    }
+    if (l.pendente > 0) travada = true;
+    return { id: l.BlackOrderId, reservada: 0 };
   });
+}
+
+// Peças com black order aberta (o verificador de 2 em 2 minutos só olha estas no Tiny).
+export async function produtosComFila() {
+  const r = await query(
+    `SELECT DISTINCT ProdutoId FROM dbo.BlackOrder WHERE Status IN ('Fila', 'Disponivel')`
+  );
+  return r.map(x => x.ProdutoId);
 }
 
 // Recalcula a reserva da fila de uma peça. `livre` = saldo do Tiny menos a reserva dos pedidos.
