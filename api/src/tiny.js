@@ -142,6 +142,12 @@ function clampEstoque(v) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+// Saldo que pode ser vendido: saldo − reservado. Pedido aprovado no Tiny (remessa nossa ou Magento)
+// reserva a peça sem tirá-la do saldo até ser faturado; sem descontar, a mesma peça é vendida duas vezes.
+export function saldoLivre(est) {
+  return clampEstoque((Number(est?.saldo) || 0) - (Number(est?.saldoReservado) || 0));
+}
+
 /* ---------------- consultas ao Tiny ---------------- */
 
 // Produtos do Tiny, 100 por página. Página vazia vem como codigo_erro 20.
@@ -174,18 +180,16 @@ export async function obterProdutoCompleto(tinyId) {
   const p = (await tinyPost('produto.obter.php', { id: tinyId })).produto;
   if (!p) throw new TinyError('Produto não encontrado no Tiny.');
 
-  let saldo = p.saldo ?? p.estoqueAtual ?? p.estoque_atual;
-  if (saldo === undefined) {
-    const est = (await tinyPost('produto.obter.estoque.php', { id: tinyId })).produto;
-    saldo = est?.saldo;
-  }
+  // produto.obter não traz saldo: vem de produto.obter.estoque, já sem o reservado.
+  const est = (await tinyPost('produto.obter.estoque.php', { id: tinyId })).produto;
+  const saldo = saldoLivre(est);
 
   return {
     tinyId: String(p.id ?? tinyId),
     sku: String(p.codigo || '').trim().toUpperCase(),
     nome: String(p.nome || '').trim().slice(0, 200),
     preco: Math.max(0, Number(p.preco) || 0),
-    estoque: clampEstoque(saldo),
+    estoque: saldo,
     descricao: limparDescricao(p.descricao_complementar),
     foto: primeiraFoto(p.anexos)
   };
@@ -273,7 +277,7 @@ export async function obterContato(tinyId) {
 // Saldo atual (prioritário: checkout esperando).
 export async function obterSaldoAtual(tinyId) {
   const est = (await tinyPost('produto.obter.estoque.php', { id: tinyId }, { prioritario: true })).produto;
-  return clampEstoque(est?.saldo);
+  return saldoLivre(est);
 }
 
 // pedido.incluir.php → { id, numero }.

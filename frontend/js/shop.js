@@ -479,7 +479,8 @@
 
     var totalEnvio = FG.cartTotalEnvio();
     var totalBlack = FG.cartTotal() - totalEnvio;
-    html += '<div class="cart-tot"><span>Total cobrado agora</span><span class="v">' + FG.fmtMoney(totalEnvio) + '</span></div>' +
+    html += '<div class="cart-tot"><span>Total do pedido</span><span class="v">' + FG.fmtMoney(totalEnvio) + '</span></div>' +
+      '<p class="muted cart-fat">A fatura é gerada quando as peças forem enviadas, só com o que for encontrado no estoque.</p>' +
       (totalBlack > 0.004
         ? '<div class="cart-tot cart-tot-bo"><span>Em black order (estimativa pelo preço de hoje; cobrado só quando chegar e você comprar)</span>' +
           '<span class="v">' + FG.fmtMoney(totalBlack) + '</span></div>'
@@ -522,7 +523,8 @@
       view.innerHTML = '<div class="empty-box"><h2 style="color:var(--green);">✔ ' +
         (o.pedidoCriado ? 'Pedido enviado!' : 'Black order registrada!') + '</h2>' +
         (o.pedidoCriado
-          ? '<p>Número do pedido: <b>' + esc(o.id) + '</b> · cobrado agora: <b>' + FG.fmtMoney(o.total) + '</b></p>'
+          ? '<p>Número do pedido: <b>' + esc(o.id) + '</b> · total: <b>' + FG.fmtMoney(o.total) + '</b></p>' +
+            '<p class="muted">A fatura é gerada quando as peças forem enviadas.</p>'
           : '<p>Compra nº <b>' + esc(o.id) + '</b>: nada estava em estoque, então nada foi cobrado.</p>') +
         boHTML +
         '<p class="muted">Acompanhe o andamento no histórico de pedidos.</p>' +

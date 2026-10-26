@@ -1505,14 +1505,60 @@
           '" data-qtd="' + it.qtd + '">Salvar</button>' +
         (it.qtdEnviada < it.qtd
           ? '<button class="btn-line btn-mini it-tudo" data-ped="' + esc(ped.id) + '" data-item="' + it.itemId +
-            '" data-qtd="' + it.qtd + '">Tudo</button>' : '')
+            '" data-qtd="' + it.qtd + '">Tudo</button>' : '') +
+        // Peça que não estava na prateleira: sai do pedido ou vai para a black order (não é faturada).
+        (ped.faturaNaRemessa && !it.backorder && it.qtdEnviada < it.qtd
+          ? '<button class="btn-line btn-mini it-nf" data-ped="' + esc(ped.id) + '" data-item="' + it.itemId +
+            '" data-max="' + (it.qtd - it.qtdEnviada) + '">Não encontrada</button>' : '')
       : '<span class="muted">—</span>';
+    var nf = it.naoEncontrada
+      ? '<div class="nf-info">' + it.naoEncontrada + ' não encontrada(s) — ' + esc(it.motivoNaoEncontrada || '') + '</div>'
+      : '';
     return '<tr><td>' + dotItem(it, cancelado) + '</td>' +
-      '<td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+      '<td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + nf + '</td>' +
       '<td class="r">' + it.qtd + '</td><td class="r">' + it.qtdEnviada + '</td>' +
       '<td class="r">' + FG.fmtMoney(it.preco) + '</td>' +
       '<td><span class="pill-status ' + st.cls + '">' + esc(st.txt) + '</span></td>' +
       '<td class="it-ctrl">' + ctrl + '</td></tr>';
+  }
+
+  // Motivos prontos (a API aceita qualquer texto; estes são os mais comuns).
+  var MOTIVOS_NF = ['Não foi encontrado', 'Estoque incorreto', 'Peça danificada'];
+
+  // Formulário "Não encontrada" dentro da célula de controle do item.
+  function formNaoEncontrada(b) {
+    var td = b.closest('td');
+    var max = Number(b.getAttribute('data-max'));
+    var ped = b.getAttribute('data-ped');
+    var item = b.getAttribute('data-item');
+    var antes = td.innerHTML;
+    td.innerHTML =
+      '<div class="nf-form">' +
+      '<label>Quantas <input type="number" class="nf-qtd" min="1" max="' + max + '" value="' + max + '" style="width:58px;"></label>' +
+      '<label>Motivo <select class="nf-mot">' + MOTIVOS_NF.map(function (m) { return '<option>' + esc(m) + '</option>'; }).join('') +
+      '<option value="__outro">Outro…</option></select></label>' +
+      '<input type="text" class="nf-outro" maxlength="200" placeholder="Escreva o motivo" hidden>' +
+      '<label><input type="radio" name="nf-dest-' + item + '" value="remover" checked> Retirar do pedido</label>' +
+      '<label><input type="radio" name="nf-dest-' + item + '" value="blackorder"> Mandar para a black order do cliente</label>' +
+      '<div class="nf-dica">Não é faturada. Confira o estoque desta peça no Tiny: se estiver errado, ela volta a aparecer na loja.</div>' +
+      '<div><button class="btn-orange btn-mini nf-ok">Confirmar</button> <button class="btn-line btn-mini nf-canc">Cancelar</button></div>' +
+      '</div>';
+    var sel = td.querySelector('.nf-mot'), outro = td.querySelector('.nf-outro');
+    sel.addEventListener('change', function () { outro.hidden = sel.value !== '__outro'; if (!outro.hidden) outro.focus(); });
+    td.querySelector('.nf-canc').addEventListener('click', function () { td.innerHTML = antes; renderPedidos(); });
+    td.querySelector('.nf-ok').addEventListener('click', async function () {
+      var q = Number(td.querySelector('.nf-qtd').value);
+      var motivo = sel.value === '__outro' ? outro.value.trim() : sel.value;
+      var destino = td.querySelector('input[name="nf-dest-' + item + '"]:checked').value;
+      if (!(q >= 1 && q <= max && q % 1 === 0)) { FG.toast('Quantidade de 1 a ' + max + '.', 'erro'); return; }
+      if (!motivo) { FG.toast('Escreva o motivo.', 'erro'); return; }
+      this.disabled = true;
+      var r = await FG.marcarNaoEncontrada(ped, item, { quantidade: q, motivo: motivo, destino: destino });
+      if (r.ok === false) { FG.toast(r.msg, 'erro'); this.disabled = false; return; }
+      FG.toast(q + ' peça(s) ' + (destino === 'blackorder' ? 'mandadas para a black order' : 'retiradas do pedido') +
+        '; o cliente foi avisado. ' + (r.aviso || ''));
+      renderPedidos();
+    });
   }
 
   // Grupo de peças ("Em estoque" ou "Pré-venda"); '' se vazio.
@@ -1574,13 +1620,15 @@
     return '<div class="venda-det">' +
       (editavel && aConfirmar
         ? '<div class="adm-banner"><b>' + aConfirmar + ' peça(s)</b> marcadas como enviadas e ainda não confirmadas. ' +
-          'Confirmar fecha a remessa e envia ao Tiny <b>somente essas peças</b>; se ainda faltar peça, ' +
-          'o pedido fica como <b>Parcial</b>, a fatura segue em aberto e o restante sai numa próxima remessa. ' +
+          'Confirmar fecha a remessa e envia ao Tiny <b>somente essas peças</b>' +
+          (o.faturaNaRemessa ? ' e gera a <b>fatura só delas</b>' : '') + '; se ainda faltar peça, ' +
+          'o pedido fica como <b>Parcial</b> e o restante sai numa próxima remessa (ou marque como <b>Não encontrada</b>). ' +
           '<button class="btn-orange btn-mini vd-remessa" data-ped="' + esc(o.id) + '" style="margin-left:8px;">Confirmar envio</button></div>'
         : editavel && o.status === 'Pendente'
           ? '<div class="adm-banner">Pedido <b>aguardando conferência</b>. Confira as peças no estoque, informe ' +
-            'abaixo quanto foi encontrado de cada uma e clique em <b>Confirmar envio</b>: só essas peças vão ao Tiny. ' +
-            'O que faltar fica para uma próxima remessa.</div>'
+            'abaixo quanto foi encontrado de cada uma e clique em <b>Confirmar envio</b>: só essas peças vão ao Tiny' +
+            (o.faturaNaRemessa ? ' e entram na fatura' : '') + '. ' +
+            'O que faltar fica para uma próxima remessa, ou marque como <b>Não encontrada</b> (com o motivo).</div>'
           : '') +
       '<div class="venda-meta">' +
       '<div><span class="muted">Cliente</span><br><b>' + esc(o.empresa) + '</b><br><span class="muted">' + esc(o.usuario) + '</span></div>' +
@@ -1707,7 +1755,9 @@
         b.disabled = false;
         if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível confirmar o envio.', 'erro'); return; }
         var n = (r.itens || []).reduce(function (s, i) { return s + i.qtd; }, 0);
-        FG.toast(n + ' peça(s) enviadas ao Tiny' + (r.parcial ? ' — pedido Parcial, fatura segue em aberto.' : ' — pedido concluído.'));
+        FG.toast(n + ' peça(s) enviadas ao Tiny' +
+          (r.fatura ? ' · fatura ' + r.fatura.numero + ' (' + FG.fmtMoney(r.fatura.total) + ')' : '') +
+          (r.parcial ? ' — pedido Parcial.' : ' — pedido concluído.'));
         renderPedidos();
       });
     });
@@ -1717,6 +1767,10 @@
     });
     Array.prototype.forEach.call(view.querySelectorAll('.it-tudo'), function (b) {
       b.addEventListener('click', function () { salvarItem(b, Number(b.getAttribute('data-qtd'))); });
+    });
+    /* ---- peça não encontrada: abre o formulário na própria célula ---- */
+    Array.prototype.forEach.call(view.querySelectorAll('.it-nf'), function (b) {
+      b.addEventListener('click', function () { formNaoEncontrada(b); });
     });
     Array.prototype.forEach.call(view.querySelectorAll('select.inline-status'), function (sel) {
       sel.addEventListener('change', async function () {

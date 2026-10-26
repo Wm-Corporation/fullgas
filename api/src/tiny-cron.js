@@ -7,6 +7,7 @@ import { sincronizarLote, podarLogCron } from './tiny.js';
 import { processarExportacoes, sincronizarSituacaoPedidos } from './tiny-pedidos.js';
 import { processarContatosPendentes, sincronizarContatosDoTiny } from './tiny-contatos.js';
 import { sincronizarListasPreco } from './lista-preco.js';
+import { produtosComFila } from './black-order.js';
 
 // Trava de sobreposição: true enquanto uma rodada está em andamento.
 let rodando = false;
@@ -59,6 +60,22 @@ async function rodada() {
   }
 }
 
+// Vigia da black order: a cada 2 min lê no Tiny só as peças com fila aberta, para reservar e
+// avisar o primeiro da fila assim que a quantidade dele chegar. Pula se a rodada grande estiver no meio.
+let vigiando = false;
+export async function vigiarBlackOrders() {
+  if (vigiando || rodando) return;
+  vigiando = true;
+  try {
+    const ids = await produtosComFila();
+    if (ids.length) await sincronizarLote(ids, 'cron');
+  } catch (e) {
+    console.warn('⚠ Vigia da black order falhou:', e.message);
+  } finally {
+    vigiando = false;
+  }
+}
+
 // Liga o agendamento (chamada pelo server.js). Configuração inválida só avisa.
 export function iniciarSincronizacaoAgendada() {
   if (!process.env.TINY_TOKEN) {
@@ -81,4 +98,6 @@ export function iniciarSincronizacaoAgendada() {
 
   cron.schedule(expressao, rodada);
   console.log(`✓ Sync Tiny (cron): agendado a cada ${minutos} min (expressão "${expressao}").`);
+  cron.schedule('*/2 * * * *', vigiarBlackOrders);
+  console.log('✓ Vigia da black order: a cada 2 min (só peças com fila aberta).');
 }

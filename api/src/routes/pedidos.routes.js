@@ -11,6 +11,7 @@ import {
 import { registrarEventoPedido, historicoDoPedido, resumoPecas } from '../historico-pedido.js';
 import { listaDaEmpresa, aplicarPercentual } from '../lista-preco.js';
 import { criarBlackOrders } from '../black-order.js';
+import { criarNotificacao } from '../notificacoes.js';
 
 const router = Router();
 
@@ -40,7 +41,10 @@ function montarItem(r) {
     qtdExportada: r.QuantidadeExportada,
     backorder: !!r.EmBackorder,
     // Nº da reivindicação de varejo aprovada que atingiu este item (ou null).
-    garantiaNumero: r.GarantiaNumero || null
+    garantiaNumero: r.GarantiaNumero || null,
+    // Peças que o admin não encontrou (saíram do pedido ou foram para a black order) e o motivo.
+    naoEncontrada: r.QuantidadeNaoEncontrada || 0,
+    motivoNaoEncontrada: r.MotivoNaoEncontrada || null
   };
 }
 
@@ -86,6 +90,7 @@ function montarPedidos(pedidoRows, itemRows, boGeradas = new Map(), daBlackOrder
         parcial: somaEnv > 0 && somaEnv < somaQtd
       },
       temBackorder: itens.some(i => i.backorder),
+      faturaNaRemessa: !!p.FaturaNaRemessa,
       blackOrders: boGeradas.get(p.PedidoId) || null,
       daBlackOrder: daBlackOrder.has(p.PedidoId)
     };
@@ -93,7 +98,7 @@ function montarPedidos(pedidoRows, itemRows, boGeradas = new Map(), daBlackOrder
 }
 
 const SELECT_PEDIDO =
-  `SELECT p.PedidoId, p.NumeroPedido, p.DataPedido, p.Status, p.Total, p.Tipo,
+  `SELECT p.PedidoId, p.NumeroPedido, p.DataPedido, p.Status, p.Total, p.Tipo, p.FaturaNaRemessa,
           u.Email AS UsuarioEmail, e.RazaoSocial AS Empresa
      FROM dbo.Pedido p
      JOIN dbo.Usuario u ON u.UsuarioId = p.UsuarioId
@@ -102,7 +107,7 @@ const SELECT_PEDIDO =
 const SELECT_ITENS =
   `SELECT pi.PedidoId, pi.PedidoItemId, pi.Sku, pi.NomeProduto, pi.PrecoUnitario,
           pi.Quantidade, pi.QuantidadeEnviada, pi.QuantidadeExportada,
-          pi.EmBackorder, pi.GarantiaNumero`;
+          pi.EmBackorder, pi.GarantiaNumero, pi.QuantidadeNaoEncontrada, pi.MotivoNaoEncontrada`;
 
 // Fatura do pedido. Pedidos antigos com pré-venda (EmBackorder) foram faturados cheios.
 async function gerarFaturaPedido(tx, pedidoId, empresaId, total) {
@@ -121,8 +126,26 @@ async function gerarFaturaPedido(tx, pedidoId, empresaId, total) {
 
 // (Entregas e rastreios saíram do fluxo; as tabelas ficam pelos pedidos antigos.)
 
+// Fatura de UMA remessa (pedidos com FaturaNaRemessa): só as peças que saíram nela, com os itens gravados.
+async function gerarFaturaRemessa(tx, pedidoId, empresaId, itens) {
+  const total = Math.round(itens.reduce((s, i) => s + i.preco * i.qtd, 0) * 100) / 100;
+  const fat = await gerarFaturaPedido(tx, pedidoId, empresaId, total);
+  for (const it of itens) {
+    await new sql.Request(tx)
+      .input('fid', sql.Int, fat.faturaId)
+      .input('sku', sql.VarChar(40), it.sku)
+      .input('nome', sql.NVarChar(200), it.nome)
+      .input('preco', sql.Decimal(12, 2), it.preco)
+      .input('qtd', sql.Int, it.qtd)
+      .query(`INSERT INTO dbo.FaturaItem (FaturaId, Sku, NomeProduto, PrecoUnitario, Quantidade)
+              VALUES (@fid, @sku, @nome, @preco, @qtd)`);
+  }
+  return { ...fat, total };
+}
+
 // Fecha a remessa: o que foi enviado e ainda não foi ao Tiny vira UM pedido lá.
 // Só peças em estoque. Roda na transação do envio; devolve os itens da remessa.
+// Pedido novo (FaturaNaRemessa) ganha aqui a fatura desta remessa, em `itens.fatura`.
 async function confirmarRemessa(tx, pedidoId) {
   const pend = await new sql.Request(tx).input('pid', sql.Int, pedidoId)
     .query(`SELECT PedidoItemId, Sku, NomeProduto, PrecoUnitario,
@@ -141,8 +164,16 @@ async function confirmarRemessa(tx, pedidoId) {
              WHERE PedidoId = @pid AND EmBackorder = 0
                AND QuantidadeEnviada > QuantidadeExportada`);
   if (exportacaoLigada()) await inserirExportacao(tx, pedidoId, 'remessa', itens);
+
+  const ped = (await new sql.Request(tx).input('pid', sql.Int, pedidoId)
+    .query('SELECT EmpresaId, FaturaNaRemessa FROM dbo.Pedido WHERE PedidoId = @pid')).recordset[0];
+  if (ped?.FaturaNaRemessa) itens.fatura = await gerarFaturaRemessa(tx, pedidoId, ped.EmpresaId, itens);
   return itens;
 }
+
+// Texto da fatura gerada na remessa, para o histórico.
+const textoFatura = (itens) => (itens.fatura
+  ? ` · fatura ${itens.fatura.numeroFatura} (R$ ${itens.fatura.total.toFixed(2).replace('.', ',')})` : '');
 
 // Peças enviadas que ainda não foram ao Tiny (falta "Confirmar envio").
 async function enviadasSemConfirmar(tx, pedidoId) {
@@ -285,6 +316,7 @@ router.get('/pedidos/:numero', requireAuth, requireAreaAny(['loja', 'pedidos']),
       garantia: p.Tipo === 'garantia',
       total: Number(p.Total),
       status: p.Status,
+      faturaNaRemessa: !!p.FaturaNaRemessa,
       itens,
       faturas,
       progresso: {
@@ -337,7 +369,8 @@ export async function novoNumeroPedido(tx) {
   return num.recordset[0];
 }
 
-// Grava pedido 'Pendente' + itens (todos em estoque) + fatura com o total. Roda na transação de quem chama.
+// Grava pedido 'Pendente' + itens (todos em estoque). Roda na transação de quem chama.
+// Sem fatura aqui: ela sai em cada remessa exportada ao Tiny (FaturaNaRemessa), só com o que foi encontrado.
 // itens: [{ produtoId, sku, nome, preco, qtd }] com o preço já da lista.
 export async function gravarPedido(tx, { numero, agora, user, lista, itens }) {
   const total = Math.round(itens.reduce((s, i) => s + i.preco * i.qtd, 0) * 100) / 100;
@@ -350,9 +383,9 @@ export async function gravarPedido(tx, { numero, agora, user, lista, itens }) {
     .input('lid', sql.Int, lista?.id ?? null)
     .input('lpct', sql.Decimal(7, 2), lista ? lista.percentual : null)
     .query(`INSERT INTO dbo.Pedido (NumeroPedido, UsuarioId, EmpresaId, DataPedido, Status, Total,
-                                    ListaPrecoId, ListaPrecoPercentual)
+                                    ListaPrecoId, ListaPrecoPercentual, FaturaNaRemessa)
             OUTPUT inserted.PedidoId
-            VALUES (@num, @uid, @eid, @data, 'Pendente', @total, @lid, @lpct)`);
+            VALUES (@num, @uid, @eid, @data, 'Pendente', @total, @lid, @lpct, 1)`);
   const pedidoId = insPed.recordset[0].PedidoId;
 
   for (const it of itens) {
@@ -367,9 +400,7 @@ export async function gravarPedido(tx, { numero, agora, user, lista, itens }) {
               VALUES (@pid, @prod, @sku, @nome, @preco, @qtd, 0)`);
   }
 
-  // A fatura cobra só o que tem estoque (a black order não entra).
-  const fatura = await gerarFaturaPedido(tx, pedidoId, user.empresaId, total);
-  return { pedidoId, total, fatura };
+  return { pedidoId, total };
 }
 
 // POST /api/pedidos — cria a partir da cesta: { itens: [{ sku, quantidade }] }.
@@ -531,13 +562,14 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
                  WHERE pi.PedidoId = @pid AND pi.EmBackorder = 0
                    AND pi.Quantidade > pi.QuantidadeEnviada`);
 
-      // Anula a fatura do pedido (ligada via PedidoFatura) e as entregas.
+      // Anula a fatura cheia dos pedidos antigos. Fatura por remessa cobra peça que saiu: fica.
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .query(`UPDATE f SET f.Status = 'Anulada'
                   FROM dbo.Fatura f
                   JOIN dbo.PedidoFatura pf ON pf.FaturaId = f.FaturaId
-                 WHERE pf.PedidoId = @pid`);
+                  JOIN dbo.Pedido pe ON pe.PedidoId = pf.PedidoId
+                 WHERE pf.PedidoId = @pid AND pe.FaturaNaRemessa = 0`);
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .query(`UPDATE e SET e.Status = 'Anulada'
@@ -553,6 +585,11 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
 
       // Cancela no Tiny o que não saiu (sem esperar).
       cancelarExportacoesDoPedido(ped.PedidoId, { pecasEnviadas });
+      // O que voltou passa pela fila da black order antes da loja: recalcula pelo Tiny.
+      const skusDevolvidos = (await query(
+        'SELECT DISTINCT Sku FROM dbo.PedidoItem WHERE PedidoId = @pid', { pid: ped.PedidoId })).map(r => r.Sku);
+      atualizarEstoqueCesta(skusDevolvidos)
+        .catch(e => console.warn('⚠ Recalcular estoque após cancelamento falhou:', e.message));
 
       // Reivindicações abertas ficam para o admin decidir.
       const abertas = (await query(
@@ -684,7 +721,7 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         ...(alvoBackorder
           ? { titulo: 'Pré-venda liberada para envio', detalhe: resumoPecas(liberados) }
           : remessa.length
-            ? { titulo: 'Remessa confirmada — todas as peças em estoque', detalhe: `${resumoPecas(remessa)} · Status: ${novoStatus}` }
+            ? { titulo: 'Remessa confirmada — todas as peças em estoque', detalhe: `${resumoPecas(remessa)} · Status: ${novoStatus}${textoFatura(remessa)}` }
             : { titulo: 'Todas as peças em estoque marcadas como enviadas', detalhe: `Status: ${novoStatus}` })
       });
       return res.json({ ok: true, status: novoStatus, parcial: faltam, remessa: remessa.length });
@@ -738,9 +775,12 @@ router.post('/pedidos/:numero/remessa', requireAuth, requireAdmin, async (req, r
     await registrarEventoPedido({
       pedidoId: ped.PedidoId, tipo: 'envio', user: req.user,
       titulo: novoStatus === 'Parcial' ? 'Remessa confirmada — envio parcial' : 'Remessa confirmada — envio concluído',
-      detalhe: `${resumoPecas(itens)} · status do pedido: ${novoStatus}`
+      detalhe: `${resumoPecas(itens)} · status do pedido: ${novoStatus}${textoFatura(itens)}`
     });
-    res.json({ ok: true, status: novoStatus, itens, parcial: novoStatus === 'Parcial' });
+    res.json({
+      ok: true, status: novoStatus, itens, parcial: novoStatus === 'Parcial',
+      fatura: itens.fatura ? { numero: itens.fatura.numeroFatura, total: itens.fatura.total } : null
+    });
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }
     next(e);
@@ -822,6 +862,100 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
       });
     }
     res.json({ ok: true, itemId: it.PedidoItemId, qtdEnviada: qtd, status: novoStatus });
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* já desfeita */ }
+    next(e);
+  }
+});
+
+// Motivos prontos para peça não encontrada (o admin também pode escrever outro).
+export const MOTIVOS_NAO_ENCONTRADA = ['Não foi encontrado', 'Estoque incorreto', 'Peça danificada'];
+
+// POST /api/pedidos/:numero/itens/:itemId/nao-encontrada (admin) — { quantidade, motivo, destino }.
+// Tira do pedido peças que não foram achadas na prateleira (não serão faturadas). destino:
+//   'remover'    → saem do pedido;   'blackorder' → vão para o fim da fila de black order do cliente.
+// Só pedidos com fatura por remessa (os antigos já têm fatura cheia) e só o que ainda não saiu.
+router.post('/pedidos/:numero/itens/:itemId/nao-encontrada', requireAuth, requireAdmin, async (req, res, next) => {
+  const q = Number(req.body?.quantidade);
+  const motivo = String(req.body?.motivo || '').trim().slice(0, 200);
+  const destino = req.body?.destino === 'blackorder' ? 'blackorder' : (req.body?.destino === 'remover' ? 'remover' : null);
+  if (!Number.isInteger(q) || q <= 0) return res.status(400).json({ erro: 'Informe quantas peças não foram encontradas.' });
+  if (!motivo) return res.status(400).json({ erro: 'Informe o motivo.' });
+  if (!destino) return res.status(400).json({ erro: 'Escolha: retirar do pedido ou mandar para a black order.' });
+
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
+  const recusar = async (http, erro) => { await tx.rollback(); return res.status(http).json({ erro }); };
+  try {
+    await tx.begin();
+    const cur = await new sql.Request(tx)
+      .input('num', sql.VarChar(20), req.params.numero)
+      .input('iid', sql.Int, Number(req.params.itemId))
+      .query(`SELECT pi.PedidoId, pi.PedidoItemId, pi.ProdutoId, pi.Sku, pi.NomeProduto, pi.PrecoUnitario,
+                     pi.Quantidade, pi.QuantidadeEnviada, pi.EmBackorder,
+                     p.NumeroPedido, p.Status, p.EmpresaId, p.UsuarioId, p.FaturaNaRemessa
+                FROM dbo.PedidoItem pi
+                JOIN dbo.Pedido p ON p.PedidoId = pi.PedidoId
+               WHERE p.NumeroPedido = @num AND pi.PedidoItemId = @iid`);
+    if (!cur.recordset.length) return recusar(404, 'Item não encontrado neste pedido.');
+    const it = cur.recordset[0];
+    if (STATUS_FINAIS.includes(it.Status))
+      return recusar(409, `Pedido ${it.Status.toLowerCase()} — as peças não podem mais ser alteradas.`);
+    if (!it.FaturaNaRemessa || it.EmBackorder)
+      return recusar(409, 'Pedido anterior à fatura por remessa: a fatura dele já foi emitida cheia. Ajuste pelo cancelamento ou à mão.');
+    const naoSaiu = it.Quantidade - it.QuantidadeEnviada;
+    if (q > naoSaiu)
+      return recusar(409, `Só ${naoSaiu} un. deste item ainda não saíram (as enviadas já estão na remessa).`);
+
+    await new sql.Request(tx)
+      .input('iid', sql.Int, it.PedidoItemId)
+      .input('q', sql.Int, q)
+      .input('mot', sql.NVarChar(200), motivo)
+      .query(`UPDATE dbo.PedidoItem
+                 SET Quantidade = Quantidade - @q,
+                     QuantidadeNaoEncontrada = QuantidadeNaoEncontrada + @q,
+                     MotivoNaoEncontrada = @mot
+               WHERE PedidoItemId = @iid`);
+    const valor = Math.round(Number(it.PrecoUnitario) * q * 100) / 100;
+    await new sql.Request(tx)
+      .input('pid', sql.Int, it.PedidoId)
+      .input('v', sql.Decimal(12, 2), valor)
+      .query('UPDATE dbo.Pedido SET Total = Total - @v, AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid');
+
+    let blackOrder = null;
+    if (destino === 'blackorder') {
+      [blackOrder] = await criarBlackOrders(tx, {
+        numeroPedido: it.NumeroPedido, pedidoId: it.PedidoId, empresaId: it.EmpresaId, usuarioId: it.UsuarioId,
+        itens: [{ produtoId: it.ProdutoId, sku: it.Sku, nome: it.NomeProduto, qtd: q }]
+      });
+    }
+
+    const novoStatus = await statusPorEnvio(tx, it.PedidoId, it.Status);
+    await new sql.Request(tx)
+      .input('pid', sql.Int, it.PedidoId)
+      .input('st', sql.NVarChar(14), novoStatus)
+      .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid');
+    await tx.commit();
+
+    const rumo = destino === 'blackorder'
+      ? 'foram para a sua black order (você é avisado quando chegarem)'
+      : 'foram retiradas do pedido';
+    await registrarEventoPedido({
+      pedidoId: it.PedidoId, tipo: 'aviso', user: req.user,
+      titulo: `Peça não encontrada: ${it.Sku}`,
+      detalhe: `${q}× ${it.NomeProduto} — ${motivo}. ${destino === 'blackorder' ? 'Foi para a black order.' : 'Retirada do pedido.'} Não será faturada.`
+    });
+    await criarNotificacao({
+      empresaId: it.EmpresaId, publico: 'cliente', origem: 'blackorder', criadoPor: req.user.id,
+      link: '#pedido/' + it.NumeroPedido,
+      titulo: `Pedido ${it.NumeroPedido}: peça não encontrada`,
+      texto: `${q} un. de ${it.NomeProduto} (${it.Sku}) não foram encontradas no estoque.\nMotivo: ${motivo}.\n` +
+        `Estas peças ${rumo} e não serão cobradas.`
+    });
+    // O reservado do pedido caiu: recalcula estoque e fila pelo Tiny.
+    atualizarEstoqueCesta([it.Sku]).catch(e => console.warn('⚠ Recalcular estoque falhou:', e.message));
+
+    res.json({ ok: true, status: novoStatus, blackOrder, aviso: 'Confira o estoque desta peça no Tiny: se ele estiver errado, a peça volta a aparecer na loja.' });
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }
     next(e);

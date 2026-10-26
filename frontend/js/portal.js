@@ -1267,6 +1267,7 @@
   // Bolinha da peça: verde enviado, amarelo parcial, cinza pendente, vermelho cancelado.
   function dotItem(it, cancelado) {
     if (cancelado) return '<span class="item-dot dot-cancelado" title="Cancelado"></span>';
+    if (!it.qtd && it.naoEncontrada) return '<span class="item-dot dot-cancelado" title="Não encontrada"></span>';
     var cls = it.qtdEnviada >= it.qtd ? 'dot-ok' : (it.qtdEnviada > 0 ? 'dot-parcial' : 'dot-pendente');
     var t = it.qtdEnviada >= it.qtd ? 'Enviado' : (it.qtdEnviada > 0 ? 'Parcial' : 'Não enviado');
     return '<span class="item-dot ' + cls + '" title="' + t + '"></span>';
@@ -1289,6 +1290,8 @@
       itens.map(function (it) {
         return '<tr><td>' + dotItem(it, cancelado) + '</td><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) +
           (it.garantiaNumero ? ' <span class="pill-status Garantia" title="Peça com garantia de varejo aprovada">Garantia Nº ' + esc(it.garantiaNumero) + '</span>' : '') +
+          (it.naoEncontrada ? '<div class="nf-info">' + it.naoEncontrada + ' un. não encontrada(s) no estoque — ' +
+            esc(it.motivoNaoEncontrada || '') + '. Não serão cobradas.</div>' : '') +
           '</td>' +
           '<td class="right">' + it.qtd + '</td><td class="right">' + it.qtdEnviada + '</td>' +
           '<td class="right">' + FG.fmtMoneyOpt(it.preco) + '</td>' +
@@ -1352,8 +1355,12 @@
             '<td><span class="pill-status bo-' + esc(b.status) + '">' + esc(BO_ROTULO[b.status] || b.status) + '</span></td></tr>';
         }).join('') + '</tbody></table>';
 
+    if (d.faturaNaRemessa && !cancelado && (!d.faturas || !d.faturas.length))
+      html += '<h3 class="sec-title">Faturas</h3><p class="muted">A fatura é gerada quando as peças forem enviadas ' +
+        '(uma por remessa), só com o que foi encontrado no estoque.</p>';
     if (d.faturas && d.faturas.length)
       html += '<h3 class="sec-title">Faturas</h3>' +
+        (d.faturaNaRemessa ? '<p class="muted">Uma fatura por remessa enviada, só com as peças que saíram nela.</p>' : '') +
         '<table class="table"><thead><tr><th>Fatura</th><th>Data</th><th>Status</th>' +
         '<th class="right">Valor</th></tr></thead><tbody>' +
         d.faturas.map(function (f) {
@@ -1490,7 +1497,7 @@
     view.innerHTML =
       '<h2>Carrinho da black order</h2>' +
       '<p class="muted">Estas peças chegaram e estão separadas para você. Escolha quanto quer de cada uma: ' +
-      'você paga só o que comprar, pelo preço de hoje, e vira um pedido normal com fatura. ' +
+      'você paga só o que comprar, pelo preço de hoje, e vira um pedido normal (faturado quando as peças saírem). ' +
       'Comprando tudo o que chegou, o que ainda não chegou continua na sua black order. ' +
       'Comprando menos, essa passa a ser a sua quantidade final: a black order da peça é encerrada e o que sobrou vai para o próximo da fila.</p>' +
       '<table class="table bo-carrinho"><thead><tr><th>Foto</th><th>Peça</th><th>Compra de origem</th>' +
@@ -1565,7 +1572,7 @@
           (r.id ? 'Compra feita!' : 'Pronto!') + '</h2>' +
           (r.id
             ? '<p>Pedido <a href="#pedido/' + esc(r.id) + '"><b>' + esc(r.id) + '</b></a> criado' +
-              (r.total != null ? ' · total <b>' + FG.fmtMoney(r.total) + '</b>' : '') + '. A fatura está em Conta financeira.</p>'
+              (r.total != null ? ' · total <b>' + FG.fmtMoney(r.total) + '</b>' : '') + '. A fatura é gerada quando as peças forem enviadas.</p>'
             : '<p>Você não comprou nenhuma peça desta vez.</p>') +
           lib + '<a class="btn red" href="#blackorder">Ver minhas black orders</a></div>';
       });

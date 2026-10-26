@@ -699,7 +699,13 @@
     });
   }
 
-  // "Confirmar envio" (admin). Promise<{ ok, status, itens, parcial }>.
+  // Peça não encontrada (admin): { quantidade, motivo, destino: 'remover' | 'blackorder' }.
+  FG.marcarNaoEncontrada = function (numero, itemId, dados) {
+    return putPedido('/pedidos/' + encodeURIComponent(numero) + '/itens/' + encodeURIComponent(itemId) + '/nao-encontrada', dados, 'POST')
+      .then(function (r) { return r.ok && FG.recarregarBlackOrders ? FG.recarregarBlackOrders().then(function () { return r; }, function () { return r; }) : r; });
+  };
+
+  // "Confirmar envio" (admin). Promise<{ ok, status, itens, parcial, fatura }>.
   FG.confirmarRemessa = function (numero) {
     return putPedido('/pedidos/' + encodeURIComponent(numero) + '/remessa', {}, 'POST');
   };

@@ -13,14 +13,23 @@ async function itensPorFatura(faturaIds) {
   if (!faturaIds.length) return map;
   const params = {};
   const marks = faturaIds.map((id, i) => { params['f' + i] = id; return '@f' + i; });
+  // Fatura por remessa tem os próprios itens (FaturaItem); a antiga, cheia, usa os itens do pedido.
   const rows = await query(
     `SELECT pf.FaturaId, p.NumeroPedido,
-            pi.Sku, pi.NomeProduto, pi.PrecoUnitario, pi.Quantidade, pi.Subtotal
+            fi.Sku, fi.NomeProduto, fi.PrecoUnitario, fi.Quantidade, fi.Subtotal, fi.FaturaItemId AS Ordem
+       FROM dbo.PedidoFatura pf
+       JOIN dbo.Pedido p ON p.PedidoId = pf.PedidoId
+       JOIN dbo.FaturaItem fi ON fi.FaturaId = pf.FaturaId
+      WHERE pf.FaturaId IN (${marks.join(',')})
+     UNION ALL
+     SELECT pf.FaturaId, p.NumeroPedido,
+            pi.Sku, pi.NomeProduto, pi.PrecoUnitario, pi.Quantidade, pi.Subtotal, pi.PedidoItemId AS Ordem
        FROM dbo.PedidoFatura pf
        JOIN dbo.PedidoItem pi ON pi.PedidoId = pf.PedidoId
        JOIN dbo.Pedido p ON p.PedidoId = pf.PedidoId
-      WHERE pf.FaturaId IN (${marks.join(',')})
-      ORDER BY pf.FaturaId, pi.PedidoItemId`,
+      WHERE pf.FaturaId IN (${marks.join(',')}) AND pi.Quantidade > 0
+        AND NOT EXISTS (SELECT 1 FROM dbo.FaturaItem x WHERE x.FaturaId = pf.FaturaId)
+      ORDER BY FaturaId, Ordem`,
     params
   );
   for (const r of rows) {
