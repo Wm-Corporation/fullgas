@@ -54,6 +54,8 @@ function toVeiculo(r, req) {
     modeloId: r.ModeloCodigo,
     // Nome do modelo junto (modelo desativado não vem em /veiculos/modelos).
     modelo: r.ModeloEtiqueta || [r.ModeloNome, r.ModeloAno].filter(Boolean).join(' ') || r.ModeloCodigo,
+    // Só o nome, sem ano: quem mostra o ano da unidade usa `ano`, não o do catálogo.
+    modeloNome: r.ModeloNome,
     ano: r.Ano,
     status: r.Status,
     entrada: r.EntradaEstoque,

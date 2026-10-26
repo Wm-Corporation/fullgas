@@ -126,11 +126,6 @@
     var cls = { 'Em processo': 'proc', 'Aprovada': 'ok', 'Recusada': 'bad', 'Esboço': 'draft' }[st] || 'proc';
     return '<span class="badge ' + cls + '">' + esc(st) + '</span>';
   }
-  // `reserva`: nome do modelo vindo do chassi (modelo inativo).
-  function modelName(modeloId, reserva) {
-    var m = FG.model(modeloId);
-    return m ? (m.nome + ' ' + m.ano) : (reserva || modeloId);
-  }
 
   /* =========================================================
      HOME
@@ -597,7 +592,7 @@
       }).join('') + '</select></div>' +
       '<div class="field"><label>NIV do veículo *</label><select id="nc-niv">' +
       vehs.map(function (v) {
-        return '<option value="' + v.niv + '">' + v.niv + ' — ' + esc(modelName(v.modeloId, v.modelo)) +
+        return '<option value="' + v.niv + '">' + v.niv + ' — ' + esc(FG.modeloDaUnidade(v)) +
           (v.venda ? '' : ' (em estoque)') + '</option>';
       }).join('') +
       '</select></div>' +
@@ -1634,34 +1629,129 @@
   function renderEstoque() {
     setCrumb(['Estoque do revendedor']); setTabOn('estoque');
     var vehs = FG.all('vehicles');
-    // Admin vê todas as concessionárias: ganha a coluna de localização.
     var admin = sess.papel === 'admin';
+    var f = { busca: '', status: '', modelo: '', ano: '', local: '' };
+    var ord = { col: '', dir: 1 };
     function local(v) { return v.fabrica ? 'Fábrica' : (v.empresa || ''); }
+    function norm(t) { return String(t == null ? '' : t).toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, ''); }
+
+    var CHAVE = {
+      niv: function (v) { return v.niv; },
+      modelo: function (v) { return FG.nomeModelo(v); },
+      ano: function (v) { return v.ano || 0; },
+      local: local,
+      status: function (v) { return v.status || ''; },
+      entrada: function (v) { return v.entrada ? new Date(v.entrada).getTime() : 0; }
+    };
+    function comparar(a, b) {
+      var x = CHAVE[ord.col](a), y = CHAVE[ord.col](b);
+      var r = typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'pt-BR', { numeric: true });
+      return (r || a.niv.localeCompare(b.niv)) * ord.dir;
+    }
+    function visiveis() {
+      var termo = norm(f.busca.trim());
+      var l = vehs.filter(function (v) {
+        if (f.status && v.status !== f.status) return false;
+        if (f.modelo && FG.nomeModelo(v) !== f.modelo) return false;
+        if (f.ano && String(v.ano) !== f.ano) return false;
+        if (f.local === 'fabrica' && !v.fabrica) return false;
+        if (f.local === 'conc' && v.fabrica) return false;
+        return !termo || norm([v.niv, FG.modeloDaUnidade(v), local(v), v.status].join(' ')).indexOf(termo) >= 0;
+      });
+      return ord.col ? l.slice().sort(comparar) : l;
+    }
+    function distintos(fn, desc) {
+      var s = {};
+      vehs.forEach(function (v) { var k = fn(v); if (k) s[k] = 1; });
+      var l = Object.keys(s).sort(function (a, b) { return String(a).localeCompare(String(b), 'pt-BR', { numeric: true }); });
+      return desc ? l.reverse() : l;
+    }
+    function selFiltro(k, rotulo, opcoes) {
+      return '<label>' + rotulo + ': <select data-es="' + k + '"><option value="">Todos</option>' +
+        opcoes.map(function (o) {
+          return '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>';
+        }).join('') + '</select></label>';
+    }
+    function cab(col, texto) {
+      return '<th data-col="' + col + '"><button type="button" class="th-ord" data-ord="' + col + '">' + texto + '</button></th>';
+    }
+    function linha(v) {
+      return '<tr class="lin-clic" data-niv="' + esc(v.niv) + '"><td class="td-foto">' + FG.fotoVeiculo(v, 'mini') + '</td>' +
+        '<td><a href="#acoes/' + esc(v.niv) + '">' + esc(v.niv) + '</a></td>' +
+        '<td>' + esc(FG.nomeModelo(v)) + '</td><td class="nowrap">' + esc(v.ano || '—') + '</td>' +
+        (admin ? '<td>' + (v.fabrica ? FG.seloFabrica() : esc(v.empresa || '—')) + '</td>' : '') +
+        '<td>' + (v.status === 'Disponível' ? '<span class="stock-ok">Disponível</span>' : esc(v.status)) + '</td>' +
+        '<td>' + FG.fmtDate(v.entrada) + '</td>' +
+        '<td><a href="#acoes/' + esc(v.niv) + '">Ações &rsaquo;</a></td></tr>';
+    }
+
     view.innerHTML =
       '<h2>Estoque do revendedor</h2>' +
-      '<div class="toolbar"><button class="tool" id="es-csv">📄 Export. p/ Excel</button></div>' +
-      '<table class="table tbl-veic"><thead><tr><th>Foto</th><th class="filt">NIV</th><th class="filt">Modelo</th>' +
-      (admin ? '<th>Localização</th>' : '') +
-      '<th class="filt">Status</th><th>Entrada</th><th></th></tr></thead><tbody>' +
-      (vehs.length ? '' : '<tr><td colspan="' + (admin ? 7 : 6) + '" class="muted">Nenhuma moto no seu estoque ainda. ' +
-        'Quando a Fullgas atribuir chassis à sua concessionária, eles aparecem aqui.</td></tr>') +
-      vehs.map(function (v) {
-        // Foto do modelo (miniatura) — clicar amplia; o NIV abre a ficha.
-        return '<tr><td class="td-foto">' + FG.fotoVeiculo(v, 'mini') + '</td>' +
-          '<td><a href="#acoes/' + esc(v.niv) + '">' + esc(v.niv) + '</a></td><td>' + esc(modelName(v.modeloId, v.modelo)) + '</td>' +
-          (admin ? '<td>' + (v.fabrica ? FG.seloFabrica() : esc(v.empresa || '—')) + '</td>' : '') +
-          '<td>' + (v.status === 'Disponível' ? '<span class="stock-ok">Disponível</span>' : esc(v.status)) + '</td>' +
-          '<td>' + FG.fmtDate(v.entrada) + '</td>' +
-          '<td><a href="#acoes/' + v.niv + '">Ações &rsaquo;</a></td></tr>';
-      }).join('') +
-      '</tbody></table>';
+      '<div class="toolbar"><button class="tool" id="es-csv" title="Exporta as motos que estão na lista, com o filtro e a ordem atuais">📄 Export. p/ Excel</button></div>' +
+      (vehs.length
+        ? '<div class="es-filtros">' +
+          '<input type="text" class="es-busca" data-es="busca" placeholder="Buscar por NIV, modelo, ano' + (admin ? ' ou localização' : '') + '" autocomplete="off">' +
+          selFiltro('status', 'Status', distintos(function (v) { return v.status; }).map(function (x) { return [x, x]; })) +
+          selFiltro('modelo', 'Modelo', distintos(function (v) { return FG.nomeModelo(v); }).map(function (x) { return [x, x]; })) +
+          selFiltro('ano', 'Ano', distintos(function (v) { return v.ano; }, true).map(function (x) { return [x, x]; })) +
+          (admin ? selFiltro('local', 'Localização', [['fabrica', 'Na Fábrica'], ['conc', 'Em concessionária']]) : '') +
+          '<button type="button" class="tool" id="es-limpar" hidden>✖ Limpar filtros</button>' +
+          '<span class="es-cont" id="es-cont" aria-live="polite"></span></div>'
+        : '') +
+      '<table class="table tbl-veic"><thead><tr><th>Foto</th>' +
+      cab('niv', 'NIV') + cab('modelo', 'Modelo') + cab('ano', 'Ano') + (admin ? cab('local', 'Localização') : '') +
+      cab('status', 'Status') + cab('entrada', 'Entrada') + '<th></th></tr></thead><tbody id="es-corpo"></tbody></table>';
+
+    var corpo = document.getElementById('es-corpo');
+    var colunas = admin ? 8 : 7;
+    function atualizar() {
+      var l = visiveis();
+      var filtrado = !!(f.busca.trim() || f.status || f.modelo || f.ano || f.local);
+      corpo.innerHTML = l.length ? l.map(linha).join('')
+        : '<tr><td colspan="' + colunas + '" class="muted">' + (vehs.length
+          ? 'Nenhuma moto com esse filtro.'
+          : 'Nenhuma moto no seu estoque ainda. Quando a Fullgas atribuir chassis à sua concessionária, eles aparecem aqui.') + '</td></tr>';
+      var cont = document.getElementById('es-cont');
+      if (cont) cont.textContent = (filtrado ? l.length + ' de ' + vehs.length : vehs.length) + (vehs.length === 1 ? ' moto' : ' motos');
+      var lim = document.getElementById('es-limpar');
+      if (lim) lim.hidden = !filtrado;
+      Array.prototype.forEach.call(view.querySelectorAll('thead th[data-col]'), function (th) {
+        if (th.getAttribute('data-col') === ord.col) th.setAttribute('aria-sort', ord.dir > 0 ? 'ascending' : 'descending');
+        else th.removeAttribute('aria-sort');
+      });
+    }
+
+    Array.prototype.forEach.call(view.querySelectorAll('[data-es]'), function (el) {
+      var k = el.getAttribute('data-es');
+      el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', function () { f[k] = el.value; atualizar(); });
+    });
+    var btnLimpar = document.getElementById('es-limpar');
+    if (btnLimpar) btnLimpar.addEventListener('click', function () {
+      Object.keys(f).forEach(function (k) { f[k] = ''; });
+      Array.prototype.forEach.call(view.querySelectorAll('[data-es]'), function (el) { el.value = ''; });
+      atualizar();
+    });
+    Array.prototype.forEach.call(view.querySelectorAll('[data-ord]'), function (b) {
+      b.addEventListener('click', function () {
+        var col = b.getAttribute('data-ord');
+        if (ord.col === col) ord.dir = -ord.dir; else { ord.col = col; ord.dir = 1; }
+        atualizar();
+      });
+    });
+    // A linha inteira abre a ficha; link, botão e foto (que amplia) seguem com a ação própria.
+    corpo.addEventListener('click', function (e) {
+      if (e.target.closest('a, button, img')) return;
+      var tr = e.target.closest('tr[data-niv]');
+      if (tr) location.hash = '#acoes/' + tr.getAttribute('data-niv');
+    });
     document.getElementById('es-csv').addEventListener('click', function () {
-      var linhas = [['NIV', 'Modelo'].concat(admin ? ['Localização'] : [], ['Status', 'Entrada'])];
-      vehs.forEach(function (v) {
-        linhas.push([v.niv, modelName(v.modeloId, v.modelo)].concat(admin ? [local(v)] : [], [v.status, FG.fmtDate(v.entrada)]));
+      var linhas = [['NIV', 'Modelo', 'Ano'].concat(admin ? ['Localização'] : [], ['Status', 'Entrada'])];
+      visiveis().forEach(function (v) {
+        linhas.push([v.niv, FG.nomeModelo(v), v.ano || ''].concat(admin ? [local(v)] : [], [v.status, FG.fmtDate(v.entrada)]));
       });
       FG.exportCSV('estoque', linhas);
     });
+    atualizar();
   }
 
   /* =========================================================
@@ -2573,7 +2663,7 @@
 
     if (vehs.length) {
       html += '<h3>Veículos</h3><table class="table"><tbody>' + vehs.map(function (v) {
-        return '<tr><td><a href="#acoes/' + v.niv + '">' + v.niv + '</a></td><td>' + esc(modelName(v.modeloId)) + '</td><td>' + esc(v.status) + '</td></tr>';
+        return '<tr><td><a href="#acoes/' + v.niv + '">' + v.niv + '</a></td><td>' + esc(FG.modeloDaUnidade(v)) + '</td><td>' + esc(v.status) + '</td></tr>';
       }).join('') + '</tbody></table>';
     }
     if (mods.length) {

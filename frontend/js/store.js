@@ -660,6 +660,17 @@
       return (m && m.label) || v.modelo || v.modeloId || '—';
     },
 
+    // Nome do modelo sem ano. O ano certo é o da unidade (v.ano), não o do catálogo.
+    nomeModelo: function (v) {
+      var m = FG.model(v.modeloId);
+      return (m && m.nome) || v.modeloNome || v.modelo || v.modeloId || '—';
+    },
+
+    // "MX2 2028": modelo + ano da unidade.
+    modeloDaUnidade: function (v) {
+      return FG.nomeModelo(v) + (v.ano ? ' ' + v.ano : '');
+    },
+
     // Foto do modelo. tam: 'grande' (original) | 'media' | 'mini' (miniatura).
     fotoVeiculo: function (v, tam) {
       tam = tam || 'mini';
