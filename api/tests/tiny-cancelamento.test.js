@@ -1,4 +1,4 @@
-// Cancelamento: com peça já enviada, não cancela no Tiny (só aviso);
+// Cancelamento: cancelar no Fullgas cancela no Tiny tudo da venda (regra de 27/10/2026);
 // cancelado ou excluído no Tiny vira aviso na exportação.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
@@ -8,8 +8,8 @@ vi.mock('../src/db.js', () => ({
   query: async (texto, p = {}) => {
     if (/SELECT ExportId, Escopo, TinyPedidoId FROM dbo\.TinyPedidoExport/.test(texto))
       return exportacoes.filter(e => e.Status !== 'cancelado');
-    if (/UPDATE dbo\.TinyPedidoExport SET Status = 'cancelado', UltimoErro = @msg/.test(texto)) {
-      const e = exportacoes.find(x => x.ExportId === p.id); e.Status = 'cancelado'; e.UltimoErro = p.msg; return [];
+    if (/UPDATE dbo\.TinyPedidoExport SET Status = 'cancelado', UltimoErro = NULL/.test(texto)) {
+      const e = exportacoes.find(x => x.ExportId === p.id); e.Status = 'cancelado'; e.UltimoErro = null; return [];
     }
     if (/SELECT e\.ExportId, e\.TinyPedidoId, p\.PedidoId/.test(texto))
       return exportacoes.filter(e => e.Status === 'enviado').map(e => ({ ...e, NumeroPedido: '0005041888', Status: 'Enviado', TemPendente: 0 }));
@@ -45,30 +45,21 @@ beforeEach(() => {
 });
 
 describe('cancelar no Fullgas', () => {
-  it('nada enviado: cancela no Tiny', async () => {
-    await cancelarExportacoesDoPedido(11, { pecasEnviadas: 0 });
+  it('cancela no Tiny o pedido inteiro', async () => {
+    await cancelarExportacoesDoPedido(11);
     expect(chamadasTiny).toEqual([{ id: '761800492', sit: 'cancelado' }]);
     expect(exportacoes[0]).toMatchObject({ Status: 'cancelado', UltimoErro: null });
   });
 
-  it('pedido inteiro com peça enviada: NÃO mexe no Tiny e deixa o aviso de ajuste manual', async () => {
-    await cancelarExportacoesDoPedido(11, { pecasEnviadas: 1 });
-    expect(chamadasTiny).toHaveLength(0);
-    expect(exportacoes[0].Status).toBe('cancelado');
-    expect(exportacoes[0].UltimoErro).toMatch(/1 peça\(s\) já enviada\(s\).*ajuste o pedido 761800492/);
-  });
-
-  it('remessa e pré-venda liberada ficam como estão (só levam peças que saíram)', async () => {
+  it('cancela também remessas e pré-venda já exportadas; a pendente só é marcada (nunca chegou lá)', async () => {
     exportacoes = [
       { ExportId: 20, Escopo: 'remessa', TinyPedidoId: '761800500', Status: 'enviado', UltimoErro: null },
       { ExportId: 21, Escopo: 'backorder', TinyPedidoId: '761800501', Status: 'enviado', UltimoErro: null },
       { ExportId: 22, Escopo: 'remessa', TinyPedidoId: null, Status: 'pendente', UltimoErro: null }
     ];
-    await cancelarExportacoesDoPedido(11, { pecasEnviadas: 3 });
-    expect(chamadasTiny).toHaveLength(0);
-    expect(exportacoes.map(e => [e.Status, e.UltimoErro])).toEqual([
-      ['enviado', null], ['enviado', null], ['pendente', null]   // a pendente segue para o Tiny pela fila
-    ]);
+    await cancelarExportacoesDoPedido(11);
+    expect(chamadasTiny).toEqual([{ id: '761800500', sit: 'cancelado' }, { id: '761800501', sit: 'cancelado' }]);
+    expect(exportacoes.map(e => e.Status)).toEqual(['cancelado', 'cancelado', 'cancelado']);
   });
 });
 

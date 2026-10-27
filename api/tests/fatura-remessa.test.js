@@ -191,7 +191,7 @@ describe('peça não encontrada', () => {
 });
 
 describe('cancelamento', () => {
-  it('não anula fatura de remessa (cobra peça que saiu) e recalcula o estoque pela fila', async () => {
+  it('anula todas as faturas (tudo é cancelado no Tiny) e recalcula o estoque pela fila depois', async () => {
     responder = (t) => {
       if (/SELECT PedidoId, Status, EmpresaId, Total FROM dbo\.Pedido/.test(t)) return [{ PedidoId: 10, Status: 'Parcial', EmpresaId: 7, Total: 70 }];
       if (/SELECT DISTINCT Sku FROM dbo\.PedidoItem/.test(t)) return [{ Sku: 'A1' }, { Sku: 'B2' }];
@@ -199,7 +199,8 @@ describe('cancelamento', () => {
     };
     const r = await request(app()).put('/api/pedidos/0005041900/status').send({ status: 'Cancelado' });
     expect(r.status).toBe(200);
-    expect(achar(/UPDATE f SET f\.Status = 'Anulada'/)[0].texto).toMatch(/pe\.FaturaNaRemessa = 0/);
+    expect(achar(/UPDATE f SET f\.Status = 'Anulada'/)[0].texto).not.toMatch(/FaturaNaRemessa/);
+    await new Promise(r => setTimeout(r, 20));              // o recálculo vem depois do cancelamento no Tiny
     expect(recalculados).toEqual(['A1', 'B2']);
   });
 });

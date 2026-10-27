@@ -326,30 +326,18 @@ export async function sincronizarSituacaoPedidos() {
 
 /* ---------------- cancelamento ---------------- */
 
-// Cancelamento local → cancela no Tiny (linhas marcadas 'cancelado' antes da chamada).
-// Remessa e pré-venda ficam como estão (só levam o que saiu).
-// Pedido inteiro ('normal') com peça já enviada: só aviso de ajuste manual.
-const SO_O_QUE_SAIU = ['remessa', 'backorder'];
-export async function cancelarExportacoesDoPedido(pedidoId, { pecasEnviadas = 0 } = {}) {
+// Cancelamento local → cancela no Tiny TODOS os pedidos daquela venda, inclusive remessas já
+// exportadas (regra de 27/10/2026): o Tiny devolve o estoque. Linhas marcadas 'cancelado' antes da chamada.
+export async function cancelarExportacoesDoPedido(pedidoId) {
   const rows = await query(
     `SELECT ExportId, Escopo, TinyPedidoId FROM dbo.TinyPedidoExport
       WHERE PedidoId = @pid AND Status <> 'cancelado'`, { pid: pedidoId });
   for (const r of rows) {
-    if (pecasEnviadas > 0 && SO_O_QUE_SAIU.includes(r.Escopo)) continue;
-    const manual = pecasEnviadas > 0 && r.TinyPedidoId
-      ? `Pedido cancelado no Fullgas com ${pecasEnviadas} peça(s) já enviada(s): ajuste o pedido ` +
-        `${r.TinyPedidoId} no Tiny à mão — só as peças que não saíram devem voltar ao estoque.`
-      : null;
     await query(
-      "UPDATE dbo.TinyPedidoExport SET Status = 'cancelado', UltimoErro = @msg WHERE ExportId = @id",
-      { id: r.ExportId, msg: manual }
+      "UPDATE dbo.TinyPedidoExport SET Status = 'cancelado', UltimoErro = NULL WHERE ExportId = @id",
+      { id: r.ExportId }
     );
     if (!r.TinyPedidoId) continue; // nunca chegou ao Tiny: nada a desfazer lá
-    if (manual) {
-      console.warn(`⚠ Exportação Tiny #${r.ExportId}: ${manual}`);
-      await registrarEventoPedido({ pedidoId, tipo: 'aviso', titulo: 'Tiny precisa de ajuste manual', detalhe: manual });
-      continue;
-    }
     try {
       await alterarSituacaoPedido(r.TinyPedidoId, 'cancelado');
       console.log(`✓ Exportação Tiny #${r.ExportId}: pedido ${r.TinyPedidoId} cancelado no Tiny.`);

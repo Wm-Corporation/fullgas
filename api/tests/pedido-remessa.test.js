@@ -272,33 +272,25 @@ describe('Entregue só depois de Enviado', () => {
   });
 });
 
-describe('cancelar devolve só o que não saiu', () => {
-  it('nada enviado: devolve tudo e manda cancelar no Tiny', async () => {
+describe('cancelar cancela tudo, também no Tiny', () => {
+  it('nada enviado: devolve tudo, anula a fatura e manda cancelar no Tiny', async () => {
     await mudar('Aprovado');
     const r = await mudar('Cancelado');
     expect(r.status).toBe(200);
     expect(devolvido).toEqual({ 100: 3, 200: 2 });
     expect(fatura).toBe('Anulada');
-    expect(cancelados).toEqual([{ pedidoId: 10, pecasEnviadas: 0 }]);
+    expect(cancelados).toEqual([{ pedidoId: 10 }]);
     expect(r.body.aviso).toBeNull();
   });
 
-  it('Parcial por remessa: só o restante volta e não há ajuste manual (a remessa já está certa)', async () => {
+  it('com peça já enviada: cancela no Tiny também e avisa para conferir a volta física', async () => {
     await enviar(1, 2);                     // 2 das 3 peças A1 saíram
     await confirmar();
     const r = await mudar('Cancelado');
     expect(r.status).toBe(200);
-    expect(devolvido).toEqual({ 100: 1, 200: 2 });
-    expect(cancelados).toEqual([{ pedidoId: 10, pecasEnviadas: 2 }]);
-    expect(r.body.aviso).toBeNull();
-  });
-
-  it('pedido que foi inteiro ao Tiny com peça enviada: aviso de ajuste manual', async () => {
-    pedidoQueFoiInteiro();
-    await enviar(1, 2);
-    const r = await mudar('Cancelado');
-    expect(devolvido).toEqual({ 100: 1, 200: 2 });
-    expect(r.body.aviso).toMatch(/2 peça\(s\) já tinham saído.*ajuste manual/);
+    expect(cancelados).toEqual([{ pedidoId: 10 }]);
+    expect(fatura).toBe('Anulada');
+    expect(r.body.aviso).toMatch(/2 peça\(s\) já tinham sido enviadas.*confira/);
   });
 
   it('peça marcada como enviada sem "Confirmar envio" bloqueia o cancelamento', async () => {

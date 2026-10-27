@@ -1462,8 +1462,8 @@
         '\n\nElas vão ao Tiny agora, numa remessa. Se faltou alguma peça na prateleira, use o detalhe do ' +
         'pedido e informe só o que foi encontrado.',
       'Entregue': 'Marcar o pedido ' + num + ' como ENTREGUE?\n\nÉ um status final: o pedido não muda mais.',
-      'Cancelado': 'CANCELAR o pedido ' + num + '?\n\nA fatura é anulada. O que não saiu é cancelado no Tiny; ' +
-        'as remessas já enviadas ficam. Peças que já saíram não voltam ao estoque. Não dá para desfazer.',
+      'Cancelado': 'CANCELAR o pedido ' + num + '?\n\nO pedido é cancelado também no Tiny (inclusive remessas já ' +
+        'enviadas: o estoque volta lá) e as faturas são anuladas. Não dá para desfazer.',
       'Pendente': 'Voltar o pedido ' + num + ' para Pendente?'
     }[st];
     return !txt || window.confirm(txt);

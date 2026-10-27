@@ -542,15 +542,10 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         return recusar(409, `${semConfirmar} peça(s) marcadas como enviadas ainda não foram confirmadas. ` +
           'Clique em "Confirmar envio" (se saíram) ou zere a quantidade enviada (se não saíram) antes de cancelar.');
 
-      // Peças que já saíram não voltam ao estoque (decisão de 30/09/2026).
+      // Cancelar aqui cancela tudo no Tiny, inclusive remessas exportadas (regra de 27/10/2026).
       const env = await new sql.Request(tx).input('pid', sql.Int, ped.PedidoId)
         .query('SELECT ISNULL(SUM(QuantidadeEnviada), 0) AS n FROM dbo.PedidoItem WHERE PedidoId = @pid');
       const pecasEnviadas = env.recordset[0].n || 0;
-      // Ajuste manual no Tiny só se o pedido foi inteiro (escopo 'normal') e parte já saiu.
-      const inteiro = await new sql.Request(tx).input('pid', sql.Int, ped.PedidoId)
-        .query(`SELECT COUNT(*) AS n FROM dbo.TinyPedidoExport
-                 WHERE PedidoId = @pid AND Escopo = 'normal' AND Status <> 'cancelado'`);
-      const ajusteManual = pecasEnviadas > 0 && (inteiro.recordset[0]?.n || 0) > 0;
 
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
@@ -562,14 +557,13 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
                  WHERE pi.PedidoId = @pid AND pi.EmBackorder = 0
                    AND pi.Quantidade > pi.QuantidadeEnviada`);
 
-      // Anula a fatura cheia dos pedidos antigos. Fatura por remessa cobra peça que saiu: fica.
+      // Tudo é cancelado no Tiny: todas as faturas do pedido (cheia ou de remessa) são anuladas.
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .query(`UPDATE f SET f.Status = 'Anulada'
                   FROM dbo.Fatura f
                   JOIN dbo.PedidoFatura pf ON pf.FaturaId = f.FaturaId
-                  JOIN dbo.Pedido pe ON pe.PedidoId = pf.PedidoId
-                 WHERE pf.PedidoId = @pid AND pe.FaturaNaRemessa = 0`);
+                 WHERE pf.PedidoId = @pid`);
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .query(`UPDATE e SET e.Status = 'Anulada'
@@ -583,13 +577,13 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
 
       await tx.commit();
 
-      // Cancela no Tiny o que não saiu (sem esperar).
-      cancelarExportacoesDoPedido(ped.PedidoId, { pecasEnviadas });
-      // O que voltou passa pela fila da black order antes da loja: recalcula pelo Tiny.
+      // Cancela no Tiny (sem esperar a resposta) e, depois, recalcula o estoque pelo Tiny:
+      // o que voltou passa pela fila da black order antes da loja.
       const skusDevolvidos = (await query(
         'SELECT DISTINCT Sku FROM dbo.PedidoItem WHERE PedidoId = @pid', { pid: ped.PedidoId })).map(r => r.Sku);
-      atualizarEstoqueCesta(skusDevolvidos)
-        .catch(e => console.warn('⚠ Recalcular estoque após cancelamento falhou:', e.message));
+      Promise.resolve(cancelarExportacoesDoPedido(ped.PedidoId))
+        .then(() => atualizarEstoqueCesta(skusDevolvidos))
+        .catch(e => console.warn('⚠ Cancelar no Tiny / recalcular estoque falhou:', e.message));
 
       // Reivindicações abertas ficam para o admin decidir.
       const abertas = (await query(
@@ -598,20 +592,15 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       await registrarEventoPedido({
         pedidoId: ped.PedidoId, tipo: 'cancelado', titulo: 'Pedido cancelado', user: req.user,
         detalhe: [
-          !pecasEnviadas
-            ? 'Nenhuma peça tinha saído: o estoque foi devolvido.'
-            : ajusteManual
-              ? `${pecasEnviadas} peça(s) já tinham saído e não voltaram ao estoque; o pedido no Tiny precisa de ajuste manual.`
-              : `${pecasEnviadas} peça(s) já tinham saído e não voltaram ao estoque; as remessas no Tiny ficam como estão.`,
+          'Cancelado também no Tiny (o estoque volta lá) e faturas anuladas.',
+          pecasEnviadas ? `${pecasEnviadas} peça(s) já tinham sido enviadas: confira se voltaram fisicamente.` : '',
           abertas.length ? `Reivindicação(ões) ainda aberta(s): ${abertas.join(', ')} — revise no painel.` : ''
         ].filter(Boolean).join(' ')
       });
 
       return res.json({
         ok: true, status: 'Cancelado', pecasEnviadas,
-        aviso: ajusteManual
-          ? `${pecasEnviadas} peça(s) já tinham saído: não voltaram ao estoque e o pedido no Tiny precisa de ajuste manual.`
-          : null
+        aviso: pecasEnviadas ? `${pecasEnviadas} peça(s) já tinham sido enviadas: o Tiny devolve o estoque delas; confira se voltaram fisicamente.` : null
       });
     }
 
