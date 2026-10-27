@@ -1499,7 +1499,7 @@
       '<p class="muted">Estas peças chegaram e estão separadas para você. Escolha quanto quer de cada uma: ' +
       'você paga só o que comprar, pelo preço de hoje, e vira um pedido normal (faturado quando as peças saírem). ' +
       'Comprando tudo o que chegou, o que ainda não chegou continua na sua black order. ' +
-      'Comprando menos, essa passa a ser a sua quantidade final: a black order da peça é encerrada e o que sobrou vai para o próximo da fila.</p>' +
+      'Comprando menos, essa passa a ser a sua quantidade final e a black order da peça é encerrada.</p>' +
       '<table class="table bo-carrinho"><thead><tr><th>Foto</th><th>Peça</th><th>Compra de origem</th>' +
       '<th class="right">Disponível</th><th class="right">Ainda na fila</th><th class="right">Comprar</th>' +
       (comPreco ? '<th class="right">Preço un.</th><th class="right">Subtotal</th>' : '') + '</tr></thead><tbody>' +
@@ -1531,10 +1531,8 @@
         var b = disp.find(function (x) { return String(x.id) === inp.getAttribute('data-id'); });
         var aviso = view.querySelector('.bo-encerra[data-id="' + b.id + '"]');
         var q = lerQtd(inp);
-        var naFila = Math.max(0, b.pendente - b.reservada);
         aviso.hidden = q >= b.reservada;
-        aviso.textContent = q >= b.reservada ? '' : (b.reservada - q) + ' volta(m) ao estoque' +
-          (naFila ? ' e ' + naFila + ' na fila saem da black order' : '') + ' — encerra esta black order';
+        aviso.textContent = q >= b.reservada ? '' : 'Comprando menos, esta black order é encerrada.';
       });
       if (!comPreco) return;
       var total = 0;
@@ -1564,17 +1562,13 @@
           renderBOCarrinho();     // a lista já foi recarregada com o que está disponível agora
           return;
         }
-        var lib = (r.liberadas || []).length
-          ? '<p class="muted">Liberadas (não compradas): ' + r.liberadas.map(function (l) {
-            return esc(l.nome) + ' — ' + l.quantidade + ' un.';
-          }).join('; ') + '</p>' : '';
         view.innerHTML = '<div class="empty-box"><h2 style="color:var(--green);">✔ ' +
           (r.id ? 'Compra feita!' : 'Pronto!') + '</h2>' +
           (r.id
             ? '<p>Pedido <a href="#pedido/' + esc(r.id) + '"><b>' + esc(r.id) + '</b></a> criado' +
               (r.total != null ? ' · total <b>' + FG.fmtMoney(r.total) + '</b>' : '') + '. A fatura é gerada quando as peças forem enviadas.</p>'
             : '<p>Você não comprou nenhuma peça desta vez.</p>') +
-          lib + '<a class="btn red" href="#blackorder">Ver minhas black orders</a></div>';
+          '<a class="btn red" href="#blackorder">Ver minhas black orders</a></div>';
       });
     });
   }
