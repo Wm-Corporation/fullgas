@@ -471,7 +471,7 @@ router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async 
       })
       : [];
 
-    // Não exporta ao Tiny aqui: só na remessa. Até lá valem as reservas (pedidos e fila).
+    // Não exporta ao Tiny aqui: só na remessa. Até lá valem as reservas (pedidos e black orders liberadas).
     await tx.commit();
 
     const emp = await query('SELECT RazaoSocial FROM dbo.Empresa WHERE EmpresaId = @id', { id: req.user.empresaId });
@@ -578,7 +578,7 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       await tx.commit();
 
       // Cancela no Tiny (sem esperar a resposta) e, depois, recalcula o estoque pelo Tiny:
-      // o que voltou passa pela fila da black order antes da loja.
+      // o que voltou vai direto para a loja.
       const skusDevolvidos = (await query(
         'SELECT DISTINCT Sku FROM dbo.PedidoItem WHERE PedidoId = @pid', { pid: ped.PedidoId })).map(r => r.Sku);
       Promise.resolve(cancelarExportacoesDoPedido(ped.PedidoId))
@@ -867,7 +867,7 @@ export const MOTIVOS_RETIRADA = ['Não foi encontrado', 'Estoque incorreto', 'Pe
 
 // POST /api/pedidos/:numero/itens/:itemId/retirar (admin) — { quantidade, motivo, descricao?, destino }.
 // Retira peças do pedido antes do envio (não serão faturadas), com o que aconteceu. destino:
-//   'remover'    → saem do pedido;   'blackorder' → vão para o fim da fila de black order do cliente.
+//   'remover'    → saem do pedido;   'blackorder' → viram black order do cliente (aguardando chegada).
 // Só pedidos com fatura por remessa (os antigos já têm fatura cheia) e só o que ainda não saiu.
 // Retirou tudo = pedido cancelado (nada foi ao Tiny). '/nao-encontrada' é o nome antigo da rota.
 router.post(['/pedidos/:numero/itens/:itemId/retirar', '/pedidos/:numero/itens/:itemId/nao-encontrada'],
@@ -954,7 +954,7 @@ router.post(['/pedidos/:numero/itens/:itemId/retirar', '/pedidos/:numero/itens/:
       texto: `${q} un. de ${it.NomeProduto} (${it.Sku}) foram retiradas do pedido.\nO que aconteceu: ${motivo}.\n` +
         `Estas peças ${rumo} e não serão cobradas.` + (resto > 0 ? '' : '\nComo não sobrou nenhuma peça, o pedido foi cancelado.')
     });
-    // O reservado do pedido caiu: recalcula estoque e fila pelo Tiny.
+    // O reservado do pedido caiu: recalcula o estoque pelo Tiny.
     atualizarEstoqueCesta([it.Sku]).catch(e => console.warn('⚠ Recalcular estoque falhou:', e.message));
 
     res.json({ ok: true, status: novoStatus, blackOrder, aviso: 'Confira o estoque desta peça no Tiny: se ele estiver errado, a peça volta a aparecer na loja.' });

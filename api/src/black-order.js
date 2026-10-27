@@ -1,7 +1,7 @@
-// Black order: o que faltou no estoque no checkout vira fila por peça (sem fatura, sem Tiny).
-// A fila segura o saldo do Tiny antes da loja, na ordem de chegada; quem recebe a quantidade inteira é avisado
-// e compra pelo carrinho da black order (POST /api/blackorders/comprar), que vira pedido normal.
-import { query, sql } from './db.js';
+// Black order: o que faltou no estoque no checkout (sem fatura, sem Tiny). Não há fila: cada uma é
+// atendida à parte. O admin libera a peça quando chega (liberarBlackOrder), ela fica guardada para o
+// cliente e ele compra pelo carrinho da black order (POST /api/blackorders/comprar), que vira pedido normal.
+import { query, getPool, sql } from './db.js';
 import { criarNotificacao } from './notificacoes.js';
 
 export const ABERTAS = ['Fila', 'Disponivel'];
@@ -10,94 +10,92 @@ export const LINK_CARRINHO = '#blackorder/carrinho';
 // O que a linha ainda espera (inclui o que já está reservado).
 export const pendente = (r) => r.Quantidade - r.QuantidadeAtendida - r.QuantidadeDescartada;
 
-// Status depois de uma mudança de quantidades.
+// Status depois de uma mudança de quantidades ('Fila' = aguardando chegada).
 export function statusDe({ Quantidade, QuantidadeReservada, QuantidadeAtendida, QuantidadeDescartada }) {
   if (Quantidade - QuantidadeAtendida - QuantidadeDescartada > 0) return QuantidadeReservada > 0 ? 'Disponivel' : 'Fila';
   return QuantidadeAtendida > 0 ? 'Atendida' : 'Cancelada';
 }
 
-// Quanto do saldo do Tiny a fila segura: tudo o que ainda espera (a loja só vê o que sobra).
+// Quanto do saldo do Tiny está guardado para black orders liberadas (a loja só vê o que sobra).
 export async function reservaBlackOrders(produtoId) {
   const r = (await query(
-    `SELECT ISNULL(SUM(Quantidade - QuantidadeAtendida - QuantidadeDescartada), 0) AS Reserva
+    `SELECT ISNULL(SUM(QuantidadeReservada), 0) AS Reserva
        FROM dbo.BlackOrder
-      WHERE ProdutoId = @pid AND Status IN ('Fila', 'Disponivel')`,
+      WHERE ProdutoId = @pid AND Status = 'Disponivel'`,
     { pid: produtoId }
   ))[0];
   return Number(r?.Reserva) || 0;
 }
 
-// Distribui `livre` pela fila em ordem de chegada. linhas: [{ BlackOrderId, pendente }] já ordenadas.
-// Tudo ou nada, e o primeiro da fila sempre antes: só reserva quando chegou a quantidade inteira
-// dele; enquanto não chega, as peças ficam guardadas (fora da loja) e quem vem atrás espera.
-export function distribuir(linhas, livre) {
-  let resto = Math.max(0, Math.floor(Number(livre) || 0));
-  let travada = false;
-  return linhas.map(l => {
-    if (!travada && l.pendente > 0 && resto >= l.pendente) {
-      resto -= l.pendente;
-      return { id: l.BlackOrderId, reservada: l.pendente };
-    }
-    if (l.pendente > 0) travada = true;
-    return { id: l.BlackOrderId, reservada: 0 };
-  });
-}
-
-// Peças com black order aberta (o verificador de 2 em 2 minutos só olha estas no Tiny).
-export async function produtosComFila() {
-  const r = await query(
-    `SELECT DISTINCT ProdutoId FROM dbo.BlackOrder WHERE Status IN ('Fila', 'Disponivel')`
+// Admin libera peças de black orders abertas. pedidos: [{ id, quantidade? }] (sem quantidade = tudo o que falta).
+// Tira do estoque da loja numa instrução só (sem estoque, recusa) e guarda para o cliente; avisa uma vez por empresa.
+// Devolve { liberadas: [...], recusadas: [{ id, erro }] }.
+export async function liberarBlackOrders(pedidos, adminId) {
+  const ids = pedidos.map(p => p.id);
+  const params = {};
+  const marks = ids.map((id, i) => { params['i' + i] = id; return '@i' + i; });
+  const linhas = await query(
+    `SELECT BlackOrderId, ProdutoId, EmpresaId, NumeroPedido, Sku, NomeProduto, Quantidade,
+            QuantidadeReservada, QuantidadeAtendida, QuantidadeDescartada, Status
+       FROM dbo.BlackOrder WHERE BlackOrderId IN (${marks.join(',')})`,
+    params
   );
-  return r.map(x => x.ProdutoId);
-}
 
-// Recalcula a reserva da fila de uma peça. `livre` = saldo do Tiny menos a reserva dos pedidos.
-// Grava só o que mudou e só se a linha não mudou no meio (compra/desistência concorrente).
-// Quem passou a ter peça (reservada subiu) é avisado. Nunca lança: o estoque já foi gravado.
-export async function alocarBlackOrders(produtoId, livre) {
-  try {
-    const linhas = await query(
-      `SELECT BlackOrderId, EmpresaId, NumeroPedido, Sku, NomeProduto, Quantidade,
-              QuantidadeReservada, QuantidadeAtendida, QuantidadeDescartada
-         FROM dbo.BlackOrder
-        WHERE ProdutoId = @pid AND Status IN ('Fila', 'Disponivel')
-        ORDER BY BlackOrderId`,
-      { pid: produtoId }
-    );
-    if (!linhas.length) return [];
-    const plano = distribuir(linhas.map(l => ({ BlackOrderId: l.BlackOrderId, pendente: pendente(l) })), livre);
-
-    const avisos = [];
-    for (let i = 0; i < linhas.length; i++) {
-      const l = linhas[i];
-      const nova = plano[i].reservada;
-      if (nova === l.QuantidadeReservada) continue;
-      const status = statusDe({ ...l, QuantidadeReservada: nova });
-      const r = await query(
-        `UPDATE dbo.BlackOrder
-            SET QuantidadeReservada = @res, Status = @st, AtualizadoEm = SYSUTCDATETIME(),
-                AvisadoEm = CASE WHEN @res > QuantidadeReservada THEN SYSUTCDATETIME() ELSE AvisadoEm END
-          OUTPUT inserted.BlackOrderId
-          WHERE BlackOrderId = @id AND QuantidadeReservada = @resAntes
-            AND QuantidadeAtendida = @atd AND QuantidadeDescartada = @desc
-            AND Status IN ('Fila', 'Disponivel')`,
-        {
-          res: nova, st: status, id: l.BlackOrderId, resAntes: l.QuantidadeReservada,
-          atd: l.QuantidadeAtendida, desc: l.QuantidadeDescartada
-        }
-      );
-      if (r.length && nova > l.QuantidadeReservada) avisos.push({ ...l, reservada: nova });
+  const liberadas = [];
+  const recusadas = [];
+  const pool = await getPool();
+  for (const ped of pedidos) {
+    const l = linhas.find(x => x.BlackOrderId === ped.id);
+    if (!l) { recusadas.push({ id: ped.id, erro: 'Black order não encontrada.' }); continue; }
+    const falta = pendente(l) - l.QuantidadeReservada;
+    if (!ABERTAS.includes(l.Status) || falta <= 0) {
+      recusadas.push({ id: ped.id, erro: `${l.NomeProduto} (${l.Sku}): nada a liberar.` });
+      continue;
     }
-    await avisarDisponiveis(avisos);
-    return avisos;
-  } catch (e) {
-    console.error(`Falha ao distribuir a black order do produto ${produtoId}:`, e.message);
-    return [];
+    const q = ped.quantidade == null ? falta : Math.min(falta, ped.quantidade);
+    if (!(q > 0)) { recusadas.push({ id: ped.id, erro: `${l.NomeProduto} (${l.Sku}): quantidade inválida.` }); continue; }
+
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+      const baixa = await new sql.Request(tx)
+        .input('pid', sql.Int, l.ProdutoId).input('q', sql.Int, q)
+        .query(`UPDATE dbo.Produto SET Estoque = Estoque - @q, AtualizadoEm = SYSUTCDATETIME()
+                OUTPUT inserted.Estoque
+                 WHERE ProdutoId = @pid AND Estoque >= @q`);
+      if (!baixa.recordset.length) {
+        await tx.rollback();
+        recusadas.push({ id: ped.id, erro: `${l.NomeProduto} (${l.Sku}): o estoque não tem ${q} un. livres.` });
+        continue;
+      }
+      const res = l.QuantidadeReservada + q;
+      const upd = await new sql.Request(tx)
+        .input('id', sql.Int, l.BlackOrderId).input('res', sql.Int, res).input('resAntes', sql.Int, l.QuantidadeReservada)
+        .input('st', sql.VarChar(12), statusDe({ ...l, QuantidadeReservada: res }))
+        .input('atd', sql.Int, l.QuantidadeAtendida).input('desc', sql.Int, l.QuantidadeDescartada)
+        .query(`UPDATE dbo.BlackOrder
+                   SET QuantidadeReservada = @res, Status = @st, AvisadoEm = SYSUTCDATETIME(), AtualizadoEm = SYSUTCDATETIME()
+                OUTPUT inserted.BlackOrderId
+                 WHERE BlackOrderId = @id AND QuantidadeReservada = @resAntes
+                   AND QuantidadeAtendida = @atd AND QuantidadeDescartada = @desc AND Status IN ('Fila', 'Disponivel')`);
+      if (!upd.recordset.length) {
+        await tx.rollback();
+        recusadas.push({ id: ped.id, erro: `${l.NomeProduto} (${l.Sku}): a black order mudou. Recarregue a página.` });
+        continue;
+      }
+      await tx.commit();
+      liberadas.push({ ...l, liberada: q, reservada: res });
+    } catch (e) {
+      try { await tx.rollback(); } catch { /* já desfeita */ }
+      throw e;
+    }
   }
+  await avisarDisponiveis(liberadas, adminId);
+  return { liberadas, recusadas };
 }
 
 // Um aviso por empresa, com o link do carrinho da black order.
-async function avisarDisponiveis(avisos) {
+async function avisarDisponiveis(avisos, criadoPor = null) {
   const porEmpresa = new Map();
   for (const a of avisos) {
     if (!porEmpresa.has(a.EmpresaId)) porEmpresa.set(a.EmpresaId, []);
@@ -110,10 +108,11 @@ async function avisarDisponiveis(avisos) {
       publico: 'cliente',
       origem: 'blackorder',
       link: LINK_CARRINHO,
+      criadoPor,
       titulo: lista.length === 1
         ? `Chegou peça da sua black order: ${lista[0].NomeProduto}`
         : `Chegaram ${lista.length} peças da sua black order`,
-      texto: 'Estas peças estão separadas para você:\n' + pecas.join('\n') +
+      texto: 'Estas peças estão disponíveis em estoque e separadas para você:\n' + pecas.join('\n') +
         '\n\nAbra o carrinho da black order para escolher quanto quer de cada uma. ' +
         'Você paga só o que comprar; o que não quiser volta para o estoque.'
     });

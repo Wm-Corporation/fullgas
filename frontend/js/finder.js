@@ -417,9 +417,9 @@
         });
       });
 
-      /* adiciona as marcadas à cesta; o que passar do estoque vira black order no pedido */
+      /* adiciona as marcadas à cesta; o que passar do estoque vira black order no pedido (avisado após o envio) */
       document.getElementById('fa-cart').addEventListener('click', function () {
-        var add = 0, recusadas = 0, ajustadas = 0, black = 0;
+        var add = 0, recusadas = 0, ajustadas = 0;
         Array.prototype.forEach.call(fdView.querySelectorAll('.part-row.sel .qn'), function (qn) {
           var qtd = Math.max(0, Number(qn.value) || 0);
           if (qtd <= 0) return;
@@ -430,10 +430,8 @@
           var cabia = Math.max(0, Math.min(qtd, lim - ja));
           if (cabia < qtd) ajustadas++;
           add += cabia;
-          if (FG.divisaoCesta(art, ja + cabia).black > 0) black++;
         });
         if (add) FG.toast(add + ' item(ns) enviados à cesta da loja.' +
-          (black ? ' ' + black + ' peça(s) sem estoque suficiente: o que faltar entra em black order.' : '') +
           (ajustadas ? ' ' + ajustadas + ' ajustado(s) ao máximo por item.' : '') +
           (recusadas ? ' ' + recusadas + ' indisponível(is).' : ''),
           (ajustadas || recusadas) ? 'erro' : undefined);

@@ -96,13 +96,6 @@
 
   function stockHTML(p) { return FG.seloEstoque(p); }
 
-  // Abaixo da quantidade na cesta: quanto sai agora e quanto vira black order.
-  function divisaoHTML(p, qtd) {
-    var d = FG.divisaoCesta(p.artigo, qtd);
-    if (!d.black) return '';
-    return '<small class="ct-div">' + (d.envio ? d.envio + ' agora · ' : '') + '<b>' + d.black + ' black order</b></small>';
-  }
-
   // Foto do produto (miniatura na lista; `inteira` = original); sem foto, o desenho da categoria.
   function prodImg(p, w, inteira) {
     if (p.imagem) {
@@ -320,11 +313,7 @@
           if (!FG.compravel(art)) FG.toast('Produto indisponível para compra.', 'erro');
           return;
         }
-        var noCarro = (FG.cart().find(function (i) { return i.artigo === art; }) || {}).qtd || 0;
-        var div = FG.divisaoCesta(art, noCarro);
         if (ajustou) FG.toast('Quantidade máxima por item: ' + lim + ' un. Quantidade ajustada.', 'erro');
-        else if (div.black) FG.toast(qtd + '× adicionado. ' + (div.envio ? div.envio + ' sai(em) agora e ' : '') +
-          div.black + ' entra(m) em black order (sem cobrança agora).');
         else FG.toast(qtd + '× adicionado à cesta.');
         refreshCart();
       });
@@ -357,7 +346,7 @@
           '<button class="btn dark add-cart" data-art="' + esc(p.artigo) + '">🛒 Adicionar ao carrinho</button></div>'
         : '<div class="prod-buy" style="margin:0 0 18px;justify-content:flex-start;">' +
           '<button class="btn dark" disabled style="opacity:.55;cursor:not-allowed;">Indisponível</button>' +
-          '<span class="muted" style="font-size:12px;">Produto sem estoque e sem previsão de chegada.</span></div>') +
+          '<span class="muted" style="font-size:12px;">Produto indisponível para compra.</span></div>') +
       (usados.length ? '<p class="muted" style="font-size:12px;">Aplicação (Parts Finder): ' +
         usados.map(function (m) { return '<a href="/finder#/modelo/' + esc(m.id) + '/chassi">' + esc(m.nome + ' ' + m.ano) + '</a>'; }).join(' · ') + '</p>' : '') +
       '</div></div>';
@@ -438,6 +427,31 @@
     });
   }
 
+  // Pop-up logo após o pedido: quais itens entraram em black order (o estoque só é conferido no envio).
+  function popupBlackOrder(o, bos) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML = '<div class="modal modal-bo" role="dialog" aria-modal="true" aria-labelledby="bo-pop-tit">' +
+      '<header><h3 id="bo-pop-tit">Itens em black order</h3><button class="x" aria-label="Fechar">×</button></header>' +
+      '<div class="modal-body">' +
+      '<p>' + (o.pedidoCriado
+        ? 'Seu pedido <b>' + esc(o.id) + '</b> foi enviado, mas estes itens não tinham estoque suficiente e entraram como <b>black order</b>:'
+        : 'Nenhum item tinha estoque. Toda a compra <b>' + esc(o.id) + '</b> entrou como <b>black order</b>:') + '</p>' +
+      '<table class="table"><thead><tr><th>Artigo</th><th>Peça</th><th class="right">Qtd.</th></tr></thead><tbody>' +
+      bos.map(function (b) {
+        return '<tr><td>' + esc(b.sku) + '</td><td>' + esc(b.nome) + '</td><td class="right">' + b.quantidade + ' un.</td></tr>';
+      }).join('') + '</tbody></table>' +
+      '<p class="muted">Eles <b>não foram cobrados</b>. Avisamos nas Notificações quando estiverem disponíveis em estoque para compra.</p>' +
+      '<div class="modal-bo-acoes"><a class="btn" href="/portal#blackorder">Ver black orders</a>' +
+      '<button class="btn red bo-pop-ok">Entendi</button></div>' +
+      '</div></div>';
+    document.body.appendChild(back);
+    var fechar = function () { back.remove(); };
+    back.querySelector('.x').addEventListener('click', fechar);
+    back.querySelector('.bo-pop-ok').addEventListener('click', fechar);
+    back.querySelector('.bo-pop-ok').focus();
+  }
+
   /* =========================================================
      ROTA: carrinho
      ========================================================= */
@@ -457,35 +471,14 @@
         '<span><b><a href="#/produto/' + esc(p.artigo) + '">' + esc(p.nome) + '</a></b><br><span class="muted">' + esc(p.artigo) + '</span>' +
         '<br>' + stockHTML(p) + '</span>' +
         '<span>' + FG.fmtMoney(p.preco) + '</span>' +
-        '<span><input class="qty-in ct-qty" data-art="' + esc(p.artigo) + '" type="number" min="0" step="1" value="' + i.qtd + '">' +
-        divisaoHTML(p, i.qtd) + '</span>' +
+        '<span><input class="qty-in ct-qty" data-art="' + esc(p.artigo) + '" type="number" min="0" step="1" value="' + i.qtd + '"></span>' +
         '<span class="right"><b>' + FG.fmtMoney(p.preco * i.qtd) + '</b></span>' +
         '<button class="del link-action ct-del" data-art="' + esc(p.artigo) + '" title="Remover">✕</button></div>';
     });
-    // O que faltar no estoque vira black order: não é cobrado agora, entra na fila e você é avisado quando chegar.
-    var blacks = cart.filter(function (i) { return FG.product(i.artigo) && FG.divisaoCesta(i.artigo, i.qtd).black > 0; });
-    var avisoHTML = '';
-    if (blacks.length) {
-      avisoHTML += '<div class="backorder-aviso bo-aviso"><b>Black order:</b> o estoque não cobre ' + blacks.length +
-        ' item(ns). O que estiver em estoque sai neste pedido; o restante entra em <b>black order</b> — ' +
-        'não é cobrado agora, entra na fila de chegada e você é avisado nas Notificações quando chegar.<ul>' +
-        blacks.map(function (i) {
-          var p = FG.product(i.artigo); var d = FG.divisaoCesta(i.artigo, i.qtd);
-          return '<li>' + esc(p.nome) + ' <span class="muted">(' + esc(p.artigo) + ')</span> — ' +
-            (d.envio ? d.envio + ' agora + ' : '') + '<b>' + d.black + ' em black order</b>' +
-            (p.previsao ? ' · previsão ' + esc(p.previsao) : '') + '</li>';
-        }).join('') + '</ul></div>';
-    }
-
-    var totalEnvio = FG.cartTotalEnvio();
-    var totalBlack = FG.cartTotal() - totalEnvio;
-    html += '<div class="cart-tot"><span>Total do pedido</span><span class="v">' + FG.fmtMoney(totalEnvio) + '</span></div>' +
-      '<p class="muted cart-fat">A fatura é gerada quando as peças forem enviadas, só com o que for encontrado no estoque.</p>' +
-      (totalBlack > 0.004
-        ? '<div class="cart-tot cart-tot-bo"><span>Em black order (estimativa pelo preço de hoje; cobrado só quando chegar e você comprar)</span>' +
-          '<span class="v">' + FG.fmtMoney(totalBlack) + '</span></div>'
-        : '') +
-      avisoHTML +
+    // Quanto vira black order só aparece depois do envio (o estoque é conferido na hora do pedido).
+    html += '<div class="cart-tot"><span>Total da cesta</span><span class="v">' + FG.fmtMoney(FG.cartTotal()) + '</span></div>' +
+      '<p class="muted cart-fat">Itens sem estoque na hora do pedido entram em black order e não são cobrados; ' +
+      'logo após o envio você vê quais foram. A fatura é gerada quando as peças forem enviadas.</p>' +
       '<div style="display:flex;justify-content:flex-end;gap:10px;">' +
       '<button class="btn" id="ct-limpar">Limpar cesta</button>' +
       '<button class="btn red" id="ct-enviar">Enviar pedido</button></div>';
@@ -514,22 +507,16 @@
       refreshCart();
       if (!o) { btn.disabled = false; btn.textContent = 'Enviar pedido'; return; }
       var bos = o.blackOrders || [];
-      var boHTML = bos.length ?
-        '<div class="backorder-aviso bo-aviso" style="max-width:560px;margin:14px auto;text-align:left;">' +
-        '<b>Black order criada</b> (não cobrada agora). Você será avisado nas Notificações quando chegar:<ul>' +
-        bos.map(function (b) {
-          return '<li>' + esc(b.nome) + ' <span class="muted">(' + esc(b.sku) + ')</span> — ' + b.quantidade + ' un.</li>';
-        }).join('') + '</ul>Acompanhe em <a href="/portal#blackorder">Pedidos › Blackorder</a>.</div>' : '';
       view.innerHTML = '<div class="empty-box"><h2 style="color:var(--green);">✔ ' +
         (o.pedidoCriado ? 'Pedido enviado!' : 'Black order registrada!') + '</h2>' +
         (o.pedidoCriado
           ? '<p>Número do pedido: <b>' + esc(o.id) + '</b> · total: <b>' + FG.fmtMoney(o.total) + '</b></p>' +
             '<p class="muted">A fatura é gerada quando as peças forem enviadas.</p>'
           : '<p>Compra nº <b>' + esc(o.id) + '</b>: nada estava em estoque, então nada foi cobrado.</p>') +
-        boHTML +
         '<p class="muted">Acompanhe o andamento no histórico de pedidos.</p>' +
         '<a class="btn red" href="' + (o.pedidoCriado ? '#/pedidos' : '/portal#blackorder') + '">' +
         (o.pedidoCriado ? 'Ver histórico' : 'Ver black orders') + '</a> <a class="btn" href="#/">Continuar comprando</a></div>';
+      if (bos.length) popupBlackOrder(o, bos);
     });
   }
 
