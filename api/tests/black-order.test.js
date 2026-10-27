@@ -1,4 +1,4 @@
-// Black order: fila por ordem de chegada, reserva no sync do Tiny, checkout dividido (estoque = pedido
+// Black order: sem fila (o admin libera cada uma), reserva só do liberado no sync do Tiny, checkout dividido (estoque = pedido
 // com fatura; resto = black order), compra pelo carrinho da black order, desistência e fatura.
 // db.js é um dublê (cada teste troca o `responder`); tiny-pedidos e histórico também.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -66,26 +66,6 @@ const achar = (re) => chamadas.filter(c => re.test(c.texto));
 
 beforeEach(() => { chamadas = []; transacoes = []; recalculados = []; responder = () => []; });
 
-describe('distribuir — fila por ordem de chegada', () => {
-  const fila = [{ BlackOrderId: 1, pendente: 5 }, { BlackOrderId: 2, pendente: 3 }, { BlackOrderId: 3, pendente: 4 }];
-  it('tudo ou nada: reserva só a quantidade inteira de cada um', () => {
-    expect(bo.distribuir(fila, 8).map(x => x.reservada)).toEqual([5, 3, 0]);
-  });
-  it('o primeiro da fila trava: sem a quantidade dele, ninguém atrás recebe', () => {
-    // 4 chegaram: não cobrem os 5 do primeiro; o segundo (3) cabia, mas espera.
-    expect(bo.distribuir(fila, 4).map(x => x.reservada)).toEqual([0, 0, 0]);
-    expect(bo.distribuir(fila, 6).map(x => x.reservada)).toEqual([5, 0, 0]);
-  });
-  it('linha sem pendência não trava a fila', () => {
-    expect(bo.distribuir([{ BlackOrderId: 1, pendente: 0 }, { BlackOrderId: 2, pendente: 2 }], 2).map(x => x.reservada)).toEqual([0, 2]);
-  });
-  it('sem saldo ninguém recebe; saldo de sobra atende todos', () => {
-    expect(bo.distribuir(fila, 0).map(x => x.reservada)).toEqual([0, 0, 0]);
-    expect(bo.distribuir(fila, -3).map(x => x.reservada)).toEqual([0, 0, 0]);
-    expect(bo.distribuir(fila, 50).map(x => x.reservada)).toEqual([5, 3, 4]);
-  });
-});
-
 describe('statusDe', () => {
   it('fila, disponível, atendida e cancelada', () => {
     expect(bo.statusDe({ Quantidade: 5, QuantidadeReservada: 0, QuantidadeAtendida: 0, QuantidadeDescartada: 0 })).toBe('Fila');
@@ -95,83 +75,83 @@ describe('statusDe', () => {
   });
 });
 
-// Fila do produto 100: BO 1 (empresa 7, 5 un.) e BO 2 (empresa 9, 4 un.), nada reservado ainda.
-function filaProduto100() {
+// Produto 100: BO 1 (empresa 7, 5 un.) e BO 2 (empresa 9, 4 un.), nada liberado ainda.
+function abertasProduto100() {
   return [
-    { BlackOrderId: 1, EmpresaId: 7, NumeroPedido: '0005041900', Sku: 'A1', NomeProduto: 'PECA A', Quantidade: 5, QuantidadeReservada: 0, QuantidadeAtendida: 0, QuantidadeDescartada: 0 },
-    { BlackOrderId: 2, EmpresaId: 9, NumeroPedido: '0005041901', Sku: 'A1', NomeProduto: 'PECA A', Quantidade: 4, QuantidadeReservada: 0, QuantidadeAtendida: 0, QuantidadeDescartada: 0 }
+    { BlackOrderId: 1, ProdutoId: 100, EmpresaId: 7, NumeroPedido: '0005041900', Sku: 'A1', NomeProduto: 'PECA A', Quantidade: 5, QuantidadeReservada: 0, QuantidadeAtendida: 0, QuantidadeDescartada: 0, Status: 'Fila' },
+    { BlackOrderId: 2, ProdutoId: 100, EmpresaId: 9, NumeroPedido: '0005041901', Sku: 'A1', NomeProduto: 'PECA A', Quantidade: 4, QuantidadeReservada: 0, QuantidadeAtendida: 0, QuantidadeDescartada: 0, Status: 'Fila' }
   ];
 }
 
-describe('alocarBlackOrders', () => {
-  it('reserva a quantidade inteira na ordem e avisa só quem foi completado', async () => {
-    const linhas = filaProduto100();
-    responder = (t, p) => {
-      if (/FROM dbo\.BlackOrder\s+WHERE ProdutoId = @pid AND Status IN/.test(t)) return linhas;
+describe('admin libera a black order (sem fila)', () => {
+  function banco(linhas, estoque) {
+    return (t, p) => {
+      if (/FROM dbo\.BlackOrder WHERE BlackOrderId IN/.test(t)) return linhas;
+      if (/UPDATE dbo\.Produto SET Estoque = Estoque - @q/.test(t)) {
+        if (estoque.v < p.q) return [];
+        estoque.v -= p.q; return [{ Estoque: estoque.v }];
+      }
       if (/UPDATE dbo\.BlackOrder/.test(t)) return [{ BlackOrderId: p.id }];
       return [];
     };
-    const avisos = await bo.alocarBlackOrders(100, 7);   // 5 do primeiro; 2 não completam os 4 do segundo
-    const upds = achar(/UPDATE dbo\.BlackOrder/);
-    expect(upds.map(u => [u.p.id, u.p.res, u.p.st])).toEqual([[1, 5, 'Disponivel']]);
-    // Condição otimista: só grava se nada mudou desde a leitura.
-    expect(upds[0].texto).toMatch(/QuantidadeReservada = @resAntes/);
-    expect(avisos.map(a => a.BlackOrderId)).toEqual([1]);
+  }
+
+  it('libera a segunda sem passar pela primeira: cada uma é atendida à parte', async () => {
+    const estoque = { v: 4 };
+    responder = banco(abertasProduto100(), estoque);
+    const r = await request(app(rotasBO, ADMIN)).post('/api/blackorders/liberar').send({ itens: [{ id: 2 }] });
+    expect(r.status).toBe(200);
+    expect(r.body.liberadas).toEqual([{ id: 2, quantidade: 4 }]);
+    expect(estoque.v).toBe(0);                               // saiu da loja: fica guardada para o cliente
+    const upd = achar(/UPDATE dbo\.BlackOrder/)[0];
+    expect(upd.p).toMatchObject({ id: 2, res: 4, st: 'Disponivel' });
     const notifs = achar(/INSERT INTO dbo\.Notificacao/);
-    expect(notifs).toHaveLength(1);                       // só o dono da black order completada
-    expect(notifs[0].p).toMatchObject({ eid: 7, origem: 'blackorder', link: '#blackorder/carrinho', publico: 'cliente' });
-    expect(notifs[0].p.texto).toMatch(/PECA A \(A1\): 5 un\./);
+    expect(notifs).toHaveLength(1);
+    expect(notifs[0].p).toMatchObject({ eid: 9, link: '#blackorder/carrinho', publico: 'cliente' });
+    expect(notifs[0].p.texto).toMatch(/PECA A \(A1\): 4 un\./);
+    expect(transacoes).toEqual(['begin', 'commit']);
   });
 
-  it('saldo que caiu tira a reserva sem avisar ninguém', async () => {
-    const linhas = filaProduto100();
-    linhas[0].QuantidadeReservada = 5;
-    responder = (t, p) => {
-      if (/FROM dbo\.BlackOrder\s+WHERE ProdutoId = @pid AND Status IN/.test(t)) return linhas;
-      if (/UPDATE dbo\.BlackOrder/.test(t)) return [{ BlackOrderId: p.id }];
-      return [];
-    };
-    await bo.alocarBlackOrders(100, 2);                   // não cobre mais os 5: a reserva sai inteira
-    expect(achar(/UPDATE dbo\.BlackOrder/).map(u => [u.p.id, u.p.res, u.p.st])).toEqual([[1, 0, 'Fila']]);
+  it('sem estoque livre suficiente: recusa, não grava e não avisa', async () => {
+    const estoque = { v: 3 };
+    responder = banco(abertasProduto100(), estoque);
+    const r = await request(app(rotasBO, ADMIN)).post('/api/blackorders/liberar').send({ itens: [{ id: 1 }] });
+    expect(r.status).toBe(409);
+    expect(r.body.erro).toMatch(/não tem 5 un\. livres/);
+    expect(estoque.v).toBe(3);
+    expect(achar(/UPDATE dbo\.BlackOrder/)).toHaveLength(0);
     expect(achar(/INSERT INTO dbo\.Notificacao/)).toHaveLength(0);
+    expect(transacoes).toEqual(['begin', 'rollback']);
   });
 
-  it('erro no banco não derruba quem chamou', async () => {
-    responder = () => { throw new Error('banco fora'); };
-    await expect(bo.alocarBlackOrders(100, 5)).resolves.toEqual([]);
+  it('liberação parcial: o resto continua aguardando chegada', async () => {
+    const estoque = { v: 10 };
+    responder = banco(abertasProduto100(), estoque);
+    const r = await request(app(rotasBO, ADMIN)).post('/api/blackorders/liberar').send({ itens: [{ id: 1, quantidade: 2 }] });
+    expect(r.status).toBe(200);
+    expect(achar(/UPDATE dbo\.BlackOrder/)[0].p).toMatchObject({ id: 1, res: 2, st: 'Disponivel' });
+    expect(estoque.v).toBe(8);
+  });
+
+  it('cliente não libera', async () => {
+    const r = await request(app(rotasBO, CLIENTE)).post('/api/blackorders/liberar').send({ itens: [{ id: 1 }] });
+    expect(r.status).toBe(403);
   });
 });
 
 describe('sincronização do Tiny (aplicarAtualizacao)', () => {
-  it('a fila vem antes da loja: estoque = saldo − pedidos − fila; a fila recebe saldo − pedidos', async () => {
-    const linhas = filaProduto100();
-    responder = (t, p) => {
-      if (/SELECT ProdutoId, Sku, TinyAtivo FROM dbo\.Produto WHERE TinyId/.test(t)) return [{ ProdutoId: 100, Sku: 'A1', TinyAtivo: 1 }];
-      if (/SELECT Sku FROM dbo\.Produto WHERE ProdutoId/.test(t)) return [{ Sku: 'A1' }];
-      if (/pi\.Quantidade - pi\.QuantidadeExportada/.test(t)) return [{ Reserva: 2 }];     // pedidos
-      if (/AS Reserva\s+FROM dbo\.BlackOrder/.test(t)) return [{ Reserva: 9 }];         // fila
-      if (/FROM dbo\.BlackOrder\s+WHERE ProdutoId = @pid AND Status IN/.test(t)) return linhas;
-      if (/UPDATE dbo\.BlackOrder/.test(t)) return [{ BlackOrderId: p.id }];
-      return [];
-    };
-    await tiny.aplicarAtualizacao('T1', { estoque: 10 }, 'cron');
-    const upProd = achar(/UPDATE dbo\.Produto SET/)[0];
-    expect(upProd.p.est).toBe(0);                          // 10 − 2 − 9 → 0 (nada para a loja)
-    // 8 livres (10 − 2): BO 1 leva os 5 dele; os 3 que sobram não completam os 4 do BO 2 (ficam guardados).
-    expect(achar(/UPDATE dbo\.BlackOrder/).map(u => [u.p.id, u.p.res])).toEqual([[1, 5]]);
-  });
-
-  it('sem fila, nada muda: estoque = saldo − pedidos e ninguém é chamado', async () => {
+  it('estoque = saldo − pedidos − o que foi liberado para black orders; nada é separado sozinho', async () => {
     responder = (t) => {
       if (/SELECT ProdutoId, Sku, TinyAtivo FROM dbo\.Produto WHERE TinyId/.test(t)) return [{ ProdutoId: 100, Sku: 'A1', TinyAtivo: 1 }];
       if (/SELECT Sku FROM dbo\.Produto WHERE ProdutoId/.test(t)) return [{ Sku: 'A1' }];
-      if (/pi\.Quantidade - pi\.QuantidadeExportada/.test(t)) return [{ Reserva: 2 }];
-      if (/AS Reserva\s+FROM dbo\.BlackOrder/.test(t)) return [{ Reserva: 0 }];
+      if (/pi\.Quantidade - pi\.QuantidadeExportada/.test(t)) return [{ Reserva: 2 }];     // pedidos
+      if (/AS Reserva\s+FROM dbo\.BlackOrder/.test(t)) return [{ Reserva: 5 }];         // liberado
       return [];
     };
     await tiny.aplicarAtualizacao('T1', { estoque: 10 }, 'cron');
-    expect(achar(/UPDATE dbo\.Produto SET/)[0].p.est).toBe(8);
-    expect(achar(/ORDER BY BlackOrderId/)).toHaveLength(0);
+    expect(achar(/UPDATE dbo\.Produto SET/)[0].p.est).toBe(3);
+    expect(achar(/AS Reserva\s+FROM dbo\.BlackOrder/)[0].texto).toMatch(/Status = 'Disponivel'/);
+    expect(achar(/UPDATE dbo\.BlackOrder/)).toHaveLength(0);
   });
 });
 
@@ -283,12 +263,12 @@ describe('carrinho da black order (POST /api/blackorders/comprar)', () => {
   }
   const comprar = (itens, user = CLIENTE) => request(app(rotasBO, user)).post('/api/blackorders/comprar').send({ itens });
 
-  it('compra tudo o que chegou (4 de 4): pedido no preço de hoje (fatura na remessa); o que não chegou segue na fila', async () => {
+  it('compra tudo o que chegou (4 de 4): pedido no preço de hoje (fatura na remessa); o que não chegou segue aberto', async () => {
     responder = banco([linhaBO()]);
     const r = await comprar([{ id: 901, quantidade: 4 }]);
     expect(r.status).toBe(201);
     expect(r.body).toMatchObject({ id: '0005042000', total: 50, liberadas: [] });
-    // 6 pedidas: 4 compradas, 2 seguem na fila.
+    // 6 pedidas: 4 compradas, 2 seguem aguardando chegada.
     expect(boUpd[0]).toMatchObject({ id: 901, atd: 4, desc: 0, st: 'Fila', res: 4 });
     expect(pedidoIns).toMatchObject({ total: 50 });
     expect(fatura).toBeNull();
@@ -301,10 +281,11 @@ describe('carrinho da black order (POST /api/blackorders/comprar)', () => {
     const r = await comprar([{ id: 901, quantidade: 3 }]);
     expect(r.status).toBe(201);
     expect(r.body).toMatchObject({ total: 37.5 });
-    // 1 que chegou volta para o próximo; as 2 que não chegaram saem da fila junto (não voltam para ele).
+    // 1 que chegou volta para a loja; as 2 que não chegaram são encerradas junto.
     expect(r.body.liberadas).toEqual([{ sku: 'A1', nome: 'PECA A1', quantidade: 1, encerrada: 2 }]);
     expect(boUpd[0]).toMatchObject({ id: 901, atd: 3, desc: 3, st: 'Atendida' });
-    expect(recalculados).toEqual(['A1', 'A1']);           // antes de vender e depois, para o próximo da fila
+    expect(recalculados).toEqual(['A1', 'A1']);           // antes de vender e depois, com a peça de volta na loja
+    expect(achar(/SET Estoque = Estoque \+ @q/)[0].p).toMatchObject({ q: 1 });
   });
 
   it('mais do que o reservado é recusado sem gravar nada', async () => {
@@ -316,7 +297,7 @@ describe('carrinho da black order (POST /api/blackorders/comprar)', () => {
     expect(pedidoIns).toBeNull();
   });
 
-  it('black order ainda na fila (nada chegou) não pode ser comprada', async () => {
+  it('black order ainda não liberada (nada chegou) não pode ser comprada', async () => {
     responder = banco([linhaBO({ Status: 'Fila', QuantidadeReservada: 0 })]);
     expect((await comprar([{ id: 901, quantidade: 1 }])).status).toBe(409);
   });
@@ -349,7 +330,7 @@ describe('carrinho da black order (POST /api/blackorders/comprar)', () => {
 });
 
 describe('desistir / cancelar', () => {
-  it('cliente desiste do que falta; o reservado volta para a fila/loja', async () => {
+  it('cliente desiste do que falta; o que estava guardado volta para a loja', async () => {
     let upd = null;
     responder = (t, p) => {
       if (/FROM dbo\.BlackOrder WHERE BlackOrderId = @id AND \(@eid IS NULL OR EmpresaId = @eid\)/.test(t))
@@ -360,6 +341,7 @@ describe('desistir / cancelar', () => {
     const r = await request(app(rotasBO, CLIENTE)).post('/api/blackorders/901/desistir').send({});
     expect(r.status).toBe(200);
     expect(upd).toMatchObject({ desc: 5, st: 'Atendida', obs: null });
+    expect(achar(/SET Estoque = Estoque \+ @q/)[0].p).toMatchObject({ q: 4 });   // as 4 guardadas voltam para a loja
     expect(recalculados).toEqual(['A1']);
     expect(achar(/INSERT INTO dbo\.Notificacao/)).toHaveLength(0);
   });
@@ -388,18 +370,19 @@ describe('desistir / cancelar', () => {
 describe('admin atualiza o envio da Europa (PATCH /api/blackorders)', () => {
   it('atualiza em lote só as abertas e avisa cada empresa uma vez', async () => {
     responder = (t) => (/UPDATE dbo\.BlackOrder SET/.test(t)
-      ? [{ BlackOrderId: 1, EmpresaId: 7, Sku: 'A1', NomeProduto: 'PECA A', NumeroPedido: '0005041900', SituacaoEnvio: 'Em trânsito', PrevisaoChegada: '20/11/26' },
-         { BlackOrderId: 2, EmpresaId: 7, Sku: 'B2', NomeProduto: 'PECA B', NumeroPedido: '0005041900', SituacaoEnvio: 'Em trânsito', PrevisaoChegada: '20/11/26' }]
+      ? [{ BlackOrderId: 1, EmpresaId: 7, Sku: 'A1', NomeProduto: 'PECA A', NumeroPedido: '0005041900', SituacaoEnvio: 'Em trânsito' },
+         { BlackOrderId: 2, EmpresaId: 7, Sku: 'B2', NomeProduto: 'PECA B', NumeroPedido: '0005041900', SituacaoEnvio: 'Em trânsito' }]
       : []);
     const r = await request(app(rotasBO, ADMIN)).patch('/api/blackorders')
-      .send({ ids: [1, 2], situacao: 'Em trânsito', previsao: '20/11/26', avisar: true });
+      .send({ ids: [1, 2], situacao: 'Em trânsito', previsao: '20/11/26', avisar: true });   // previsão não existe mais: ignorada
     expect(r.status).toBe(200);
     const upd = achar(/UPDATE dbo\.BlackOrder SET/)[0];
     expect(upd.texto).toMatch(/Status IN \('Fila', 'Disponivel'\)/);
-    expect(upd.p).toMatchObject({ SituacaoEnvio: 'Em trânsito', PrevisaoChegada: '20/11/26' });
+    expect(upd.p).toMatchObject({ SituacaoEnvio: 'Em trânsito' });
+    expect(upd.texto).not.toMatch(/PrevisaoChegada/);
     const notifs = achar(/INSERT INTO dbo\.Notificacao/);
     expect(notifs).toHaveLength(1);
-    expect(notifs[0].p.texto).toMatch(/PECA B \(B2\).*Em trânsito · previsão 20\/11\/26/);
+    expect(notifs[0].p.texto).toMatch(/PECA B \(B2\).*Em trânsito$/);
   });
 
   it('situação fora da lista e cliente tentando: recusados', async () => {

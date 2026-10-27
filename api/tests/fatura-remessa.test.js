@@ -230,23 +230,6 @@ describe('cancelamento', () => {
   });
 });
 
-describe('vigia da black order (a cada 2 min)', () => {
-  it('lê no Tiny só as peças com fila aberta', async () => {
-    vi.resetModules();
-    const lotes = [];
-    vi.doMock('../src/tiny.js', () => ({ sincronizarLote: async (ids) => { lotes.push(ids); return []; }, podarLogCron: async () => {} }));
-    vi.doMock('../src/tiny-contatos.js', () => ({ processarContatosPendentes: async () => {}, sincronizarContatosDoTiny: async () => {} }));
-    vi.doMock('../src/lista-preco.js', () => ({ sincronizarListasPreco: async () => {} }));
-    responder = (t) => (/SELECT DISTINCT ProdutoId FROM dbo\.BlackOrder/.test(t) ? [{ ProdutoId: 4 }, { ProdutoId: 9 }] : []);
-    const { vigiarBlackOrders } = await import('../src/tiny-cron.js');
-    await vigiarBlackOrders();
-    expect(lotes).toEqual([[4, 9]]);
-    responder = () => [];
-    await vigiarBlackOrders();
-    expect(lotes).toHaveLength(1);                           // sem fila, não chama o Tiny
-  });
-});
-
 describe('estoque alterado no Tiny (lido a cada 1 min)', () => {
   it('data no formato do Tiny, no horário de Brasília', () => {
     expect(tiny.dataTiny(new Date('2026-10-27T12:05:09Z'))).toBe('27/10/2026 09:05:09');

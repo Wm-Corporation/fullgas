@@ -3,7 +3,7 @@
 import 'dotenv/config';
 import { query } from './db.js';
 import { prepararMiniaturas } from './miniaturas.js';
-import { reservaBlackOrders, alocarBlackOrders } from './black-order.js';
+import { reservaBlackOrders } from './black-order.js';
 
 const BASE = 'https://api.tiny.com.br/api2';
 
@@ -458,15 +458,13 @@ export async function aplicarAtualizacao(tinyId, dados, evento) {
 
   const sets = ['TinySincronizadoEm = SYSUTCDATETIME()', 'AtualizadoEm = SYSUTCDATETIME()'];
   const params = { pid: p.ProdutoId };
-  let livreParaFila = null;
   if (dados.estoque !== undefined) {
-    // Saldo do Tiny menos a reserva dos pedidos e a fila de black order (a fila vem antes da loja).
+    // Saldo do Tiny menos a reserva dos pedidos e o que foi liberado para black orders.
     const saldo = clampEstoque(dados.estoque);
     const reserva = await reservaPendente(p.ProdutoId);
-    const fila = await reservaBlackOrders(p.ProdutoId);
+    const bo = await reservaBlackOrders(p.ProdutoId);
     sets.push('Estoque = @est');
-    params.est = Math.max(0, saldo - reserva - fila);
-    if (fila > 0) livreParaFila = saldo - reserva;
+    params.est = Math.max(0, saldo - reserva - bo);
   }
   if (dados.preco !== undefined) { sets.push('Preco = @preco'); params.preco = Math.max(0, Number(dados.preco) || 0); }
   if (dados.nome !== undefined && dados.nome) { sets.push('Nome = @nome'); params.nome = String(dados.nome).slice(0, 200); }
@@ -474,7 +472,6 @@ export async function aplicarAtualizacao(tinyId, dados, evento) {
   if (dados.foto !== undefined && dados.foto) { sets.push('ImagemUrl = @foto'); params.foto = dados.foto; }
 
   await query(`UPDATE dbo.Produto SET ${sets.join(', ')} WHERE ProdutoId = @pid`, params);
-  if (livreParaFila !== null) await alocarBlackOrders(p.ProdutoId, livreParaFila);
   await registrarLog(tinyId, p.Sku, evento, 'ok', null);
   return { status: 'ok', sku: p.Sku };
 }
