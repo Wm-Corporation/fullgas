@@ -1334,7 +1334,7 @@
 
   function modalProduto(p) {
     var novo = !p;
-    // Produto do Tiny: só categoria e previsão são editáveis.
+    // Produto do Tiny: só a categoria é editável.
     var tiny = !!(p && p.tinyAtivo);
     var trava = tiny ? ' disabled' : '';
     var back = document.createElement('div');
@@ -1344,7 +1344,7 @@
       '<div class="modal-body">' +
       (tiny
         ? '<div class="adm-banner">🔒 Este produto é gerenciado pelo <b>Tiny ERP</b>: nome, preço, estoque, descrição e foto ' +
-          'são atualizados automaticamente. Para alterar, edite no Tiny. Aqui só categoria e previsão de chegada.' +
+          'são atualizados automaticamente. Para alterar, edite no Tiny. Aqui só a categoria.' +
           (p.tinySincronizadoEm ? '<br><span class="muted">Última sincronização: ' + FG.fmtDateTime(p.tinySincronizadoEm) + '</span>' : '') +
           '</div>'
         : '') +
@@ -1360,7 +1360,6 @@
       }).join('') + '</select></div>' +
       '<div class="field"><label>Preço (R$)</label><input id="mp-preco" type="number" step="0.01" min="0"' + trava + ' value="' + (p ? p.preco : '') + '"></div>' +
       '<div class="field"><label>Estoque</label><input id="mp-est" type="number" min="0"' + trava + ' value="' + (p ? p.estoque : 0) + '"></div>' +
-      '<div class="field"><label>Previsão de chegada (se sem estoque)</label><input id="mp-prev" type="text" placeholder="dd/mm/aa" value="' + (p && p.previsao ? p.previsao : '') + '"></div>' +
       '<div class="field"><label>Descrição</label><textarea id="mp-desc" rows="3"' + trava + '>' + (p ? esc(p.descricao) : '') + '</textarea></div>' +
       '<div class="field"><label>Foto da peça (miniatura no Localizador de Peças)</label>' +
       '<div class="fnd-foto-row">' +
@@ -1420,7 +1419,6 @@
         cat: document.getElementById('mp-cat').value,
         preco: preco,
         estoque: Math.max(0, Number(document.getElementById('mp-est').value) || 0),
-        previsao: document.getElementById('mp-prev').value.trim() || null,
         descricao: document.getElementById('mp-desc').value.trim()
       };
       function fail(e) { FG.toast((e && e.message) || 'Falha ao salvar o produto.', 'erro'); }
@@ -2013,21 +2011,22 @@
   }
 
   /* =========================================================
-     BLACK ORDER — fila do que faltou no estoque (sem fatura, sem Tiny)
+     BLACK ORDER — o que faltou no estoque (sem fatura, sem Tiny). Sem fila: o admin libera cada uma.
      ========================================================= */
   // Mesmas opções que a API aceita (blackorders.routes.js → SITUACOES).
   var BO_SITUACOES = [
     'Aguardando pedido à fábrica', 'Pedida à Europa', 'Em produção na fábrica',
     'Em trânsito', 'Em desembaraço aduaneiro', 'Chegou — em conferência'
   ];
-  var BO_ROTULO_ADM = { Fila: 'Aguardando chegada', Disponivel: 'Chegou — aguardando o cliente', Atendida: 'Concluída', Cancelada: 'Cancelada' };
-  var boSel = {};   // BlackOrderId → true (seleção para atualizar em lote)
+  var BO_ROTULO_ADM = { Fila: 'Aguardando chegada', Disponivel: 'Liberada — aguardando o cliente', Atendida: 'Concluída', Cancelada: 'Cancelada' };
+  var boSel = {};   // BlackOrderId → true (seleção para atualizar ou liberar em lote)
 
   function renderBlackOrderAdm() {
     h1.textContent = 'Black order'; setOn('blackorder');
     var todos = FG.all('blackorders');
     var f = filtros.blackorder;
     var aberta = function (b) { return b.status === 'Fila' || b.status === 'Disponivel'; };
+    var falta = function (b) { return Math.max(0, b.pendente - b.reservada); };
     var lista = todos.filter(function (b) {
       if (!f.status && !aberta(b)) return false;
       if (f.status && f.status !== 'todas' && b.status !== f.status) return false;
@@ -2037,75 +2036,76 @@
       if (!todos.some(function (b) { return String(b.id) === id && aberta(b); })) delete boSel[id];
     });
 
-    // Resumo por peça (só abertas): quanto a fila espera e quanto já está separado.
-    var porPeca = {};
-    todos.filter(aberta).forEach(function (b) {
-      var p = porPeca[b.artigo] || (porPeca[b.artigo] = { artigo: b.artigo, nome: b.nome, ids: [], clientes: {}, espera: 0, reservada: 0, situacoes: {}, previsoes: {} });
-      p.ids.push(b.id); p.clientes[b.empresa] = 1;
-      p.espera += b.pendente - b.reservada; p.reservada += b.reservada;
-      if (b.situacao) p.situacoes[b.situacao] = 1;
-      if (b.previsao) p.previsoes[b.previsao] = 1;
+    // Peças da mesma compra ficam juntas (é um pedido, não peças avulsas).
+    var grupos = [], porCompra = {};
+    lista.forEach(function (b) {
+      var g = porCompra[b.compra];
+      if (!g) { g = porCompra[b.compra] = { compra: b.compra, itens: [] }; grupos.push(g); }
+      g.itens.push(b);
     });
-    var pecas = Object.keys(porPeca).sort().map(function (k) { return porPeca[k]; });
-
-    var resumo = pecas.length
-      ? '<table class="tbl"><thead><tr><th></th><th>Artigo</th><th>Peça</th><th class="r">Clientes</th>' +
-        '<th class="r">Aguardando chegada</th><th class="r">Já separadas</th><th>Situação</th><th>Previsão</th></tr></thead><tbody>' +
-        pecas.map(function (p) {
-          var todasSel = p.ids.every(function (id) { return boSel[id]; });
-          return '<tr><td><input type="checkbox" class="bo-sel-peca" data-ids="' + p.ids.join(',') + '"' + (todasSel ? ' checked' : '') +
-            ' title="Selecionar todas as black orders desta peça"></td>' +
-            '<td>' + esc(p.artigo) + '</td><td>' + esc(p.nome) + '</td>' +
-            '<td class="r">' + Object.keys(p.clientes).length + '</td>' +
-            '<td class="r"><b>' + p.espera + '</b></td><td class="r">' + p.reservada + '</td>' +
-            '<td>' + esc(Object.keys(p.situacoes).join(' / ') || '—') + '</td>' +
-            '<td>' + esc(Object.keys(p.previsoes).join(' / ') || '—') + '</td></tr>';
-        }).join('') + '</tbody></table>'
-      : '<p class="muted">Nenhuma black order aberta. Elas nascem no checkout quando o cliente pede mais do que há em estoque.</p>';
 
     var nSel = Object.keys(boSel).length;
     var painel =
       '<div class="bo-painel">' +
       '<div class="field"><label for="bo-sit">Situação do envio</label><select id="bo-sit"><option value="">(manter)</option>' +
       BO_SITUACOES.map(function (s) { return '<option>' + esc(s) + '</option>'; }).join('') + '</select></div>' +
-      '<div class="field"><label for="bo-prev">Previsão de chegada</label><input id="bo-prev" type="text" maxlength="20" placeholder="dd/mm/aa (vazio = manter)"></div>' +
       '<div class="field bo-obs-campo"><label for="bo-obs">Observação para o cliente</label><input id="bo-obs" type="text" maxlength="500" placeholder="vazio = manter"></div>' +
       '<label class="bo-avisar"><input type="checkbox" id="bo-avisar" checked> Avisar os clientes</label>' +
       '<button class="btn-orange" id="bo-aplicar"' + (nSel ? '' : ' disabled') + '>Aplicar em ' + nSel + ' selecionada(s)</button>' +
+      '<button class="btn-line" id="bo-liberar-sel"' + (nSel ? '' : ' disabled') + ' title="Libera tudo o que falta de cada uma, se houver estoque">' +
+      'Liberar ' + nSel + ' selecionada(s)</button>' +
       '</div>';
 
-    var linhas = lista.map(function (b) {
+    function linha(b) {
       var podeSel = aberta(b);
+      var est = b.estoqueLoja || 0;
+      var acoes = '';
+      if (falta(b) > 0) {
+        acoes += '<div class="bo-liberar"><input class="bo-lib-qtd" type="number" min="1" max="' + falta(b) + '" value="' + falta(b) +
+          '" aria-label="Quantidade a liberar"><button class="btn-orange btn-mini bo-lib"' + (est > 0 ? '' : ' disabled title="Sem estoque livre na loja"') +
+          '>Liberar</button></div>';
+      }
+      if (podeSel) acoes += '<button class="btn-line btn-mini bo-cancelar">Cancelar</button>';
       return '<tr' + (b.status === 'Disponivel' ? ' class="bo-linha-disp"' : '') + '>' +
         '<td>' + (podeSel ? '<input type="checkbox" class="bo-sel" data-id="' + b.id + '"' + (boSel[b.id] ? ' checked' : '') + '>' : '') + '</td>' +
-        '<td>' + esc(b.empresa) + '<div class="muted" style="font-size:11px;">' + esc(b.usuario || '') + '</div></td>' +
-        '<td>' + esc(b.compra) + '<div class="muted" style="font-size:11px;">' + FG.fmtDate(b.data) + '</div></td>' +
         '<td>' + esc(b.artigo) + '<div style="font-size:12px;">' + esc(b.nome) + '</div></td>' +
         '<td class="r">' + b.qtd + '</td><td class="r">' + b.reservada + '</td><td class="r">' + b.atendida + '</td>' +
-        '<td class="r"><b>' + b.pendente + '</b></td>' +
+        '<td class="r"><b>' + falta(b) + '</b></td>' +
+        '<td class="r' + (podeSel && falta(b) > 0 && est >= falta(b) ? ' bo-est-ok' : '') + '">' + (podeSel ? est : '—') + '</td>' +
         '<td><span class="pill-status bo-' + esc(b.status) + '">' + esc(BO_ROTULO_ADM[b.status] || b.status) + '</span>' +
         (b.status === 'Disponivel' && b.avisadoEm ? '<div class="muted" style="font-size:11px;">avisado ' + FG.fmtDateTime(b.avisadoEm) + '</div>' : '') + '</td>' +
-        '<td>' + esc(b.situacao || '—') + (b.previsao ? '<div class="muted" style="font-size:11px;">previsão ' + esc(b.previsao) + '</div>' : '') +
+        '<td>' + esc(b.situacao || '—') +
         (b.observacao ? '<div class="muted" style="font-size:11px;">' + esc(b.observacao) + '</div>' : '') + '</td>' +
-        '<td class="bo-acao" data-id="' + b.id + '">' + (podeSel ? '<button class="btn-line btn-mini bo-cancelar">Cancelar</button>' : '') + '</td></tr>';
+        '<td class="bo-acao" data-id="' + b.id + '">' + acoes + '</td></tr>';
+    }
+
+    var corpo = grupos.map(function (g) {
+      var b0 = g.itens[0];
+      var abertas = g.itens.filter(aberta).map(function (b) { return b.id; });
+      var todasSel = abertas.length && abertas.every(function (id) { return boSel[id]; });
+      return '<tr class="bo-grupo"><td>' + (abertas.length ? '<input type="checkbox" class="bo-sel-compra" data-ids="' + abertas.join(',') + '"' +
+          (todasSel ? ' checked' : '') + ' title="Selecionar as peças desta compra">' : '') + '</td>' +
+        '<td colspan="9"><b>Compra ' + esc(g.compra) + '</b> · ' + esc(b0.empresa) +
+        ' <span class="muted">(' + esc(b0.usuario || '') + ') · ' + FG.fmtDateTime(b0.data) + ' · ' +
+        g.itens.length + ' peça' + (g.itens.length > 1 ? 's' : '') + '</span></td></tr>' +
+        g.itens.map(linha).join('');
     }).join('');
 
     view.innerHTML =
-      '<div class="adm-card"><div class="c-head">Fila por peça</div><div class="c-body">' +
-      '<p class="muted" style="margin-top:0;">A fila vem antes da loja: quando o saldo do Tiny sobe, as peças são separadas ' +
-      'por ordem de chegada e o cliente é avisado para comprar pelo carrinho da black order (aí vira pedido com fatura).</p>' +
-      resumo + '</div></div>' +
-      '<div class="adm-card"><div class="c-head">Atualizar o envio da Europa</div><div class="c-body">' + painel + '</div></div>' +
+      '<div class="adm-card"><div class="c-head">Atualizar e liberar</div><div class="c-body">' +
+      '<p class="muted" style="margin-top:0;">Não há fila: cada black order é atendida à parte. Quando a peça estiver em estoque, ' +
+      'clique em <b>Liberar</b>: ela sai da loja, fica guardada para o cliente e ele é avisado para comprar pelo carrinho da black order.</p>' +
+      painel + '</div></div>' +
       '<div class="adm-card"><div class="c-head">Black orders (' + contagem('blackorder', lista.length, todos.length) + ')</div><div class="c-body">' +
       barraFiltro('blackorder', [
         { k: 'status', rotulo: 'Situação', todos: 'Abertas', opcoes: [
-          ['Fila', 'Aguardando chegada'], ['Disponivel', 'Chegou — aguardando o cliente'],
+          ['Fila', 'Aguardando chegada'], ['Disponivel', 'Liberada — aguardando o cliente'],
           ['Atendida', 'Concluídas'], ['Cancelada', 'Canceladas'], ['todas', 'Todas']] }
       ], 'Buscar por artigo, peça, cliente, compra ou situação') +
-      '<div class="tbl-scroll"><table class="tbl"><thead><tr><th></th><th>Cliente</th><th>Compra</th><th>Peça</th>' +
-      '<th class="r">Pedida</th><th class="r">Separada</th><th class="r">Comprada</th><th class="r">Pendente</th>' +
-      '<th>Status</th><th>Envio</th><th></th></tr></thead><tbody>' +
-      (linhas || vazioFiltro(11, todos.length ? 'Nenhuma black order com esse filtro.' : 'Nenhuma black order ainda.')) +
+      '<div class="tbl-scroll"><table class="tbl bo-tbl"><thead><tr><th></th><th>Peça</th>' +
+      '<th class="r">Pedida</th><th class="r">Liberada</th><th class="r">Comprada</th><th class="r">Aguardando</th>' +
+      '<th class="r">Estoque loja</th><th>Status</th><th>Envio</th><th></th></tr></thead><tbody>' +
+      (corpo || vazioFiltro(10, todos.length ? 'Nenhuma black order com esse filtro.' : 'Nenhuma black order ainda.')) +
       '</tbody></table></div></div></div>';
 
     bindFiltro(renderBlackOrderAdm);
@@ -2116,27 +2116,54 @@
         renderBlackOrderAdm();
       });
     });
-    Array.prototype.forEach.call(view.querySelectorAll('.bo-sel-peca'), function (c) {
+    Array.prototype.forEach.call(view.querySelectorAll('.bo-sel-compra'), function (c) {
       c.addEventListener('change', function () {
         c.getAttribute('data-ids').split(',').forEach(function (id) { if (c.checked) boSel[id] = true; else delete boSel[id]; });
         renderBlackOrderAdm();
       });
     });
 
+    function liberar(itens, btn) {
+      btn.disabled = true;
+      FG.boLiberar(itens).then(function (r) {
+        if (!r.ok) { FG.toast(r.msg, 'erro'); renderBlackOrderAdm(); return; }
+        var n = r.liberadas.length;
+        FG.toast(n + ' black order(s) liberada(s); o cliente foi avisado.' +
+          (r.recusadas.length ? ' Não liberadas: ' + r.recusadas.map(function (x) { return x.erro; }).join(' ') : ''),
+          r.recusadas.length ? 'erro' : undefined);
+        r.liberadas.forEach(function (l) { delete boSel[l.id]; });
+        renderBlackOrderAdm();
+      });
+    }
+    Array.prototype.forEach.call(view.querySelectorAll('.bo-lib'), function (b) {
+      b.addEventListener('click', function () {
+        var td = b.closest('.bo-acao');
+        var inp = td.querySelector('.bo-lib-qtd');
+        var max = Number(inp.getAttribute('max'));
+        var q = Math.max(1, Math.min(max, Math.floor(Number(inp.value)) || 0));
+        liberar([{ id: Number(td.getAttribute('data-id')), quantidade: q }], b);
+      });
+    });
+    document.getElementById('bo-liberar-sel').addEventListener('click', function () {
+      var ids = Object.keys(boSel).map(Number).filter(function (id) {
+        return todos.some(function (b) { return b.id === id && falta(b) > 0; });
+      });
+      if (!ids.length) { FG.toast('As selecionadas já estão liberadas.', 'erro'); return; }
+      liberar(ids.map(function (id) { return { id: id }; }), this);
+    });
+
     document.getElementById('bo-aplicar').addEventListener('click', function () {
       var btn = this;
       var dados = { ids: Object.keys(boSel).map(Number), avisar: document.getElementById('bo-avisar').checked };
       var sit = document.getElementById('bo-sit').value;
-      var prev = document.getElementById('bo-prev').value.trim();
       var obs = document.getElementById('bo-obs').value.trim();
       if (sit) dados.situacao = sit;
-      if (prev) dados.previsao = prev;
       if (obs) dados.observacao = obs;
-      if (!sit && !prev && !obs) { FG.toast('Escolha a situação, a previsão ou escreva uma observação.', 'erro'); return; }
+      if (!sit && !obs) { FG.toast('Escolha a situação ou escreva uma observação.', 'erro'); return; }
       btn.disabled = true;
       FG.boAtualizar(dados).then(function (r) {
         if (!r.ok) { FG.toast(r.msg, 'erro'); btn.disabled = false; return; }
-        FG.toast(r.alteradas + ' black order(s) atualizada(s)' + (dados.avisar ? ' e clientes avisados.' : '.'));
+        FG.toast(r.alteradas + ' black order(s) atualizada(s)' + (dados.avisar && sit ? ' e clientes avisados.' : '.'));
         boSel = {};
         renderBlackOrderAdm();
       });

@@ -1405,10 +1405,11 @@
     });
   }
 
-  function boCard(b) {
+  // Uma peça dentro do quadro da compra.
+  function boItem(b) {
     var aguardando = Math.max(0, b.pendente - b.reservada);
     function dado(rot, val) { return '<div><b>' + rot + '</b>' + val + '</div>'; }
-    return '<div class="bo-card st-' + esc(b.status) + '">' +
+    return '<div class="bo-item st-' + esc(b.status) + '">' +
       '<div class="bo-foto">' + boFoto(b) + '</div>' +
       '<div class="bo-info">' +
       '<div class="bo-topo"><span class="bo-nome">' + esc(b.nome) + '</span>' +
@@ -1416,30 +1417,50 @@
       '<span class="pill-status bo-' + esc(b.status) + '">' + esc(BO_ROTULO[b.status] || b.status) + '</span></div>' +
       (b.descricao ? '<div class="bo-desc">' + esc(b.descricao) + '</div>' : '') +
       '<div class="bo-grid">' +
-      dado('Compra de origem', boCompraHTML(b)) +
-      dado('Data', FG.fmtDateTime(b.data)) +
       dado('Categoria', esc(b.categoria || '—')) +
-      dado('Pedida por', esc(b.usuario || '—')) +
       dado('Quantidade pedida', b.qtd + ' un.') +
       (b.reservada ? dado('Disponível agora', '<b class="bo-ok">' + b.reservada + ' un.</b>') : '') +
       (boAberta(b) ? dado('Aguardando chegada', aguardando + ' un.') : '') +
-      (boAberta(b) && b.aFrente != null ? dado('À sua frente na fila', b.aFrente + ' un.') : '') +
       dado('Já comprada', b.atendida + ' un.' + (b.atendimentos.length
         ? ' <span class="muted">(' + b.atendimentos.map(function (a) {
           return '<a href="#pedido/' + esc(a.pedido) + '">' + esc(a.pedido) + '</a>';
         }).join(', ') + ')</span>' : '')) +
       (b.descartada ? dado('Não comprada / cancelada', b.descartada + ' un.') : '') +
       dado('Situação do envio', esc(b.situacao || (boAberta(b) ? 'Aguardando atualização da Fullgas' : '—'))) +
-      dado('Previsão de chegada', esc(b.previsao || '—')) +
       (b.preco !== undefined ? dado('Preço hoje', FG.fmtMoney(b.preco) + ' <span class="muted">/un.</span>') : '') +
       '</div>' +
       (b.observacao ? '<div class="bo-obs"><b>Observação da Fullgas:</b> ' + esc(b.observacao) + '</div>' : '') +
       (boAberta(b)
-        ? '<div class="bo-acoes">' +
-          (b.status === 'Disponivel' ? '<a class="btn red" href="#blackorder/carrinho">Comprar no carrinho da black order</a>' : '') +
-          '<button class="btn bo-desistir" data-id="' + b.id + '">Desistir do restante</button></div>'
+        ? '<div class="bo-acoes"><button class="btn bo-desistir" data-id="' + b.id + '">Desistir desta peça</button></div>'
         : '') +
       '</div></div>';
+  }
+
+  // As peças de uma mesma compra ficam juntas num quadro só (é um pedido, não peças avulsas).
+  function boGrupos(lista) {
+    var grupos = [], porCompra = {};
+    lista.forEach(function (b) {
+      var g = porCompra[b.compra];
+      if (!g) { g = porCompra[b.compra] = { compra: b.compra, itens: [] }; grupos.push(g); }
+      g.itens.push(b);
+    });
+    return grupos;
+  }
+
+  function boCompraCard(g) {
+    var b0 = g.itens[0];
+    var disp = g.itens.some(function (b) { return b.status === 'Disponivel'; });
+    var abertas = g.itens.some(boAberta);
+    var pecas = g.itens.reduce(function (n, b) { return n + b.qtd; }, 0);
+    return '<div class="bo-compra' + (disp ? ' tem-disp' : '') + (abertas ? '' : ' encerrada') + '">' +
+      '<div class="bo-compra-topo">' +
+      '<div><span class="muted">Compra</span> <b class="bo-compra-num">' + boCompraHTML(b0) + '</b></div>' +
+      '<div class="muted">' + FG.fmtDateTime(b0.data) + ' · pedida por ' + esc(b0.usuario || '—') + '</div>' +
+      '<div class="muted">' + g.itens.length + ' peça' + (g.itens.length > 1 ? 's' : '') + ' · ' + pecas + ' un.</div>' +
+      (disp ? '<a class="btn red bo-compra-btn" href="#blackorder/carrinho">Comprar no carrinho da black order</a>' : '') +
+      '</div>' +
+      g.itens.map(boItem).join('') +
+      '</div>';
   }
 
   function renderBlackOrders(body) {
@@ -1448,6 +1469,8 @@
     var encerradas = todas.filter(function (b) { return !boAberta(b); });
     var disp = abertas.filter(function (b) { return b.status === 'Disponivel'; });
     var lista = boVer === 'abertas' ? abertas : encerradas;
+    var grupos = boGrupos(lista);
+    var nCompras = function (l) { return boGrupos(l).length; };
 
     body.innerHTML =
       (disp.length
@@ -1455,12 +1478,12 @@
           ' item(ns) prontos para compra.<a class="btn red" href="#blackorder/carrinho">Abrir carrinho da black order</a></div>'
         : '') +
       '<p class="muted bo-intro">Black order é o que você pediu e não tinha em estoque. Não é cobrada agora: ' +
-      'entra na fila por ordem de chegada e, quando a peça chega, você é avisado nas Notificações e decide quanto comprar.</p>' +
+      'quando a peça estiver disponível em estoque, você é avisado nas Notificações e decide quanto comprar.</p>' +
       '<div class="claim-subtabs">' +
-      '<button class="claim-subtab' + (boVer === 'abertas' ? ' on' : '') + '" data-bo-ver="abertas">Abertas (' + abertas.length + ')</button>' +
-      '<button class="claim-subtab' + (boVer === 'encerradas' ? ' on' : '') + '" data-bo-ver="encerradas">Encerradas (' + encerradas.length + ')</button>' +
+      '<button class="claim-subtab' + (boVer === 'abertas' ? ' on' : '') + '" data-bo-ver="abertas">Abertas (' + nCompras(abertas) + ')</button>' +
+      '<button class="claim-subtab' + (boVer === 'encerradas' ? ' on' : '') + '" data-bo-ver="encerradas">Encerradas (' + nCompras(encerradas) + ')</button>' +
       '</div>' +
-      (lista.length ? lista.map(boCard).join('')
+      (grupos.length ? grupos.map(boCompraCard).join('')
         : '<div class="empty-box">' + (boVer === 'abertas'
           ? 'Nenhuma black order aberta. Quando você pedir mais do que temos em estoque, o restante aparece aqui.'
           : 'Nenhuma black order encerrada.') + '</div>');
@@ -1472,7 +1495,7 @@
       boBotaoDuplo(btn, function () {
         FG.boDesistir(btn.getAttribute('data-id')).then(function (r) {
           if (!r.ok) { FG.toast(r.msg, 'erro'); btn.disabled = false; return; }
-          FG.toast('Pronto: você desistiu do restante desta black order. Nada foi cobrado.');
+          FG.toast('Pronto: você desistiu desta peça. Nada foi cobrado.');
           renderBlackOrders(body);
         });
       });
@@ -1495,7 +1518,7 @@
       'Comprando tudo o que chegou, o que ainda não chegou continua na sua black order. ' +
       'Comprando menos, essa passa a ser a sua quantidade final e a black order da peça é encerrada.</p>' +
       '<table class="table bo-carrinho"><thead><tr><th>Foto</th><th>Peça</th><th>Compra de origem</th>' +
-      '<th class="right">Disponível</th><th class="right">Ainda na fila</th><th class="right">Comprar</th>' +
+      '<th class="right">Disponível</th><th class="right">Aguardando chegada</th><th class="right">Comprar</th>' +
       (comPreco ? '<th class="right">Preço un.</th><th class="right">Subtotal</th>' : '') + '</tr></thead><tbody>' +
       disp.map(function (b) {
         return '<tr><td class="td-foto bo-foto-mini">' + boFoto(b) + '</td>' +

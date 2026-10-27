@@ -382,6 +382,10 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .bo-avisar { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding-bottom: 8px; }
 .tbl tr.bo-linha-disp td { background: #f0fdf4; }
 .bo-acao .bo-motivo { width: 190px; margin-bottom: 4px; display: block; }
+.tbl tr.bo-grupo td { background: #f1f5f9; border-top: 2px solid #cbd5e1; font-size: 13px; }
+.bo-tbl td.bo-est-ok { color: #166534; font-weight: 700; }
+.bo-liberar { display: flex; gap: 4px; margin-bottom: 4px; }
+.bo-liberar .bo-lib-qtd { width: 64px; }
 .nf-info { margin-top: 3px; font-size: 11px; color: #b45309; }
 .nf-form { display: flex; flex-direction: column; gap: 5px; font-size: 12px; min-width: 230px; }
 .nf-form label { display: flex; align-items: center; gap: 6px; }

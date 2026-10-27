@@ -185,17 +185,10 @@ h1, h2, h3 { margin: 0 0 .5em; }
 
 /* Black order: aviso no carrinho e confirmação, divisão por linha e cartões em Pedidos › Blackorder */
 .bo-aviso { background: #f8fafc; border-color: #cbd5e1; border-left-color: #1f2937; color: #1f2937; }
-.ct-div { display: block; margin-top: 4px; font-size: 11px; color: #6b7280; white-space: nowrap; }
-.ct-div b { color: #1f2937; }
-.cart-tot.cart-tot-bo { font-size: 13px; color: #6b7280; border-top: none; padding-top: 0; }
-.cart-tot.cart-tot-bo .v { font-size: 14px; color: #6b7280; }
 .bo-badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--green); color: #fff; font-size: 11px; font-weight: 700; text-align: center; }
 .bo-intro { margin: 0 0 10px; font-size: 13px; }
 .bo-chegou { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 14px; margin-bottom: 12px; border: 1px solid #bbf7d0; border-left: 4px solid var(--green); background: #f0fdf4; border-radius: 4px; }
 .bo-chegou .btn { margin-left: auto; }
-.bo-card { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; padding: 14px; margin-bottom: 12px; border: 1px solid var(--line); border-left: 4px solid #94a3b8; border-radius: 4px; background: #fff; }
-.bo-card.st-Disponivel { border-left-color: var(--green); }
-.bo-card.st-Atendida, .bo-card.st-Cancelada { opacity: .85; border-left-color: #cbd5e1; }
 .bo-foto { width: 96px; height: 96px; display: flex; align-items: center; justify-content: center; background: #f8f8f8; border-radius: 4px; overflow: hidden; }
 .bo-foto img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .bo-topo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
@@ -207,6 +200,16 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .bo-obs { margin-top: 10px; padding: 8px 10px; background: #fffbeb; border-radius: 4px; font-size: 13px; }
 .bo-acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .bo-desistir.armado { border-color: #b91c1c; color: #b91c1c; }
+/* Black order agrupada por compra: um quadro por compra, uma linha por peça. */
+.bo-compra { margin-bottom: 14px; border: 1px solid var(--line); border-left: 4px solid #94a3b8; border-radius: 4px; background: #fff; }
+.bo-compra.tem-disp { border-left-color: var(--green); }
+.bo-compra.encerrada { opacity: .85; border-left-color: #cbd5e1; }
+.bo-compra-topo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 10px 14px; background: #f8fafc; border-bottom: 1px solid var(--line); font-size: 13px; }
+.bo-compra-num { font-size: 15px; }
+.bo-compra-btn { margin-left: auto; }
+.bo-item { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; padding: 14px; }
+.bo-item + .bo-item { border-top: 1px dashed var(--line); }
+.bo-item.st-Atendida, .bo-item.st-Cancelada { opacity: .8; }
 .bo-carrinho td { vertical-align: middle; }
 .bo-foto-mini img { max-width: 56px; max-height: 56px; object-fit: contain; }
 .bo-foto-mini svg { width: 56px; height: auto; }
@@ -217,9 +220,10 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status.bo-Cancelada { background: #fee2e2; color: #991b1b; }
 .bo-link-lista { font-size: 11px; }
 @media (max-width: 560px) {
-  .bo-card { grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 10px; }
   .bo-foto { width: 64px; height: 64px; }
   .bo-chegou .btn { margin-left: 0; }
+  .bo-item { grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 10px; }
+  .bo-compra-btn { margin-left: 0; }
 }
 
 /* ---------- selo "Fábrica" (FG.seloFabrica, store.js) ---------- */
@@ -1032,6 +1036,8 @@ main.finder { padding: 8px 28px 70px; }
 /* modal com a foto do modelo (Show Image) */
 .modal.modal-img { max-width: 720px; }
 .modal.modal-img .modal-body img { width: 100%; height: auto; display: block; }
+.modal.modal-bo { max-width: 560px; }
+.modal-bo-acoes { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
 
 /* impressão de fatura */
 @media print {
