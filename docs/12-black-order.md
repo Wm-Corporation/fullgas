@@ -15,9 +15,8 @@ Regra definida pelo dono em 26/10/2026.
 
 | Estoque | Bolinha | Texto |
 |---|---|---|
-| > 20 | verde | Em estoque |
-| 10 a 20 | amarela | Em estoque |
-| 1 a 9 | vermelha | Em estoque |
+| 10 ou mais | verde | Em estoque |
+| 1 a 9 | amarela | Em estoque |
 | 0 | vermelha | Black order (+ previsão, se houver) |
 
 ## Fila e reserva (revisto em 27/10/2026)
