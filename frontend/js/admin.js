@@ -1440,8 +1440,8 @@
   /* =========================================================
      PEDIDOS
      ========================================================= */
-  // 'Parcial' está no filtro, mas não no seletor (vem do "Confirmar envio").
-  var STATUS = ['Pendente', 'Aprovado', 'Parcial', 'Enviado', 'Entregue', 'Cancelado'];
+  // Remessa única (27/10/2026): 'Parcial' não acontece mais; fica só em PROXIMOS para pedidos antigos.
+  var STATUS = ['Pendente', 'Aprovado', 'Enviado', 'Entregue', 'Cancelado'];
   // Status terminais: uma vez aqui, o pedido não pode mais mudar de status.
   var STATUS_TERMINAIS = ['Entregue', 'Cancelado'];
 
@@ -1457,10 +1457,10 @@
   function confirmaStatus(num, st) {
     var txt = {
       'Aprovado': 'Aprovar o pedido ' + num + '?\n\nNada vai ao Tiny agora. Confira as peças no estoque, ' +
-        'informe no detalhe quanto foi encontrado de cada uma e clique em "Confirmar envio" — só essas peças vão ao Tiny.',
-      'Enviado': 'Marcar TODAS as peças em estoque do pedido ' + num + ' como enviadas?' +
-        '\n\nElas vão ao Tiny agora, numa remessa. Se faltou alguma peça na prateleira, use o detalhe do ' +
-        'pedido e informe só o que foi encontrado.',
+        'retire no detalhe o que não estiver lá ("Retirar peças") e clique em "Confirmar envio".',
+      'Enviado': 'Enviar TODAS as peças restantes do pedido ' + num + '?' +
+        '\n\nElas vão ao Tiny agora, numa remessa só, e a fatura é gerada. Se faltou alguma peça na ' +
+        'prateleira, cancele aqui e use "Retirar peças" no detalhe antes.',
       'Entregue': 'Marcar o pedido ' + num + ' como ENTREGUE?\n\nÉ um status final: o pedido não muda mais.',
       'Cancelado': 'CANCELAR o pedido ' + num + '?\n\nO pedido é cancelado também no Tiny (inclusive remessas já ' +
         'enviadas: o estoque volta lá) e as faturas são anuladas. Não dá para desfazer.',
@@ -1469,8 +1469,9 @@
     return !txt || window.confirm(txt);
   }
 
-  // Status da peça: Enviado, Parcial, Pré-venda ou Pendente.
+  // Status da peça: Retirada, Enviado, Parcial (pedidos antigos), Pré-venda ou Pendente.
   function itemStatus(it) {
+    if (!it.qtd && it.naoEncontrada) return { cls: 'Cancelado', txt: 'Retirada' };
     if (it.qtdEnviada >= it.qtd) return { cls: 'Enviado', txt: 'Enviado' };
     if (it.qtdEnviada > 0) return { cls: 'Parcial', txt: 'Parcial ' + it.qtdEnviada + '/' + it.qtd };
     if (it.backorder) return { cls: 'PreVenda', txt: 'Pré-venda' };
@@ -1480,16 +1481,16 @@
   // Bolinha da peça (mesmas cores do portal).
   function dotItem(it, cancelado) {
     if (cancelado) return '<span class="item-dot dot-cancelado" title="Cancelado"></span>';
+    if (!it.qtd && it.naoEncontrada) return '<span class="item-dot dot-cancelado" title="Retirada do pedido"></span>';
     var cls = it.qtdEnviada >= it.qtd ? 'dot-ok' : (it.qtdEnviada > 0 ? 'dot-parcial' : 'dot-pendente');
     return '<span class="item-dot ' + cls + '" title="' + itemStatus(it).txt + '"></span>';
   }
 
   var LEGENDA_DOTS =
     '<div class="dot-legenda"><strong>Legenda do status:</strong>' +
-    '<span><span class="item-dot dot-ok"></span>Enviado — quantidade completa despachada</span>' +
-    '<span><span class="item-dot dot-parcial"></span>Parcial — parte da quantidade já saiu</span>' +
-    '<span><span class="item-dot dot-pendente"></span>Não enviado — aguardando separação/estoque</span>' +
-    '<span><span class="item-dot dot-cancelado"></span>Cancelado — o pedido foi cancelado</span>' +
+    '<span><span class="item-dot dot-ok"></span>Enviado — foi ao Tiny na remessa</span>' +
+    '<span><span class="item-dot dot-pendente"></span>Não enviado — aguardando conferência</span>' +
+    '<span><span class="item-dot dot-cancelado"></span>Retirada ou pedido cancelado</span>' +
     '</div>';
 
   // Linha de peça no detalhe. `editavel` libera a quantidade enviada.
@@ -1497,21 +1498,23 @@
     var st = itemStatus(it);
     var cancelado = ped.status === 'Cancelado';
     // Grava a quantidade enviada; em pré-venda consome estoque.
-    var ctrl = editavel
+    // Peça normal: só "Retirar peças" (remessa única). Garantia sem estoque (pré-venda) mantém o envio por peça.
+    var retirar = editavel && ped.faturaNaRemessa && !it.backorder && it.qtdEnviada < it.qtd
+      ? '<button class="btn-line btn-mini it-nf" data-ped="' + esc(ped.id) + '" data-item="' + it.itemId +
+        '" data-max="' + (it.qtd - it.qtdEnviada) + '">Retirar peças</button>' : '';
+    var ctrl = !it.backorder
+      ? (retirar || '<span class="muted">—</span>')
+      : editavel
       ? '<input type="number" class="it-qtd" data-item="' + it.itemId + '" min="0" max="' + it.qtd +
           '" value="' + it.qtdEnviada + '" style="width:62px;">' +
         '<button class="btn-line btn-mini it-save" data-ped="' + esc(ped.id) + '" data-item="' + it.itemId +
           '" data-qtd="' + it.qtd + '">Salvar</button>' +
         (it.qtdEnviada < it.qtd
           ? '<button class="btn-line btn-mini it-tudo" data-ped="' + esc(ped.id) + '" data-item="' + it.itemId +
-            '" data-qtd="' + it.qtd + '">Tudo</button>' : '') +
-        // Peça que não estava na prateleira: sai do pedido ou vai para a black order (não é faturada).
-        (ped.faturaNaRemessa && !it.backorder && it.qtdEnviada < it.qtd
-          ? '<button class="btn-line btn-mini it-nf" data-ped="' + esc(ped.id) + '" data-item="' + it.itemId +
-            '" data-max="' + (it.qtd - it.qtdEnviada) + '">Não encontrada</button>' : '')
+            '" data-qtd="' + it.qtd + '">Tudo</button>' : '')
       : '<span class="muted">—</span>';
     var nf = it.naoEncontrada
-      ? '<div class="nf-info">' + it.naoEncontrada + ' não encontrada(s) — ' + esc(it.motivoNaoEncontrada || '') + '</div>'
+      ? '<div class="nf-info">' + it.naoEncontrada + ' retirada(s) — ' + esc(it.motivoNaoEncontrada || '') + '</div>'
       : '';
     return '<tr><td>' + dotItem(it, cancelado) + '</td>' +
       '<td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + nf + '</td>' +
@@ -1521,10 +1524,10 @@
       '<td class="it-ctrl">' + ctrl + '</td></tr>';
   }
 
-  // Motivos prontos (a API aceita qualquer texto; estes são os mais comuns).
+  // Motivos prontos (o admin completa com a descrição; "Outro" = só a descrição).
   var MOTIVOS_NF = ['Não foi encontrado', 'Estoque incorreto', 'Peça danificada'];
 
-  // Formulário "Não encontrada" dentro da célula de controle do item.
+  // Formulário "Retirar peças" dentro da célula de controle do item.
   function formNaoEncontrada(b) {
     var td = b.closest('td');
     var max = Number(b.getAttribute('data-max'));
@@ -1535,27 +1538,27 @@
       '<div class="nf-form">' +
       '<label>Quantas <input type="number" class="nf-qtd" min="1" max="' + max + '" value="' + max + '" style="width:58px;"></label>' +
       '<label>Motivo <select class="nf-mot">' + MOTIVOS_NF.map(function (m) { return '<option>' + esc(m) + '</option>'; }).join('') +
-      '<option value="__outro">Outro…</option></select></label>' +
-      '<input type="text" class="nf-outro" maxlength="200" placeholder="Escreva o motivo" hidden>' +
+      '<option value="Outro">Outro</option></select></label>' +
+      '<textarea class="nf-desc" maxlength="180" rows="2" placeholder="O que aconteceu (o cliente vê este texto)"></textarea>' +
       '<label><input type="radio" name="nf-dest-' + item + '" value="remover" checked> Retirar do pedido</label>' +
       '<label><input type="radio" name="nf-dest-' + item + '" value="blackorder"> Mandar para a black order do cliente</label>' +
-      '<div class="nf-dica">Não é faturada. Confira o estoque desta peça no Tiny: se estiver errado, ela volta a aparecer na loja.</div>' +
+      '<div class="nf-dica">Não é faturada. Se o estoque do Tiny estiver errado, corrija lá: senão a peça volta a aparecer na loja.</div>' +
       '<div><button class="btn-orange btn-mini nf-ok">Confirmar</button> <button class="btn-line btn-mini nf-canc">Cancelar</button></div>' +
       '</div>';
-    var sel = td.querySelector('.nf-mot'), outro = td.querySelector('.nf-outro');
-    sel.addEventListener('change', function () { outro.hidden = sel.value !== '__outro'; if (!outro.hidden) outro.focus(); });
+    var sel = td.querySelector('.nf-mot'), desc = td.querySelector('.nf-desc');
+    sel.addEventListener('change', function () { if (sel.value === 'Outro') desc.focus(); });
     td.querySelector('.nf-canc').addEventListener('click', function () { td.innerHTML = antes; renderPedidos(); });
     td.querySelector('.nf-ok').addEventListener('click', async function () {
       var q = Number(td.querySelector('.nf-qtd').value);
-      var motivo = sel.value === '__outro' ? outro.value.trim() : sel.value;
+      var descricao = desc.value.trim();
       var destino = td.querySelector('input[name="nf-dest-' + item + '"]:checked').value;
       if (!(q >= 1 && q <= max && q % 1 === 0)) { FG.toast('Quantidade de 1 a ' + max + '.', 'erro'); return; }
-      if (!motivo) { FG.toast('Escreva o motivo.', 'erro'); return; }
+      if (sel.value === 'Outro' && !descricao) { FG.toast('Descreva o que aconteceu.', 'erro'); desc.focus(); return; }
       this.disabled = true;
-      var r = await FG.marcarNaoEncontrada(ped, item, { quantidade: q, motivo: motivo, destino: destino });
+      var r = await FG.marcarNaoEncontrada(ped, item, { quantidade: q, motivo: sel.value, descricao: descricao, destino: destino });
       if (r.ok === false) { FG.toast(r.msg, 'erro'); this.disabled = false; return; }
       FG.toast(q + ' peça(s) ' + (destino === 'blackorder' ? 'mandadas para a black order' : 'retiradas do pedido') +
-        '; o cliente foi avisado. ' + (r.aviso || ''));
+        '; o cliente foi avisado.' + (r.status === 'Cancelado' ? ' Não sobrou peça: pedido cancelado.' : ''));
       renderPedidos();
     });
   }
@@ -1612,23 +1615,16 @@
     var preVenda = o.itens.filter(function (it) { return it.backorder; });
     // Pedido entregue ou cancelado está fechado: as peças não mudam mais.
     var editavel = STATUS_TERMINAIS.indexOf(o.status) < 0;
-    // Enviadas e ainda não no Tiny = próxima remessa (sem pré-venda).
-    var aConfirmar = emEstoque.reduce(function (s, it) {
-      return s + Math.max(0, (it.qtdEnviada || 0) - (it.qtdExportada || 0));
-    }, 0);
+    // Peças que ainda não saíram (sem pré-venda): o Confirmar envio manda todas numa remessa só.
+    var aEnviar = emEstoque.reduce(function (s, it) { return s + Math.max(0, it.qtd - (it.qtdEnviada || 0)); }, 0);
     return '<div class="venda-det">' +
-      (editavel && aConfirmar
-        ? '<div class="adm-banner"><b>' + aConfirmar + ' peça(s)</b> marcadas como enviadas e ainda não confirmadas. ' +
-          'Confirmar fecha a remessa e envia ao Tiny <b>somente essas peças</b>' +
-          (o.faturaNaRemessa ? ' e gera a <b>fatura só delas</b>' : '') + '; se ainda faltar peça, ' +
-          'o pedido fica como <b>Parcial</b> e o restante sai numa próxima remessa (ou marque como <b>Não encontrada</b>). ' +
+      (editavel && aEnviar
+        ? '<div class="adm-banner">Confira as peças na prateleira. O que não estiver lá, use <b>Retirar peças</b> ' +
+          '(com o que aconteceu): sai do pedido ou vai para a black order do cliente. Depois, <b>Confirmar envio</b> ' +
+          'manda as <b>' + aEnviar + ' peça(s)</b> restantes ao Tiny numa remessa só' +
+          (o.faturaNaRemessa ? ' e gera a fatura' : '') + '.' +
           '<button class="btn-orange btn-mini vd-remessa" data-ped="' + esc(o.id) + '" style="margin-left:8px;">Confirmar envio</button></div>'
-        : editavel && o.status === 'Pendente'
-          ? '<div class="adm-banner">Pedido <b>aguardando conferência</b>. Confira as peças no estoque, informe ' +
-            'abaixo quanto foi encontrado de cada uma e clique em <b>Confirmar envio</b>: só essas peças vão ao Tiny' +
-            (o.faturaNaRemessa ? ' e entram na fatura' : '') + '. ' +
-            'O que faltar fica para uma próxima remessa, ou marque como <b>Não encontrada</b> (com o motivo).</div>'
-          : '') +
+        : '') +
       '<div class="venda-meta">' +
       '<div><span class="muted">Cliente</span><br><b>' + esc(o.empresa) + '</b><br><span class="muted">' + esc(o.usuario) + '</span></div>' +
       '<div><span class="muted">Data da compra</span><br><b>' + FG.fmtDateTime(o.data) + '</b></div>' +
@@ -1643,9 +1639,10 @@
       grupoItens('Pré-venda', preVenda, o, editavel) +
       '</tbody></table>' + LEGENDA_DOTS +
       (editavel
-        ? '<p class="muted" style="font-size:12px;margin:4px 0 0;">Ajuste a quantidade encontrada/despachada de cada peça, clique em <b>Salvar</b> ' +
-          'e, quando a remessa estiver fechada, em <b>Confirmar envio</b> — é ele que manda as peças ao Tiny. ' +
-          'Em peça de pré-venda, aumentar dá baixa no estoque de verdade e já vai ao Tiny na hora (fluxo próprio).</p>'
+        ? (preVenda.length
+          ? '<p class="muted" style="font-size:12px;margin:4px 0 0;">Peça de garantia em pré-venda: aumentar a quantidade ' +
+            'enviada dá baixa no estoque de verdade e já vai ao Tiny na hora (fluxo próprio).</p>'
+          : '')
         : '<p class="muted" style="font-size:12px;margin:4px 0 0;">Pedido ' + esc(o.status.toLowerCase()) +
           ' — as peças não podem mais ser alteradas.</p>') +
       '<div class="tiny-venda" data-ped="' + esc(o.id) + '"></div>' +
@@ -1755,8 +1752,7 @@
         if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível confirmar o envio.', 'erro'); return; }
         var n = (r.itens || []).reduce(function (s, i) { return s + i.qtd; }, 0);
         FG.toast(n + ' peça(s) enviadas ao Tiny' +
-          (r.fatura ? ' · fatura ' + r.fatura.numero + ' (' + FG.fmtMoney(r.fatura.total) + ')' : '') +
-          (r.parcial ? ' — pedido Parcial.' : ' — pedido concluído.'));
+          (r.fatura ? ' · fatura ' + r.fatura.numero + ' (' + FG.fmtMoney(r.fatura.total) + ')' : '') + '.');
         renderPedidos();
       });
     });

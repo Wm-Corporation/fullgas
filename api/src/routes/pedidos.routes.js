@@ -735,7 +735,9 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
   }
 });
 
-// POST /api/pedidos/:numero/remessa (admin) — "Confirmar envio": o que foi enviado e não está no Tiny vira um pedido lá.
+// POST /api/pedidos/:numero/remessa (admin) — "Confirmar envio": remessa ÚNICA (regra de 27/10/2026).
+// Tudo o que restou no pedido sai agora e vai ao Tiny (com a fatura); o que não estava na
+// prateleira o admin retira antes (/retirar). Itens de garantia sem estoque (EmBackorder) ficam de fora.
 router.post('/pedidos/:numero/remessa', requireAuth, requireAdmin, async (req, res, next) => {
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
@@ -750,9 +752,12 @@ router.post('/pedidos/:numero/remessa', requireAuth, requireAdmin, async (req, r
     if (STATUS_FINAIS.includes(ped.Status))
       return recusar(409, `Pedido ${ped.Status.toLowerCase()} não aceita novas remessas.`);
 
+    await new sql.Request(tx).input('pid', sql.Int, ped.PedidoId)
+      .query(`UPDATE dbo.PedidoItem SET QuantidadeEnviada = Quantidade
+               WHERE PedidoId = @pid AND EmBackorder = 0 AND Quantidade > QuantidadeEnviada`);
     const itens = await confirmarRemessa(tx, ped.PedidoId);
     if (!itens.length)
-      return recusar(409, 'Nada novo para enviar: informe a quantidade enviada das peças desta remessa.');
+      return recusar(409, 'Nada para enviar: todas as peças deste pedido já saíram ou foram retiradas.');
     const novoStatus = await statusPorEnvio(tx, ped.PedidoId, ped.Status);
     await new sql.Request(tx)
       .input('pid', sql.Int, ped.PedidoId)
@@ -857,19 +862,23 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
   }
 });
 
-// Motivos prontos para peça não encontrada (o admin também pode escrever outro).
-export const MOTIVOS_NAO_ENCONTRADA = ['Não foi encontrado', 'Estoque incorreto', 'Peça danificada'];
+// Motivos prontos para retirar peças (o admin completa com a descrição, ou escolhe 'Outro').
+export const MOTIVOS_RETIRADA = ['Não foi encontrado', 'Estoque incorreto', 'Peça danificada'];
 
-// POST /api/pedidos/:numero/itens/:itemId/nao-encontrada (admin) — { quantidade, motivo, destino }.
-// Tira do pedido peças que não foram achadas na prateleira (não serão faturadas). destino:
+// POST /api/pedidos/:numero/itens/:itemId/retirar (admin) — { quantidade, motivo, descricao?, destino }.
+// Retira peças do pedido antes do envio (não serão faturadas), com o que aconteceu. destino:
 //   'remover'    → saem do pedido;   'blackorder' → vão para o fim da fila de black order do cliente.
 // Só pedidos com fatura por remessa (os antigos já têm fatura cheia) e só o que ainda não saiu.
-router.post('/pedidos/:numero/itens/:itemId/nao-encontrada', requireAuth, requireAdmin, async (req, res, next) => {
+// Retirou tudo = pedido cancelado (nada foi ao Tiny). '/nao-encontrada' é o nome antigo da rota.
+router.post(['/pedidos/:numero/itens/:itemId/retirar', '/pedidos/:numero/itens/:itemId/nao-encontrada'],
+  requireAuth, requireAdmin, async (req, res, next) => {
   const q = Number(req.body?.quantidade);
-  const motivo = String(req.body?.motivo || '').trim().slice(0, 200);
+  const base = String(req.body?.motivo || '').trim();
+  const descricao = String(req.body?.descricao || '').trim();
+  const motivo = (base && base !== 'Outro' ? base + (descricao ? ' — ' + descricao : '') : descricao).slice(0, 200);
   const destino = req.body?.destino === 'blackorder' ? 'blackorder' : (req.body?.destino === 'remover' ? 'remover' : null);
   if (!Number.isInteger(q) || q <= 0) return res.status(400).json({ erro: 'Informe quantas peças não foram encontradas.' });
-  if (!motivo) return res.status(400).json({ erro: 'Informe o motivo.' });
+  if (!motivo) return res.status(400).json({ erro: 'Informe o motivo ou descreva o que aconteceu.' });
   if (!destino) return res.status(400).json({ erro: 'Escolha: retirar do pedido ou mandar para a black order.' });
 
   const pool = await getPool();
@@ -919,7 +928,10 @@ router.post('/pedidos/:numero/itens/:itemId/nao-encontrada', requireAuth, requir
       });
     }
 
-    const novoStatus = await statusPorEnvio(tx, it.PedidoId, it.Status);
+    // Sobrou alguma peça? Se não, o pedido acaba aqui (nada foi ao Tiny: não há o que desfazer lá).
+    const resto = (await new sql.Request(tx).input('pid', sql.Int, it.PedidoId)
+      .query('SELECT ISNULL(SUM(Quantidade), 0) AS n FROM dbo.PedidoItem WHERE PedidoId = @pid')).recordset[0].n;
+    const novoStatus = resto > 0 ? await statusPorEnvio(tx, it.PedidoId, it.Status) : 'Cancelado';
     await new sql.Request(tx)
       .input('pid', sql.Int, it.PedidoId)
       .input('st', sql.NVarChar(14), novoStatus)
@@ -930,16 +942,17 @@ router.post('/pedidos/:numero/itens/:itemId/nao-encontrada', requireAuth, requir
       ? 'foram para a sua black order (você é avisado quando chegarem)'
       : 'foram retiradas do pedido';
     await registrarEventoPedido({
-      pedidoId: it.PedidoId, tipo: 'aviso', user: req.user,
-      titulo: `Peça não encontrada: ${it.Sku}`,
-      detalhe: `${q}× ${it.NomeProduto} — ${motivo}. ${destino === 'blackorder' ? 'Foi para a black order.' : 'Retirada do pedido.'} Não será faturada.`
+      pedidoId: it.PedidoId, tipo: resto > 0 ? 'aviso' : 'cancelado', user: req.user,
+      titulo: `Peças retiradas: ${it.Sku}`,
+      detalhe: `${q}× ${it.NomeProduto} — ${motivo}. ${destino === 'blackorder' ? 'Foram para a black order.' : 'Saíram do pedido.'} Não serão faturadas.` +
+        (resto > 0 ? '' : ' Todas as peças foram retiradas: pedido cancelado.')
     });
     await criarNotificacao({
       empresaId: it.EmpresaId, publico: 'cliente', origem: 'blackorder', criadoPor: req.user.id,
       link: '#pedido/' + it.NumeroPedido,
-      titulo: `Pedido ${it.NumeroPedido}: peça não encontrada`,
-      texto: `${q} un. de ${it.NomeProduto} (${it.Sku}) não foram encontradas no estoque.\nMotivo: ${motivo}.\n` +
-        `Estas peças ${rumo} e não serão cobradas.`
+      titulo: `Pedido ${it.NumeroPedido}: peças retiradas`,
+      texto: `${q} un. de ${it.NomeProduto} (${it.Sku}) foram retiradas do pedido.\nO que aconteceu: ${motivo}.\n` +
+        `Estas peças ${rumo} e não serão cobradas.` + (resto > 0 ? '' : '\nComo não sobrou nenhuma peça, o pedido foi cancelado.')
     });
     // O reservado do pedido caiu: recalcula estoque e fila pelo Tiny.
     atualizarEstoqueCesta([it.Sku]).catch(e => console.warn('⚠ Recalcular estoque falhou:', e.message));

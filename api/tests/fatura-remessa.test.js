@@ -124,6 +124,7 @@ function bancoNaoEncontrada(extra = {}) {
     if (/SET Quantidade = Quantidade - @q/.test(t)) { st.item = p; return []; }
     if (/SET Total = Total - @v/.test(t)) { st.total = p; return []; }
     if (/INSERT INTO dbo\.BlackOrder /.test(t)) { st.bo = p; return [{ BlackOrderId: 950 }]; }
+    if (/SELECT ISNULL\(SUM\(Quantidade\), 0\) AS n FROM dbo\.PedidoItem/.test(t)) return [{ n: st.resto ?? 1 }];
     if (/AS Confirmada/.test(t)) return [{ totNormais: 1, pendNormais: 0, comEnvio: 1, pendTotal: 0 }];
     return [];
   };
@@ -143,7 +144,7 @@ describe('peça não encontrada', () => {
     expect(r.body.status).toBe('Enviado');                     // o que restou já saiu
     const n = achar(/INSERT INTO dbo\.Notificacao/)[0];
     expect(n.p).toMatchObject({ eid: 7, link: '#pedido/0005041900' });
-    expect(n.p.texto).toMatch(/Motivo: Estoque incorreto\.[\s\S]*retiradas do pedido e não serão cobradas/);
+    expect(n.p.texto).toMatch(/O que aconteceu: Estoque incorreto\.[\s\S]*retiradas do pedido e não serão cobradas/);
     expect(recalculados).toEqual(['B2']);
     expect(r.body.aviso).toMatch(/Tiny/);
   });
@@ -156,6 +157,30 @@ describe('peça não encontrada', () => {
     expect(b.st.bo).toMatchObject({ num: '0005041900', pid: 10, eid: 7, uid: 3, prod: 200, sku: 'B2', qtd: 2 });
     expect(r.body.blackOrder).toMatchObject({ id: 950, quantidade: 2 });
     expect(achar(/INSERT INTO dbo\.Notificacao/)[0].p.texto).toMatch(/foram para a sua black order/);
+  });
+
+  it('motivo pronto + descrição viram um texto só; "Outro" usa só a descrição', async () => {
+    let b = bancoNaoEncontrada(); responder = b.resp;
+    await request(app()).post('/api/pedidos/0005041900/itens/5/retirar')
+      .send({ quantidade: 1, motivo: 'Peça danificada', descricao: 'caixa amassada na prateleira', destino: 'remover' });
+    expect(b.st.item.mot).toBe('Peça danificada — caixa amassada na prateleira');
+    b = bancoNaoEncontrada(); responder = b.resp;
+    await request(app()).post('/api/pedidos/0005041900/itens/5/retirar')
+      .send({ quantidade: 1, motivo: 'Outro', descricao: 'cliente pediu para tirar', destino: 'remover' });
+    expect(b.st.item.mot).toBe('cliente pediu para tirar');
+    b = bancoNaoEncontrada(); responder = b.resp;
+    const r = await request(app()).post('/api/pedidos/0005041900/itens/5/retirar')
+      .send({ quantidade: 1, motivo: 'Outro', descricao: '', destino: 'remover' });
+    expect(r.status).toBe(400);
+  });
+
+  it('retirou todas as peças: o pedido é cancelado e o cliente sabe', async () => {
+    const b = bancoNaoEncontrada(); b.st.resto = 0; responder = b.resp;
+    const r = await request(app()).post('/api/pedidos/0005041900/itens/5/retirar')
+      .send({ quantidade: 3, motivo: 'Não foi encontrado', destino: 'remover' });
+    expect(r.body.status).toBe('Cancelado');
+    expect(achar(/UPDATE dbo\.Pedido SET Status = @st/)[0].p.st).toBe('Cancelado');
+    expect(achar(/INSERT INTO dbo\.Notificacao/)[0].p.texto).toMatch(/o pedido foi cancelado/);
   });
 
   it('mais do que ainda não saiu: recusado sem gravar', async () => {

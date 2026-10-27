@@ -696,9 +696,9 @@
     });
   }
 
-  // Peça não encontrada (admin): { quantidade, motivo, destino: 'remover' | 'blackorder' }.
+  // Retirar peças do pedido (admin): { quantidade, motivo, descricao, destino: 'remover' | 'blackorder' }.
   FG.marcarNaoEncontrada = function (numero, itemId, dados) {
-    return putPedido('/pedidos/' + encodeURIComponent(numero) + '/itens/' + encodeURIComponent(itemId) + '/nao-encontrada', dados, 'POST')
+    return putPedido('/pedidos/' + encodeURIComponent(numero) + '/itens/' + encodeURIComponent(itemId) + '/retirar', dados, 'POST')
       .then(function (r) { return r.ok && FG.recarregarBlackOrders ? FG.recarregarBlackOrders().then(function () { return r; }, function () { return r; }) : r; });
   };
 

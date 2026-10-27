@@ -1,4 +1,4 @@
-// Ciclo do pedido: aprovar não vai ao Tiny; "Confirmar envio" exporta o que saiu; o resto vai em nova remessa.
+// Ciclo do pedido: aprovar não vai ao Tiny; "Confirmar envio" manda tudo o que restou numa remessa só.
 // Entregue só depois de Enviado; cancelar devolve só o que não saiu. db.js (com transação) e tiny-pedidos.js são dublês.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
@@ -35,6 +35,12 @@ function responder(texto, p) {
   if (/SELECT PedidoId, Status, EmpresaId, Total FROM dbo\.Pedido/.test(texto) ||
       /SELECT PedidoId, Status FROM dbo\.Pedido/.test(texto))
     return um(pedido.NumeroPedido === p.num ? [pedido] : []);
+  // remessa única: tudo o que restou sai agora
+  if (/UPDATE dbo\.PedidoItem SET QuantidadeEnviada = Quantidade\s+WHERE PedidoId = @pid AND EmBackorder = 0/.test(texto)) {
+    const alvo = itens.filter(i => !i.EmBackorder && i.Quantidade > i.QuantidadeEnviada);
+    alvo.forEach(i => { i.QuantidadeEnviada = i.Quantidade; });
+    return um(alvo);
+  }
   // confirmarRemessa
   if (/QuantidadeEnviada - QuantidadeExportada AS Qtd/.test(texto))
     return um(itens.filter(i => !i.EmBackorder && i.QuantidadeEnviada > i.QuantidadeExportada)
@@ -165,40 +171,35 @@ describe('aprovar NÃO vai ao Tiny', () => {
   });
 });
 
-describe('remessa ("Confirmar envio")', () => {
-  it('pedido Pendente: marca só o encontrado, confirma, e o Tiny recebe só isso', async () => {
-    await enviar(1, 1);                       // achou 1 de 3 peças A1; B2 não achou
-    expect(exportacoes).toHaveLength(0);      // marcar não exporta
-    expect(pedido.Status).toBe('Pendente');   // nem muda o status antes de confirmar
-
+describe('remessa única ("Confirmar envio")', () => {
+  it('pedido Pendente: tudo o que restou vai ao Tiny numa remessa só e o pedido fica Enviado', async () => {
     const r = await confirmar();
     expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ ok: true, status: 'Parcial', parcial: true });
-    expect(exportacoes).toEqual([{ pedidoId: 10, escopo: 'remessa', itens: [{ sku: 'A1', nome: 'PECA A', preco: 10, qtd: 1 }] }]);
-    expect(pedido.Status).toBe('Parcial');
+    expect(r.body).toMatchObject({ ok: true, status: 'Enviado', parcial: false });
+    expect(exportacoes).toEqual([{ pedidoId: 10, escopo: 'remessa', itens: [
+      { sku: 'A1', nome: 'PECA A', preco: 10, qtd: 3 },
+      { sku: 'B2', nome: 'PECA B', preco: 20, qtd: 2 }
+    ] }]);
+    expect(pedido.Status).toBe('Enviado');
   });
 
-  it('a segunda remessa leva só o restante e fecha o pedido como Enviado', async () => {
-    await enviar(1, 1);
+  it('peça retirada antes não vai (o item já está com a quantidade menor)', async () => {
+    itens[1].Quantidade = 1;                  // 1 das 2 B2 foi retirada do pedido
     await confirmar();
-    exportacoes.length = 0;
-
-    await enviar(1, 3);   // completa o A1
-    await enviar(2, 2);   // e manda o B2 inteiro
-    const r = await confirmar();
-    expect(r.body.status).toBe('Enviado');
     expect(exportacoes[0].itens).toEqual([
-      { sku: 'A1', nome: 'PECA A', preco: 10, qtd: 2 },   // só o que faltava
-      { sku: 'B2', nome: 'PECA B', preco: 20, qtd: 2 }
+      { sku: 'A1', nome: 'PECA A', preco: 10, qtd: 3 },
+      { sku: 'B2', nome: 'PECA B', preco: 20, qtd: 1 }
     ]);
   });
 
-  it('recusa confirmar sem nada novo, sem exportar nem mudar o status', async () => {
+  it('recusa confirmar quando não sobrou nada, sem exportar nem mudar o status', async () => {
+    await confirmar();
+    exportacoes.length = 0;
+    pedido.Status = 'Aprovado';
     const r = await confirmar();
     expect(r.status).toBe(409);
-    expect(r.body.erro).toMatch(/Nada novo para enviar/);
+    expect(r.body.erro).toMatch(/Nada para enviar/);
     expect(exportacoes).toHaveLength(0);
-    expect(pedido.Status).toBe('Pendente');
     expect(transacoes).toContain('rollback');
   });
 
@@ -217,16 +218,12 @@ describe('remessa ("Confirmar envio")', () => {
     expect(r.body.erro).toMatch(/não volta para Pendente/);
   });
 
-  it('"Enviado" no seletor marca o restante e já fecha a remessa dele', async () => {
-    await enviar(1, 1);
-    await confirmar();
-    exportacoes.length = 0;
-
+  it('"Enviado" no seletor faz o mesmo que o Confirmar envio: tudo numa remessa', async () => {
     const r = await mudar('Enviado');
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ status: 'Enviado', remessa: 2 });
     expect(exportacoes).toEqual([{ pedidoId: 10, escopo: 'remessa', itens: [
-      { sku: 'A1', nome: 'PECA A', preco: 10, qtd: 2 },
+      { sku: 'A1', nome: 'PECA A', preco: 10, qtd: 3 },
       { sku: 'B2', nome: 'PECA B', preco: 20, qtd: 2 }
     ] }]);
   });
@@ -284,13 +281,12 @@ describe('cancelar cancela tudo, também no Tiny', () => {
   });
 
   it('com peça já enviada: cancela no Tiny também e avisa para conferir a volta física', async () => {
-    await enviar(1, 2);                     // 2 das 3 peças A1 saíram
-    await confirmar();
+    await confirmar();                      // as 5 peças saíram
     const r = await mudar('Cancelado');
     expect(r.status).toBe(200);
     expect(cancelados).toEqual([{ pedidoId: 10 }]);
     expect(fatura).toBe('Anulada');
-    expect(r.body.aviso).toMatch(/2 peça\(s\) já tinham sido enviadas.*confira/);
+    expect(r.body.aviso).toMatch(/5 peça\(s\) já tinham sido enviadas.*confira/);
   });
 
   it('peça marcada como enviada sem "Confirmar envio" bloqueia o cancelamento', async () => {

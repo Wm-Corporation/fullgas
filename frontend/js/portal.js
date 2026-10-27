@@ -1262,7 +1262,7 @@
   // Bolinha da peça: verde enviado, amarelo parcial, cinza pendente, vermelho cancelado.
   function dotItem(it, cancelado) {
     if (cancelado) return '<span class="item-dot dot-cancelado" title="Cancelado"></span>';
-    if (!it.qtd && it.naoEncontrada) return '<span class="item-dot dot-cancelado" title="Não encontrada"></span>';
+    if (!it.qtd && it.naoEncontrada) return '<span class="item-dot dot-cancelado" title="Retirada do pedido"></span>';
     var cls = it.qtdEnviada >= it.qtd ? 'dot-ok' : (it.qtdEnviada > 0 ? 'dot-parcial' : 'dot-pendente');
     var t = it.qtdEnviada >= it.qtd ? 'Enviado' : (it.qtdEnviada > 0 ? 'Parcial' : 'Não enviado');
     return '<span class="item-dot ' + cls + '" title="' + t + '"></span>';
@@ -1271,10 +1271,9 @@
   // Legenda das bolinhas — vai uma única vez, logo abaixo das tabelas de itens.
   var LEGENDA_DOTS =
     '<div class="dot-legenda"><strong>Legenda do status:</strong>' +
-    '<span><span class="item-dot dot-ok"></span>Enviado — quantidade completa já despachada</span>' +
-    '<span><span class="item-dot dot-parcial"></span>Parcial — parte da quantidade já saiu</span>' +
-    '<span><span class="item-dot dot-pendente"></span>Não enviado — aguardando separação/estoque</span>' +
-    '<span><span class="item-dot dot-cancelado"></span>Cancelado — o pedido foi cancelado</span>' +
+    '<span><span class="item-dot dot-ok"></span>Enviado</span>' +
+    '<span><span class="item-dot dot-pendente"></span>Não enviado — aguardando conferência</span>' +
+    '<span><span class="item-dot dot-cancelado"></span>Retirada do pedido ou pedido cancelado</span>' +
     '</div>';
 
   function tabelaItens(itens, cancelado) {
@@ -1285,7 +1284,7 @@
       itens.map(function (it) {
         return '<tr><td>' + dotItem(it, cancelado) + '</td><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) +
           (it.garantiaNumero ? ' <span class="pill-status Garantia" title="Peça com garantia de varejo aprovada">Garantia Nº ' + esc(it.garantiaNumero) + '</span>' : '') +
-          (it.naoEncontrada ? '<div class="nf-info">' + it.naoEncontrada + ' un. não encontrada(s) no estoque — ' +
+          (it.naoEncontrada ? '<div class="nf-info">' + it.naoEncontrada + ' un. retirada(s) do pedido — ' +
             esc(it.motivoNaoEncontrada || '') + '. Não serão cobradas.</div>' : '') +
           '</td>' +
           '<td class="right">' + it.qtd + '</td><td class="right">' + it.qtdEnviada + '</td>' +
