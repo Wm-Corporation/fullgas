@@ -420,13 +420,13 @@
       var envio = Math.min(qtd, Math.max(0, (p && p.estoque) || 0));
       return { envio: envio, black: qtd - envio };
     },
-    // Bolinha do estoque: > 20 verde; 10 a 20 amarela; < 10 vermelha; 0 = black order.
+    // Bolinha do estoque: 10 ou mais verde; 1 a 9 amarela; 0 = black order (vermelha).
     nivelEstoque: function (p) {
       var e = Math.max(0, Number(p && p.estoque) || 0);
       // A cor mostra o nível; o texto é sempre "Em estoque" (não revela se são poucas unidades).
-      if (e > 20) return { cls: 'verde', txt: 'Em estoque' };
-      if (e >= 10) return { cls: 'amarela', txt: 'Em estoque' };
-      if (e > 0) return { cls: 'vermelha', txt: 'Em estoque' };
+      // Vermelho só para black order (sem estoque).
+      if (e >= 10) return { cls: 'verde', txt: 'Em estoque' };
+      if (e > 0) return { cls: 'amarela', txt: 'Em estoque' };
       return { cls: 'vermelha', txt: 'Black order', black: true };
     },
     // HTML da bolinha + texto (loja, Localizador, admin). Sem estoque, mostra a previsão se houver.

@@ -7,7 +7,9 @@ Regra definida pelo dono em 26/10/2026.
 - Qualquer peça do catálogo pode ser comprada, em qualquer quantidade (teto de 100.000 por linha só contra erro de digitação).
 - No checkout (`POST /api/pedidos`), cada linha leva **o que houver em estoque** para o pedido normal; o que faltar vira **black order**.
 - O pedido normal **não gera fatura no checkout**: cada "Confirmar envio" exportado ao Tiny gera a fatura só das peças daquela remessa (`Pedido.FaturaNaRemessa`, `FaturaItem`). A black order não é cobrada e não vai ao Tiny.
-- Peça não encontrada na prateleira: o admin marca a quantidade e o motivo ("Não foi encontrado", "Estoque incorreto", "Peça danificada" ou texto) e escolhe **retirar do pedido** ou **mandar para a black order** do cliente. Não é faturada; o cliente vê o motivo e é avisado. Conferir o estoque no Tiny (se estiver errado, a peça volta à loja).
+- **Remessa única** (27/10/2026): sem envio parcial. O admin confere a prateleira, usa **Retirar peças** no que não estiver lá (motivo pronto — "Não foi encontrado", "Estoque incorreto", "Peça danificada" — ou "Outro", mais a descrição do que aconteceu) e escolhe **retirar do pedido** ou **mandar para a black order** do cliente. Depois, **Confirmar envio** manda ao Tiny tudo o que restou numa remessa só, com a fatura. Retirou tudo = pedido cancelado. O cliente vê a descrição e é avisado. Se o estoque do Tiny estiver errado, corrigir lá (senão a peça volta à loja).
+- **Cancelar** no portal cancela no Tiny todos os pedidos da venda (inclusive remessas exportadas) e anula as faturas.
+- **Estoque** chega do Tiny em até 1 min (`lista.atualizacoes.estoque.php`, só o que mudou).
 - Pedido e black order usam o mesmo número de compra. Se nada tinha estoque, não há pedido (nem fatura): só black order.
 - Pedidos antigos com `PedidoItem.EmBackorder = 1` (pré-venda) continuam no fluxo antigo até saírem: foram faturados cheios.
 
@@ -15,9 +17,8 @@ Regra definida pelo dono em 26/10/2026.
 
 | Estoque | Bolinha | Texto |
 |---|---|---|
-| > 20 | verde | Em estoque |
-| 10 a 20 | amarela | Em estoque |
-| 1 a 9 | vermelha | Em estoque |
+| 10 ou mais | verde | Em estoque |
+| 1 a 9 | amarela | Em estoque |
 | 0 | vermelha | Black order (+ previsão, se houver) |
 
 ## Fila e reserva (revisto em 27/10/2026)

@@ -167,6 +167,23 @@ router.post('/notificacoes', requireAuth, requireAdmin, uploadAnexo, async (req,
   } catch (e) { next(e); }
 });
 
+// POST /api/notificacoes/lidas — abriu a caixa: marca como lidas todas as que este usuário vê.
+router.post('/notificacoes/lidas', requireAuth, async (req, res, next) => {
+  try {
+    const r = await query(
+      `INSERT INTO dbo.NotificacaoLida (NotificacaoId, UsuarioId)
+       OUTPUT inserted.NotificacaoId
+       SELECT n.NotificacaoId, @uid
+         FROM dbo.Notificacao n
+        WHERE ${VISIVEL_PARA}
+          AND NOT EXISTS (SELECT 1 FROM dbo.NotificacaoLida l
+                           WHERE l.NotificacaoId = n.NotificacaoId AND l.UsuarioId = @uid)`,
+      { uid: req.user.id, ...escopo(req.user) }
+    );
+    res.json({ ok: true, marcadas: r.length });
+  } catch (e) { next(e); }
+});
+
 // PATCH /api/notificacoes/:id/lida  { lida: true|false } — estado por usuário.
 router.patch('/notificacoes/:id/lida', requireAuth, async (req, res, next) => {
   try {

@@ -3,7 +3,7 @@
 // Rodada que ainda não terminou faz a próxima ser pulada.
 import cron from 'node-cron';
 import 'dotenv/config';
-import { sincronizarLote, podarLogCron } from './tiny.js';
+import { sincronizarLote, podarLogCron, listarEstoquesAlterados, aplicarSaldosAlterados } from './tiny.js';
 import { processarExportacoes, sincronizarSituacaoPedidos } from './tiny-pedidos.js';
 import { processarContatosPendentes, sincronizarContatosDoTiny } from './tiny-contatos.js';
 import { sincronizarListasPreco } from './lista-preco.js';
@@ -60,8 +60,8 @@ async function rodada() {
   }
 }
 
-// Vigia da black order: a cada 2 min lê no Tiny só as peças com fila aberta, para reservar e
-// avisar o primeiro da fila assim que a quantidade dele chegar. Pula se a rodada grande estiver no meio.
+// Vigia da black order: a cada 10 min lê no Tiny as peças com fila aberta (rede de segurança
+// do estoque alterado). Pula se a rodada grande estiver no meio.
 let vigiando = false;
 export async function vigiarBlackOrders() {
   if (vigiando || rodando) return;
@@ -73,6 +73,25 @@ export async function vigiarBlackOrders() {
     console.warn('⚠ Vigia da black order falhou:', e.message);
   } finally {
     vigiando = false;
+  }
+}
+
+// Estoque quase na hora: a cada 1 min pergunta ao Tiny só o que mudou e aplica nessas peças
+// (fila da black order inclusive). Margem de 2 min para trás: o Tiny registra com algum atraso.
+let lendoEstoque = false;
+let ultimaLeitura = null;
+export async function vigiarEstoque(agora = new Date()) {
+  if (lendoEstoque || rodando) return;
+  lendoEstoque = true;
+  try {
+    const desde = new Date((ultimaLeitura || agora).getTime() - 2 * 60 * 1000);
+    const alterados = await listarEstoquesAlterados(desde);
+    ultimaLeitura = agora;
+    if (alterados.length) await aplicarSaldosAlterados(alterados);
+  } catch (e) {
+    console.warn('⚠ Leitura de estoque alterado no Tiny falhou:', e.message);
+  } finally {
+    lendoEstoque = false;
   }
 }
 
@@ -98,6 +117,9 @@ export function iniciarSincronizacaoAgendada() {
 
   cron.schedule(expressao, rodada);
   console.log(`✓ Sync Tiny (cron): agendado a cada ${minutos} min (expressão "${expressao}").`);
-  cron.schedule('*/2 * * * *', vigiarBlackOrders);
-  console.log('✓ Vigia da black order: a cada 2 min (só peças com fila aberta).');
+  cron.schedule('* * * * *', () => vigiarEstoque());
+  console.log('✓ Estoque alterado no Tiny: lido a cada 1 min.');
+  // Rede de segurança da fila (o estoque alterado já cobre a chegada de peças).
+  cron.schedule('*/10 * * * *', vigiarBlackOrders);
+  console.log('✓ Vigia da black order: a cada 10 min (só peças com fila aberta).');
 }

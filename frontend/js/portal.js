@@ -215,17 +215,12 @@
         (n.texto ? '<div style="white-space:pre-line;">' + esc(n.texto) + '</div>' : '') +
         anexo + linkChamado + linkInterno +
         '<div class="nt-date">' + FG.fmtDateTime(n.data) + '</div></div>' +
-        (n.lida ? '' : '<button class="link-action" data-id="' + n.id + '" data-lida="true">Marcar como lida</button>') +
         '</div>';
     });
     view.innerHTML = html;
     FG.carregarArquivos(view);       // busca os anexos protegidos
-    Array.prototype.forEach.call(view.querySelectorAll('[data-id]'), function (b) {
-      b.addEventListener('click', function () {
-        FG.markNotif(b.getAttribute('data-id'), b.getAttribute('data-lida') === 'true');
-        refreshPill(); renderNotifs();
-      });
-    });
+    // Abriu a caixa = viu: marca tudo como lido (o destaque das novas fica só nesta visita).
+    if (list.some(function (n) { return !n.lida; })) FG.marcarNotifsLidas().then(refreshPill);
   }
 
   /* =========================================================
@@ -1267,7 +1262,7 @@
   // Bolinha da peça: verde enviado, amarelo parcial, cinza pendente, vermelho cancelado.
   function dotItem(it, cancelado) {
     if (cancelado) return '<span class="item-dot dot-cancelado" title="Cancelado"></span>';
-    if (!it.qtd && it.naoEncontrada) return '<span class="item-dot dot-cancelado" title="Não encontrada"></span>';
+    if (!it.qtd && it.naoEncontrada) return '<span class="item-dot dot-cancelado" title="Retirada do pedido"></span>';
     var cls = it.qtdEnviada >= it.qtd ? 'dot-ok' : (it.qtdEnviada > 0 ? 'dot-parcial' : 'dot-pendente');
     var t = it.qtdEnviada >= it.qtd ? 'Enviado' : (it.qtdEnviada > 0 ? 'Parcial' : 'Não enviado');
     return '<span class="item-dot ' + cls + '" title="' + t + '"></span>';
@@ -1276,10 +1271,9 @@
   // Legenda das bolinhas — vai uma única vez, logo abaixo das tabelas de itens.
   var LEGENDA_DOTS =
     '<div class="dot-legenda"><strong>Legenda do status:</strong>' +
-    '<span><span class="item-dot dot-ok"></span>Enviado — quantidade completa já despachada</span>' +
-    '<span><span class="item-dot dot-parcial"></span>Parcial — parte da quantidade já saiu</span>' +
-    '<span><span class="item-dot dot-pendente"></span>Não enviado — aguardando separação/estoque</span>' +
-    '<span><span class="item-dot dot-cancelado"></span>Cancelado — o pedido foi cancelado</span>' +
+    '<span><span class="item-dot dot-ok"></span>Enviado</span>' +
+    '<span><span class="item-dot dot-pendente"></span>Não enviado — aguardando conferência</span>' +
+    '<span><span class="item-dot dot-cancelado"></span>Retirada do pedido ou pedido cancelado</span>' +
     '</div>';
 
   function tabelaItens(itens, cancelado) {
@@ -1290,7 +1284,7 @@
       itens.map(function (it) {
         return '<tr><td>' + dotItem(it, cancelado) + '</td><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) +
           (it.garantiaNumero ? ' <span class="pill-status Garantia" title="Peça com garantia de varejo aprovada">Garantia Nº ' + esc(it.garantiaNumero) + '</span>' : '') +
-          (it.naoEncontrada ? '<div class="nf-info">' + it.naoEncontrada + ' un. não encontrada(s) no estoque — ' +
+          (it.naoEncontrada ? '<div class="nf-info">' + it.naoEncontrada + ' un. retirada(s) do pedido — ' +
             esc(it.motivoNaoEncontrada || '') + '. Não serão cobradas.</div>' : '') +
           '</td>' +
           '<td class="right">' + it.qtd + '</td><td class="right">' + it.qtdEnviada + '</td>' +
@@ -1499,7 +1493,7 @@
       '<p class="muted">Estas peças chegaram e estão separadas para você. Escolha quanto quer de cada uma: ' +
       'você paga só o que comprar, pelo preço de hoje, e vira um pedido normal (faturado quando as peças saírem). ' +
       'Comprando tudo o que chegou, o que ainda não chegou continua na sua black order. ' +
-      'Comprando menos, essa passa a ser a sua quantidade final: a black order da peça é encerrada e o que sobrou vai para o próximo da fila.</p>' +
+      'Comprando menos, essa passa a ser a sua quantidade final e a black order da peça é encerrada.</p>' +
       '<table class="table bo-carrinho"><thead><tr><th>Foto</th><th>Peça</th><th>Compra de origem</th>' +
       '<th class="right">Disponível</th><th class="right">Ainda na fila</th><th class="right">Comprar</th>' +
       (comPreco ? '<th class="right">Preço un.</th><th class="right">Subtotal</th>' : '') + '</tr></thead><tbody>' +
@@ -1531,10 +1525,8 @@
         var b = disp.find(function (x) { return String(x.id) === inp.getAttribute('data-id'); });
         var aviso = view.querySelector('.bo-encerra[data-id="' + b.id + '"]');
         var q = lerQtd(inp);
-        var naFila = Math.max(0, b.pendente - b.reservada);
         aviso.hidden = q >= b.reservada;
-        aviso.textContent = q >= b.reservada ? '' : (b.reservada - q) + ' volta(m) ao estoque' +
-          (naFila ? ' e ' + naFila + ' na fila saem da black order' : '') + ' — encerra esta black order';
+        aviso.textContent = q >= b.reservada ? '' : 'Comprando menos, esta black order é encerrada.';
       });
       if (!comPreco) return;
       var total = 0;
@@ -1564,17 +1556,13 @@
           renderBOCarrinho();     // a lista já foi recarregada com o que está disponível agora
           return;
         }
-        var lib = (r.liberadas || []).length
-          ? '<p class="muted">Liberadas (não compradas): ' + r.liberadas.map(function (l) {
-            return esc(l.nome) + ' — ' + l.quantidade + ' un.';
-          }).join('; ') + '</p>' : '';
         view.innerHTML = '<div class="empty-box"><h2 style="color:var(--green);">✔ ' +
           (r.id ? 'Compra feita!' : 'Pronto!') + '</h2>' +
           (r.id
             ? '<p>Pedido <a href="#pedido/' + esc(r.id) + '"><b>' + esc(r.id) + '</b></a> criado' +
               (r.total != null ? ' · total <b>' + FG.fmtMoney(r.total) + '</b>' : '') + '. A fatura é gerada quando as peças forem enviadas.</p>'
             : '<p>Você não comprou nenhuma peça desta vez.</p>') +
-          lib + '<a class="btn red" href="#blackorder">Ver minhas black orders</a></div>';
+          '<a class="btn red" href="#blackorder">Ver minhas black orders</a></div>';
       });
     });
   }
@@ -2023,39 +2011,6 @@
       });
     var totalGarantias = garantias.reduce(function (s, c) { return s + (c.valorGarantia || 0); }, 0);
 
-    // Pré-venda ainda a enviar (sem pedidos cancelados).
-    var preParts = [];
-    FG.all('orders').forEach(function (o) {
-      if (o.status === 'Cancelado') return;
-      (o.itens || []).forEach(function (it) {
-        if (!it.backorder) return;
-        if (it.qtdEnviada >= it.qtd) return; // nada pendente — já enviado
-        var p = FG.product(it.artigo);
-        var st = (p && p.estoque >= (it.qtd - it.qtdEnviada)) ? 'Disponivel' : 'Aguardando';
-        preParts.push({ it: it, o: o, st: st, prev: p && p.previsao });
-      });
-    });
-
-    var preVendaHTML = '';
-    if (preParts.length) {
-      preVendaHTML =
-        '<h3 class="sec-title">Pré-venda — peças a enviar</h3>' +
-        '<div class="backorder-aviso">Estas peças já estão incluídas na fatura do pedido (sem cobrança ' +
-        'à parte). São enviadas assim que voltam ao estoque — acompanhe o status abaixo.</div>' +
-        '<table class="table"><thead><tr><th>Artigo</th><th>Peça</th><th class="right">Qtd.</th>' +
-        '<th>Data do pedido</th><th>Pedido</th><th>Status do envio</th></tr></thead><tbody>' +
-        preParts.map(function (x) {
-          var pendente = x.it.qtd - x.it.qtdEnviada;
-          var pill = x.st === 'Disponivel'
-            ? '<span class="pill-status Disponivel">Disponível — envio em breve</span>'
-            : '<span class="pill-status Aguardando">Aguardando reposição' + (x.prev ? ' · ' + esc(x.prev) : '') + '</span>';
-          return '<tr><td>' + esc(x.it.artigo) + '</td><td>' + esc(x.it.nome) + '</td>' +
-            '<td class="right">' + pendente + '</td>' +
-            '<td>' + (x.o.data ? FG.fmtDate(x.o.data) : '—') + '</td>' +
-            '<td><a href="#pedido/' + esc(x.o.id) + '">' + esc(x.o.id) + '</a></td>' +
-            '<td>' + pill + '</td></tr>';
-        }).join('') + '</tbody></table>';
-    }
 
     // Bloco "Garantias" — reivindicações aprovadas do revendedor.
     var garantiasHTML =
@@ -2096,7 +2051,7 @@
           '<td class="nowrap"><button class="pdf-ico pdf-baixar" data-i="' + idx + '">⬇ Baixar PDF</button> ' +
           '<button class="pdf-ico pdf-imprimir" data-i="' + idx + '">🖨 Imprimir</button></td></tr>';
       }).join('') : '<tr><td colspan="7" class="muted">Nenhuma fatura.</td></tr>') +
-      '</tbody></table>' + garantiasHTML + preVendaHTML;
+      '</tbody></table>' + garantiasHTML;
 
     document.getElementById('fi-csv').addEventListener('click', function () {
       var linhas = [['Tipo', 'N°', 'Pedido', 'Data', 'Situação', 'Valor']];

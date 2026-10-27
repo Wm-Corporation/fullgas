@@ -124,6 +124,7 @@ function bancoNaoEncontrada(extra = {}) {
     if (/SET Quantidade = Quantidade - @q/.test(t)) { st.item = p; return []; }
     if (/SET Total = Total - @v/.test(t)) { st.total = p; return []; }
     if (/INSERT INTO dbo\.BlackOrder /.test(t)) { st.bo = p; return [{ BlackOrderId: 950 }]; }
+    if (/SELECT ISNULL\(SUM\(Quantidade\), 0\) AS n FROM dbo\.PedidoItem/.test(t)) return [{ n: st.resto ?? 1 }];
     if (/AS Confirmada/.test(t)) return [{ totNormais: 1, pendNormais: 0, comEnvio: 1, pendTotal: 0 }];
     return [];
   };
@@ -143,7 +144,7 @@ describe('peça não encontrada', () => {
     expect(r.body.status).toBe('Enviado');                     // o que restou já saiu
     const n = achar(/INSERT INTO dbo\.Notificacao/)[0];
     expect(n.p).toMatchObject({ eid: 7, link: '#pedido/0005041900' });
-    expect(n.p.texto).toMatch(/Motivo: Estoque incorreto\.[\s\S]*retiradas do pedido e não serão cobradas/);
+    expect(n.p.texto).toMatch(/O que aconteceu: Estoque incorreto\.[\s\S]*retiradas do pedido e não serão cobradas/);
     expect(recalculados).toEqual(['B2']);
     expect(r.body.aviso).toMatch(/Tiny/);
   });
@@ -156,6 +157,30 @@ describe('peça não encontrada', () => {
     expect(b.st.bo).toMatchObject({ num: '0005041900', pid: 10, eid: 7, uid: 3, prod: 200, sku: 'B2', qtd: 2 });
     expect(r.body.blackOrder).toMatchObject({ id: 950, quantidade: 2 });
     expect(achar(/INSERT INTO dbo\.Notificacao/)[0].p.texto).toMatch(/foram para a sua black order/);
+  });
+
+  it('motivo pronto + descrição viram um texto só; "Outro" usa só a descrição', async () => {
+    let b = bancoNaoEncontrada(); responder = b.resp;
+    await request(app()).post('/api/pedidos/0005041900/itens/5/retirar')
+      .send({ quantidade: 1, motivo: 'Peça danificada', descricao: 'caixa amassada na prateleira', destino: 'remover' });
+    expect(b.st.item.mot).toBe('Peça danificada — caixa amassada na prateleira');
+    b = bancoNaoEncontrada(); responder = b.resp;
+    await request(app()).post('/api/pedidos/0005041900/itens/5/retirar')
+      .send({ quantidade: 1, motivo: 'Outro', descricao: 'cliente pediu para tirar', destino: 'remover' });
+    expect(b.st.item.mot).toBe('cliente pediu para tirar');
+    b = bancoNaoEncontrada(); responder = b.resp;
+    const r = await request(app()).post('/api/pedidos/0005041900/itens/5/retirar')
+      .send({ quantidade: 1, motivo: 'Outro', descricao: '', destino: 'remover' });
+    expect(r.status).toBe(400);
+  });
+
+  it('retirou todas as peças: o pedido é cancelado e o cliente sabe', async () => {
+    const b = bancoNaoEncontrada(); b.st.resto = 0; responder = b.resp;
+    const r = await request(app()).post('/api/pedidos/0005041900/itens/5/retirar')
+      .send({ quantidade: 3, motivo: 'Não foi encontrado', destino: 'remover' });
+    expect(r.body.status).toBe('Cancelado');
+    expect(achar(/UPDATE dbo\.Pedido SET Status = @st/)[0].p.st).toBe('Cancelado');
+    expect(achar(/INSERT INTO dbo\.Notificacao/)[0].p.texto).toMatch(/o pedido foi cancelado/);
   });
 
   it('mais do que ainda não saiu: recusado sem gravar', async () => {
@@ -191,7 +216,7 @@ describe('peça não encontrada', () => {
 });
 
 describe('cancelamento', () => {
-  it('não anula fatura de remessa (cobra peça que saiu) e recalcula o estoque pela fila', async () => {
+  it('anula todas as faturas (tudo é cancelado no Tiny) e recalcula o estoque pela fila depois', async () => {
     responder = (t) => {
       if (/SELECT PedidoId, Status, EmpresaId, Total FROM dbo\.Pedido/.test(t)) return [{ PedidoId: 10, Status: 'Parcial', EmpresaId: 7, Total: 70 }];
       if (/SELECT DISTINCT Sku FROM dbo\.PedidoItem/.test(t)) return [{ Sku: 'A1' }, { Sku: 'B2' }];
@@ -199,7 +224,8 @@ describe('cancelamento', () => {
     };
     const r = await request(app()).put('/api/pedidos/0005041900/status').send({ status: 'Cancelado' });
     expect(r.status).toBe(200);
-    expect(achar(/UPDATE f SET f\.Status = 'Anulada'/)[0].texto).toMatch(/pe\.FaturaNaRemessa = 0/);
+    expect(achar(/UPDATE f SET f\.Status = 'Anulada'/)[0].texto).not.toMatch(/FaturaNaRemessa/);
+    await new Promise(r => setTimeout(r, 20));              // o recálculo vem depois do cancelamento no Tiny
     expect(recalculados).toEqual(['A1', 'B2']);
   });
 });
@@ -218,5 +244,45 @@ describe('vigia da black order (a cada 2 min)', () => {
     responder = () => [];
     await vigiarBlackOrders();
     expect(lotes).toHaveLength(1);                           // sem fila, não chama o Tiny
+  });
+});
+
+describe('estoque alterado no Tiny (lido a cada 1 min)', () => {
+  it('data no formato do Tiny, no horário de Brasília', () => {
+    expect(tiny.dataTiny(new Date('2026-10-27T12:05:09Z'))).toBe('27/10/2026 09:05:09');
+    expect(tiny.dataTiny(new Date('2026-10-27T03:00:00Z'))).toBe('27/10/2026 00:00:00');
+  });
+
+  it('lista as páginas até o fim, já com saldo − reservado; nada mudou (erro 20) = lista vazia', async () => {
+    process.env.TINY_TOKEN = 'teste';
+    const corpos = [];
+    const respostas = [
+      { retorno: { status: 'OK', numero_paginas: 2, produtos: [{ produto: { id: 1, saldo: 10, saldoReservado: 3 } }] } },
+      { retorno: { status: 'OK', numero_paginas: 2, produtos: [{ produto: { id: 2, saldo: 4, saldoReservado: 0 } }] } },
+      { retorno: { status: 'Erro', codigo_erro: 20, erros: [{ erro: 'A consulta não retornou registros' }] } }
+    ];
+    vi.stubGlobal('fetch', async (url, opt) => {
+      corpos.push(String(url) + '?' + opt.body);
+      return { ok: true, status: 200, json: async () => respostas.shift() };
+    });
+    try {
+      const l = await tiny.listarEstoquesAlterados(new Date('2026-10-27T12:00:00Z'));
+      expect(l).toEqual([{ tinyId: '1', saldo: 7 }, { tinyId: '2', saldo: 4 }]);
+      expect(corpos[0]).toMatch(/lista\.atualizacoes\.estoque\.php\?.*dataAlteracao=27%2F10%2F2026\+09%3A00%3A00.*pagina=1/);
+      expect(corpos[1]).toMatch(/pagina=2/);
+      expect(await tiny.listarEstoquesAlterados(new Date())).toEqual([]);
+    } finally { vi.unstubAllGlobals(); }
+  }, 15000);
+
+  it('aplica só nos produtos importados e ligados (o resto do Tiny é ignorado)', async () => {
+    responder = (t, p) => {
+      if (/SELECT TinyId FROM dbo\.Produto WHERE TinyAtivo = 1 AND TinyId IN/.test(t)) return [{ TinyId: '1' }];
+      if (/SELECT ProdutoId, Sku, TinyAtivo FROM dbo\.Produto WHERE TinyId/.test(t)) return p.tid === '1' ? [{ ProdutoId: 4, Sku: 'A1', TinyAtivo: 1 }] : [];
+      return [];
+    };
+    const r = await tiny.aplicarSaldosAlterados([{ tinyId: '1', saldo: 7 }, { tinyId: '999', saldo: 2 }]);
+    expect(r.map(x => x.sku)).toEqual(['A1']);
+    expect(achar(/UPDATE dbo\.Produto SET/)[0].p).toMatchObject({ pid: 4, est: 7 });
+    expect(achar(/TinySyncLog/).some(c => c.p.sku === undefined && /ignorado/.test(JSON.stringify(c.p)))).toBe(false);
   });
 });

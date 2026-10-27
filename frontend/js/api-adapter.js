@@ -211,7 +211,7 @@
   // Cache em memória que espelha o antigo "db".
   var CACHE = { products: [], categories: [], models: [], vehicles: [],
                 orders: [], claims: [], invoices: [], deliveries: [],
-                notifications: [], users: [], searches: [], prevenda: [], blackorders: [] };
+                notifications: [], users: [], searches: [], blackorders: [] };
 
   // De onde vem cada lista do cache.
   var FONTES = [
@@ -221,7 +221,6 @@
     ['models', '/veiculos/modelos'],
     ['vehicles', '/veiculos'],
     ['invoices', '/faturas'],
-    ['prevenda', '/prevenda'],
     ['blackorders', '/blackorders'],
     ['claims', '/reivindicacoes'],
     ['users', '/usuarios'],   // só admin recebe; cliente resolve null
@@ -253,10 +252,6 @@
   }
   FG.recarregarFaturas = recarregarFaturas;
 
-  function recarregarPreVenda() {
-    return apiGet('/prevenda').then(function (l) { if (l) CACHE.prevenda = l; return l; });
-  }
-  FG.recarregarPreVenda = recarregarPreVenda;
 
   function recarregarBlackOrders() {
     return apiGet('/blackorders').then(function (l) { if (l) CACHE.blackorders = l; return l; });
@@ -302,6 +297,12 @@
     var n = CACHE.notifications.find(function (x) { return String(x.id) === String(id); });
     if (n) n.lida = lida; // otimista: a tela reflete na hora
     return req('PATCH', '/notificacoes/' + encodeURIComponent(id) + '/lida', { lida: !!lida });
+  };
+
+  // Abriu a caixa de notificações: todas viram lidas (uma chamada só).
+  FG.marcarNotifsLidas = function () {
+    CACHE.notifications.forEach(function (n) { n.lida = true; });   // otimista
+    return req('POST', '/notificacoes/lidas', {});
   };
 
   // Admin envia notificação: { titulo, texto, tipo, empresaId?, anexo? }. Promise<{ ok, msg? }>.
@@ -607,12 +608,8 @@
     encerrarSessao(null, '/');
   };
 
-  // Depois de gravar produto: recarrega o cache e a pré-venda.
-  function aposGravarProduto(lista) {
-    return recarregarPreVenda().then(function () { return lista; });
-  }
-  FG.apiCriarProduto = function (p) { return api('/produtos', { method: 'POST', body: p }).then(recarregarProdutos).then(aposGravarProduto); };
-  FG.apiEditarProduto = function (sku, p) { return api('/produtos/' + encodeURIComponent(sku), { method: 'PUT', body: p }).then(recarregarProdutos).then(aposGravarProduto); };
+  FG.apiCriarProduto = function (p) { return api('/produtos', { method: 'POST', body: p }).then(recarregarProdutos); };
+  FG.apiEditarProduto = function (sku, p) { return api('/produtos/' + encodeURIComponent(sku), { method: 'PUT', body: p }).then(recarregarProdutos); };
   FG.apiExcluirProduto = function (sku) { return api('/produtos/' + encodeURIComponent(sku), { method: 'DELETE' }).then(recarregarProdutos).then(aposGravarProduto); };
 
   /* ---------- categorias (admin) ---------- */
@@ -699,9 +696,9 @@
     });
   }
 
-  // Peça não encontrada (admin): { quantidade, motivo, destino: 'remover' | 'blackorder' }.
+  // Retirar peças do pedido (admin): { quantidade, motivo, descricao, destino: 'remover' | 'blackorder' }.
   FG.marcarNaoEncontrada = function (numero, itemId, dados) {
-    return putPedido('/pedidos/' + encodeURIComponent(numero) + '/itens/' + encodeURIComponent(itemId) + '/nao-encontrada', dados, 'POST')
+    return putPedido('/pedidos/' + encodeURIComponent(numero) + '/itens/' + encodeURIComponent(itemId) + '/retirar', dados, 'POST')
       .then(function (r) { return r.ok && FG.recarregarBlackOrders ? FG.recarregarBlackOrders().then(function () { return r; }, function () { return r; }) : r; });
   };
 
@@ -761,13 +758,9 @@
     return putPedido('/pedidos/' + encodeURIComponent(numero) + '/status', { escopo: escopo });
   };
 
-  // "Enviado" de um item (admin). Recarrega pedidos, produtos e pré-venda.
+  // "Enviado" de um item (admin). Recarrega pedidos e produtos.
   FG.setItemEnviado = function (numero, itemId, qtd) {
-    return putPedido('/pedidos/' + encodeURIComponent(numero) + '/itens/' + itemId + '/enviado', { qtd: qtd })
-      .then(function (r) {
-        if (!r.ok) return r;
-        return recarregarPreVenda().then(function () { return r; });
-      });
+    return putPedido('/pedidos/' + encodeURIComponent(numero) + '/itens/' + itemId + '/enviado', { qtd: qtd });
   };
 
   /* ---------- veículos: substitui as ações inline do portal.js ---------- */
@@ -866,12 +859,12 @@
     }, function () { return { ok: false, msg: 'Falha no envio das fotos.' }; });
   };
 
-  // Muda o status (admin). Aprovar cria pedido de garantia: recarrega pedidos, produtos e pré-venda.
+  // Muda o status (admin). Aprovar cria pedido de garantia: recarrega pedidos e produtos.
   FG.setClaimStatus = function (id, status) {
     return req('PUT', '/reivindicacoes/' + encodeURIComponent(id) + '/status', { status: status }).then(function (r) {
       if (!r.ok) { FG.toast(r.msg || 'Não foi possível atualizar o status.', 'erro'); return r; }
       var extras = status === 'Aprovada'
-        ? [recarregarPedidos(), recarregarProdutos(), recarregarPreVenda()]
+        ? [recarregarPedidos(), recarregarProdutos()]
         : [];
       return Promise.all([recarregarClaims()].concat(extras)).then(function () { return r; });
     });

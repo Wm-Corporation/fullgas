@@ -542,15 +542,10 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         return recusar(409, `${semConfirmar} peça(s) marcadas como enviadas ainda não foram confirmadas. ` +
           'Clique em "Confirmar envio" (se saíram) ou zere a quantidade enviada (se não saíram) antes de cancelar.');
 
-      // Peças que já saíram não voltam ao estoque (decisão de 30/09/2026).
+      // Cancelar aqui cancela tudo no Tiny, inclusive remessas exportadas (regra de 27/10/2026).
       const env = await new sql.Request(tx).input('pid', sql.Int, ped.PedidoId)
         .query('SELECT ISNULL(SUM(QuantidadeEnviada), 0) AS n FROM dbo.PedidoItem WHERE PedidoId = @pid');
       const pecasEnviadas = env.recordset[0].n || 0;
-      // Ajuste manual no Tiny só se o pedido foi inteiro (escopo 'normal') e parte já saiu.
-      const inteiro = await new sql.Request(tx).input('pid', sql.Int, ped.PedidoId)
-        .query(`SELECT COUNT(*) AS n FROM dbo.TinyPedidoExport
-                 WHERE PedidoId = @pid AND Escopo = 'normal' AND Status <> 'cancelado'`);
-      const ajusteManual = pecasEnviadas > 0 && (inteiro.recordset[0]?.n || 0) > 0;
 
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
@@ -562,14 +557,13 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
                  WHERE pi.PedidoId = @pid AND pi.EmBackorder = 0
                    AND pi.Quantidade > pi.QuantidadeEnviada`);
 
-      // Anula a fatura cheia dos pedidos antigos. Fatura por remessa cobra peça que saiu: fica.
+      // Tudo é cancelado no Tiny: todas as faturas do pedido (cheia ou de remessa) são anuladas.
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .query(`UPDATE f SET f.Status = 'Anulada'
                   FROM dbo.Fatura f
                   JOIN dbo.PedidoFatura pf ON pf.FaturaId = f.FaturaId
-                  JOIN dbo.Pedido pe ON pe.PedidoId = pf.PedidoId
-                 WHERE pf.PedidoId = @pid AND pe.FaturaNaRemessa = 0`);
+                 WHERE pf.PedidoId = @pid`);
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .query(`UPDATE e SET e.Status = 'Anulada'
@@ -583,13 +577,13 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
 
       await tx.commit();
 
-      // Cancela no Tiny o que não saiu (sem esperar).
-      cancelarExportacoesDoPedido(ped.PedidoId, { pecasEnviadas });
-      // O que voltou passa pela fila da black order antes da loja: recalcula pelo Tiny.
+      // Cancela no Tiny (sem esperar a resposta) e, depois, recalcula o estoque pelo Tiny:
+      // o que voltou passa pela fila da black order antes da loja.
       const skusDevolvidos = (await query(
         'SELECT DISTINCT Sku FROM dbo.PedidoItem WHERE PedidoId = @pid', { pid: ped.PedidoId })).map(r => r.Sku);
-      atualizarEstoqueCesta(skusDevolvidos)
-        .catch(e => console.warn('⚠ Recalcular estoque após cancelamento falhou:', e.message));
+      Promise.resolve(cancelarExportacoesDoPedido(ped.PedidoId))
+        .then(() => atualizarEstoqueCesta(skusDevolvidos))
+        .catch(e => console.warn('⚠ Cancelar no Tiny / recalcular estoque falhou:', e.message));
 
       // Reivindicações abertas ficam para o admin decidir.
       const abertas = (await query(
@@ -598,20 +592,15 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       await registrarEventoPedido({
         pedidoId: ped.PedidoId, tipo: 'cancelado', titulo: 'Pedido cancelado', user: req.user,
         detalhe: [
-          !pecasEnviadas
-            ? 'Nenhuma peça tinha saído: o estoque foi devolvido.'
-            : ajusteManual
-              ? `${pecasEnviadas} peça(s) já tinham saído e não voltaram ao estoque; o pedido no Tiny precisa de ajuste manual.`
-              : `${pecasEnviadas} peça(s) já tinham saído e não voltaram ao estoque; as remessas no Tiny ficam como estão.`,
+          'Cancelado também no Tiny (o estoque volta lá) e faturas anuladas.',
+          pecasEnviadas ? `${pecasEnviadas} peça(s) já tinham sido enviadas: confira se voltaram fisicamente.` : '',
           abertas.length ? `Reivindicação(ões) ainda aberta(s): ${abertas.join(', ')} — revise no painel.` : ''
         ].filter(Boolean).join(' ')
       });
 
       return res.json({
         ok: true, status: 'Cancelado', pecasEnviadas,
-        aviso: ajusteManual
-          ? `${pecasEnviadas} peça(s) já tinham saído: não voltaram ao estoque e o pedido no Tiny precisa de ajuste manual.`
-          : null
+        aviso: pecasEnviadas ? `${pecasEnviadas} peça(s) já tinham sido enviadas: o Tiny devolve o estoque delas; confira se voltaram fisicamente.` : null
       });
     }
 
@@ -746,7 +735,9 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
   }
 });
 
-// POST /api/pedidos/:numero/remessa (admin) — "Confirmar envio": o que foi enviado e não está no Tiny vira um pedido lá.
+// POST /api/pedidos/:numero/remessa (admin) — "Confirmar envio": remessa ÚNICA (regra de 27/10/2026).
+// Tudo o que restou no pedido sai agora e vai ao Tiny (com a fatura); o que não estava na
+// prateleira o admin retira antes (/retirar). Itens de garantia sem estoque (EmBackorder) ficam de fora.
 router.post('/pedidos/:numero/remessa', requireAuth, requireAdmin, async (req, res, next) => {
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
@@ -761,9 +752,12 @@ router.post('/pedidos/:numero/remessa', requireAuth, requireAdmin, async (req, r
     if (STATUS_FINAIS.includes(ped.Status))
       return recusar(409, `Pedido ${ped.Status.toLowerCase()} não aceita novas remessas.`);
 
+    await new sql.Request(tx).input('pid', sql.Int, ped.PedidoId)
+      .query(`UPDATE dbo.PedidoItem SET QuantidadeEnviada = Quantidade
+               WHERE PedidoId = @pid AND EmBackorder = 0 AND Quantidade > QuantidadeEnviada`);
     const itens = await confirmarRemessa(tx, ped.PedidoId);
     if (!itens.length)
-      return recusar(409, 'Nada novo para enviar: informe a quantidade enviada das peças desta remessa.');
+      return recusar(409, 'Nada para enviar: todas as peças deste pedido já saíram ou foram retiradas.');
     const novoStatus = await statusPorEnvio(tx, ped.PedidoId, ped.Status);
     await new sql.Request(tx)
       .input('pid', sql.Int, ped.PedidoId)
@@ -868,19 +862,23 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
   }
 });
 
-// Motivos prontos para peça não encontrada (o admin também pode escrever outro).
-export const MOTIVOS_NAO_ENCONTRADA = ['Não foi encontrado', 'Estoque incorreto', 'Peça danificada'];
+// Motivos prontos para retirar peças (o admin completa com a descrição, ou escolhe 'Outro').
+export const MOTIVOS_RETIRADA = ['Não foi encontrado', 'Estoque incorreto', 'Peça danificada'];
 
-// POST /api/pedidos/:numero/itens/:itemId/nao-encontrada (admin) — { quantidade, motivo, destino }.
-// Tira do pedido peças que não foram achadas na prateleira (não serão faturadas). destino:
+// POST /api/pedidos/:numero/itens/:itemId/retirar (admin) — { quantidade, motivo, descricao?, destino }.
+// Retira peças do pedido antes do envio (não serão faturadas), com o que aconteceu. destino:
 //   'remover'    → saem do pedido;   'blackorder' → vão para o fim da fila de black order do cliente.
 // Só pedidos com fatura por remessa (os antigos já têm fatura cheia) e só o que ainda não saiu.
-router.post('/pedidos/:numero/itens/:itemId/nao-encontrada', requireAuth, requireAdmin, async (req, res, next) => {
+// Retirou tudo = pedido cancelado (nada foi ao Tiny). '/nao-encontrada' é o nome antigo da rota.
+router.post(['/pedidos/:numero/itens/:itemId/retirar', '/pedidos/:numero/itens/:itemId/nao-encontrada'],
+  requireAuth, requireAdmin, async (req, res, next) => {
   const q = Number(req.body?.quantidade);
-  const motivo = String(req.body?.motivo || '').trim().slice(0, 200);
+  const base = String(req.body?.motivo || '').trim();
+  const descricao = String(req.body?.descricao || '').trim();
+  const motivo = (base && base !== 'Outro' ? base + (descricao ? ' — ' + descricao : '') : descricao).slice(0, 200);
   const destino = req.body?.destino === 'blackorder' ? 'blackorder' : (req.body?.destino === 'remover' ? 'remover' : null);
   if (!Number.isInteger(q) || q <= 0) return res.status(400).json({ erro: 'Informe quantas peças não foram encontradas.' });
-  if (!motivo) return res.status(400).json({ erro: 'Informe o motivo.' });
+  if (!motivo) return res.status(400).json({ erro: 'Informe o motivo ou descreva o que aconteceu.' });
   if (!destino) return res.status(400).json({ erro: 'Escolha: retirar do pedido ou mandar para a black order.' });
 
   const pool = await getPool();
@@ -930,7 +928,10 @@ router.post('/pedidos/:numero/itens/:itemId/nao-encontrada', requireAuth, requir
       });
     }
 
-    const novoStatus = await statusPorEnvio(tx, it.PedidoId, it.Status);
+    // Sobrou alguma peça? Se não, o pedido acaba aqui (nada foi ao Tiny: não há o que desfazer lá).
+    const resto = (await new sql.Request(tx).input('pid', sql.Int, it.PedidoId)
+      .query('SELECT ISNULL(SUM(Quantidade), 0) AS n FROM dbo.PedidoItem WHERE PedidoId = @pid')).recordset[0].n;
+    const novoStatus = resto > 0 ? await statusPorEnvio(tx, it.PedidoId, it.Status) : 'Cancelado';
     await new sql.Request(tx)
       .input('pid', sql.Int, it.PedidoId)
       .input('st', sql.NVarChar(14), novoStatus)
@@ -941,16 +942,17 @@ router.post('/pedidos/:numero/itens/:itemId/nao-encontrada', requireAuth, requir
       ? 'foram para a sua black order (você é avisado quando chegarem)'
       : 'foram retiradas do pedido';
     await registrarEventoPedido({
-      pedidoId: it.PedidoId, tipo: 'aviso', user: req.user,
-      titulo: `Peça não encontrada: ${it.Sku}`,
-      detalhe: `${q}× ${it.NomeProduto} — ${motivo}. ${destino === 'blackorder' ? 'Foi para a black order.' : 'Retirada do pedido.'} Não será faturada.`
+      pedidoId: it.PedidoId, tipo: resto > 0 ? 'aviso' : 'cancelado', user: req.user,
+      titulo: `Peças retiradas: ${it.Sku}`,
+      detalhe: `${q}× ${it.NomeProduto} — ${motivo}. ${destino === 'blackorder' ? 'Foram para a black order.' : 'Saíram do pedido.'} Não serão faturadas.` +
+        (resto > 0 ? '' : ' Todas as peças foram retiradas: pedido cancelado.')
     });
     await criarNotificacao({
       empresaId: it.EmpresaId, publico: 'cliente', origem: 'blackorder', criadoPor: req.user.id,
       link: '#pedido/' + it.NumeroPedido,
-      titulo: `Pedido ${it.NumeroPedido}: peça não encontrada`,
-      texto: `${q} un. de ${it.NomeProduto} (${it.Sku}) não foram encontradas no estoque.\nMotivo: ${motivo}.\n` +
-        `Estas peças ${rumo} e não serão cobradas.`
+      titulo: `Pedido ${it.NumeroPedido}: peças retiradas`,
+      texto: `${q} un. de ${it.NomeProduto} (${it.Sku}) foram retiradas do pedido.\nO que aconteceu: ${motivo}.\n` +
+        `Estas peças ${rumo} e não serão cobradas.` + (resto > 0 ? '' : '\nComo não sobrou nenhuma peça, o pedido foi cancelado.')
     });
     // O reservado do pedido caiu: recalcula estoque e fila pelo Tiny.
     atualizarEstoqueCesta([it.Sku]).catch(e => console.warn('⚠ Recalcular estoque falhou:', e.message));
