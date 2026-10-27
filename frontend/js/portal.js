@@ -2023,39 +2023,6 @@
       });
     var totalGarantias = garantias.reduce(function (s, c) { return s + (c.valorGarantia || 0); }, 0);
 
-    // Pré-venda ainda a enviar (sem pedidos cancelados).
-    var preParts = [];
-    FG.all('orders').forEach(function (o) {
-      if (o.status === 'Cancelado') return;
-      (o.itens || []).forEach(function (it) {
-        if (!it.backorder) return;
-        if (it.qtdEnviada >= it.qtd) return; // nada pendente — já enviado
-        var p = FG.product(it.artigo);
-        var st = (p && p.estoque >= (it.qtd - it.qtdEnviada)) ? 'Disponivel' : 'Aguardando';
-        preParts.push({ it: it, o: o, st: st, prev: p && p.previsao });
-      });
-    });
-
-    var preVendaHTML = '';
-    if (preParts.length) {
-      preVendaHTML =
-        '<h3 class="sec-title">Pré-venda — peças a enviar</h3>' +
-        '<div class="backorder-aviso">Estas peças já estão incluídas na fatura do pedido (sem cobrança ' +
-        'à parte). São enviadas assim que voltam ao estoque — acompanhe o status abaixo.</div>' +
-        '<table class="table"><thead><tr><th>Artigo</th><th>Peça</th><th class="right">Qtd.</th>' +
-        '<th>Data do pedido</th><th>Pedido</th><th>Status do envio</th></tr></thead><tbody>' +
-        preParts.map(function (x) {
-          var pendente = x.it.qtd - x.it.qtdEnviada;
-          var pill = x.st === 'Disponivel'
-            ? '<span class="pill-status Disponivel">Disponível — envio em breve</span>'
-            : '<span class="pill-status Aguardando">Aguardando reposição' + (x.prev ? ' · ' + esc(x.prev) : '') + '</span>';
-          return '<tr><td>' + esc(x.it.artigo) + '</td><td>' + esc(x.it.nome) + '</td>' +
-            '<td class="right">' + pendente + '</td>' +
-            '<td>' + (x.o.data ? FG.fmtDate(x.o.data) : '—') + '</td>' +
-            '<td><a href="#pedido/' + esc(x.o.id) + '">' + esc(x.o.id) + '</a></td>' +
-            '<td>' + pill + '</td></tr>';
-        }).join('') + '</tbody></table>';
-    }
 
     // Bloco "Garantias" — reivindicações aprovadas do revendedor.
     var garantiasHTML =
@@ -2096,7 +2063,7 @@
           '<td class="nowrap"><button class="pdf-ico pdf-baixar" data-i="' + idx + '">⬇ Baixar PDF</button> ' +
           '<button class="pdf-ico pdf-imprimir" data-i="' + idx + '">🖨 Imprimir</button></td></tr>';
       }).join('') : '<tr><td colspan="7" class="muted">Nenhuma fatura.</td></tr>') +
-      '</tbody></table>' + garantiasHTML + preVendaHTML;
+      '</tbody></table>' + garantiasHTML;
 
     document.getElementById('fi-csv').addEventListener('click', function () {
       var linhas = [['Tipo', 'N°', 'Pedido', 'Data', 'Situação', 'Valor']];

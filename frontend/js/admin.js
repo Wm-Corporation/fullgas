@@ -68,7 +68,6 @@
      ========================================================= */
   var filtros = {
     pedidos:  { status: '', busca: '' },
-    prevenda: { status: '', busca: '' },
     blackorder: { status: '', busca: '' },
     produtos: { cat: '', estoque: '', busca: '' },
     chassis:  { status: '', modelo: '', atrib: '', busca: '' },
@@ -2018,115 +2017,6 @@
   }
 
   /* =========================================================
-     PRÉ-VENDA — peças a enviar, por cliente (sem valores)
-     ========================================================= */
-  function pvStatusPill(it) {
-    if (it.status === 'Disponivel') return '<span class="pill-status Disponivel">Disponível p/ envio</span>';
-    // Aguardando: mostra o estoque parcial, se houver.
-    var detalhe = it.estoque > 0
-      ? ' · estoque ' + it.estoque + '/' + it.pendente
-      : (it.previsao ? ' · ' + esc(it.previsao) : '');
-    return '<span class="pill-status Aguardando">Aguardando reposição' + detalhe + '</span>';
-  }
-
-  var MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
-               'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
-
-  // Chave ordenável do mês ("2026-07") e o rótulo humano ("Julho de 2026").
-  function mesChave(iso) {
-    if (!iso) return '0000-00';
-    var d = new Date(iso);
-    return d.getFullYear() + '-' + FG.pad(d.getMonth() + 1, 2);
-  }
-  function mesRotulo(chave) {
-    if (chave === '0000-00') return 'Sem data';
-    var p = chave.split('-');
-    var nome = MESES[Number(p[1]) - 1] || '';
-    return nome.charAt(0).toUpperCase() + nome.slice(1) + ' de ' + p[0];
-  }
-
-  function renderPreVenda() {
-    h1.textContent = 'Pré-venda — peças a enviar'; setOn('prevenda');
-    var todos = FG.all('prevenda');
-    if (!todos.length) {
-      view.innerHTML = '<div class="adm-card"><div class="c-body muted">' +
-        'Nenhuma peça em pré-venda pendente. Elas aparecem aqui quando um pedido inclui ' +
-        'itens sem estoque, e podem ser marcadas como enviadas quando o produto for reposto.</div></div>';
-      return;
-    }
-    var f = filtros.prevenda;
-    var itens = todos.filter(function (it) {
-      if (f.status && it.status !== f.status) return false;
-      return casaBusca('prevenda', [it.artigo, it.nome, it.empresa, it.pedido]);
-    });
-
-    // Bloco de uma empresa (cabeçalho + tabela das peças dela).
-    function blocoEmpresa(emp, lista) {
-      var linhas = lista.map(function (it) {
-        var acao = it.status === 'Disponivel'
-          ? '<button class="btn-orange btn-mini pv-enviar" data-ped="' + esc(it.pedido) + '" data-item="' + it.itemId + '" data-qtd="' + it.qtd + '">Liberar envio</button>'
-          : '<span class="muted" style="font-size:11px;">' + (it.estoque > 0 ? 'estoque insuficiente (' + it.estoque + '/' + it.pendente + ')' : 'sem estoque') + '</span>';
-        return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
-          '<td class="r">' + it.pendente + '</td>' +
-          '<td>' + (it.data ? FG.fmtDate(it.data) : '—') + '</td>' +
-          '<td><a href="#pedidos" title="Ver em Vendas">' + esc(it.pedido) + '</a></td>' +
-          '<td>' + pvStatusPill(it) + '</td><td>' + acao + '</td></tr>';
-      }).join('');
-      return '<div class="venda-det"><div style="font-weight:600;margin:6px 0 2px;">' + esc(emp) + '</div>' +
-        '<table class="tbl"><thead><tr><th>Artigo</th><th>Peça</th><th class="r">Qtd.</th>' +
-        '<th>Data do pedido</th><th>Pedido de origem</th><th>Status</th><th>Ação</th></tr></thead><tbody>' +
-        linhas + '</tbody></table></div>';
-    }
-
-    function porEmpresa(lista) {
-      var g = {};
-      lista.forEach(function (it) { (g[it.empresa] = g[it.empresa] || []).push(it); });
-      return Object.keys(g).map(function (emp) { return blocoEmpresa(emp, g[emp]); }).join('');
-    }
-
-    // Mais de um mês na fila: agrupa por mês (mais recente primeiro).
-    var meses = {};
-    itens.forEach(function (it) { (meses[mesChave(it.data)] = meses[mesChave(it.data)] || []).push(it); });
-    var chaves = Object.keys(meses).sort().reverse();
-    var mesAtual = mesChave(new Date().toISOString());
-
-    var corpo;
-    if (!itens.length) {
-      corpo = '<p class="muted">Nenhuma peça com esse filtro.</p>';
-    } else if (chaves.length <= 1) {
-      corpo = porEmpresa(itens);
-    } else {
-      corpo = chaves.map(function (ch) {
-        var atrasado = ch < mesAtual && ch !== '0000-00';
-        return '<div class="pv-mes' + (atrasado ? ' atrasado' : '') + '">' +
-          '<div class="pv-mes-head">' + esc(mesRotulo(ch)) +
-          ' <span class="muted">(' + meses[ch].length + ' peça' + (meses[ch].length > 1 ? 's' : '') + ')</span>' +
-          (atrasado ? '<span class="pv-atraso">aguardando desde ' + esc(mesRotulo(ch).toLowerCase()) + '</span>' : '') +
-          '</div>' + porEmpresa(meses[ch]) + '</div>';
-      }).join('');
-    }
-
-    view.innerHTML =
-      '<div class="adm-card"><div class="c-head">Peças a enviar — pré-venda (' +
-      contagem('prevenda', itens.length, todos.length) + ')</div>' +
-      '<div class="c-body">' +
-      barraFiltro('prevenda', [
-        { k: 'status', rotulo: 'Situação', opcoes: [['Disponivel', 'Disponível p/ envio'], ['Aguardando', 'Aguardando reposição']] }
-      ], 'Buscar por artigo, peça, empresa ou pedido') +
-      corpo + '</div></div>';
-
-    bindFiltro(renderPreVenda);
-    Array.prototype.forEach.call(view.querySelectorAll('.pv-enviar'), function (b) {
-      b.addEventListener('click', async function () {
-        var r = await FG.setItemEnviado(b.getAttribute('data-ped'), b.getAttribute('data-item'), Number(b.getAttribute('data-qtd')));
-        if (r && r.ok === false) FG.toast(r.msg || 'Não foi possível liberar a peça.', 'erro');
-        else FG.toast('Peça liberada para separação — confirme o envio no pedido quando sair.');
-        renderPreVenda();
-      });
-    });
-  }
-
-  /* =========================================================
      BLACK ORDER — fila do que faltou no estoque (sem fatura, sem Tiny)
      ========================================================= */
   // Mesmas opções que a API aceita (blackorders.routes.js → SITUACOES).
@@ -3482,7 +3372,6 @@
         break;
       case 'produtos': renderProdutos(); break;
       case 'pedidos': renderPedidos(); break;
-      case 'prevenda': renderPreVenda(); break;
       case 'blackorder': renderBlackOrderAdm(); break;
       case 'reivindicacoes': renderClaims(); break;
       case 'tiny': renderTiny(); break;
