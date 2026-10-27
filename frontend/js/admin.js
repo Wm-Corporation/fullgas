@@ -1454,11 +1454,12 @@
   // Confirma antes de gravar (efeitos no Tiny, fatura e status final).
   function confirmaStatus(num, st) {
     var txt = {
-      'Aprovado': 'Aprovar o pedido ' + num + '?\n\nNada vai ao Tiny agora. Confira as peças no estoque, ' +
-        'retire no detalhe o que não estiver lá ("Retirar peças") e clique em "Confirmar envio".',
+      'Aprovado': 'Aprovar o pedido ' + num + '?\n\nAprovar confirma que TODAS as peças estão no estoque: depois ' +
+        'disso não dá mais para retirar peças. O que não estiver lá, retire antes ("Retirar peças" no detalhe). ' +
+        'Nada vai ao Tiny agora: isso acontece no "Confirmar envio".',
       'Enviado': 'Enviar TODAS as peças restantes do pedido ' + num + '?' +
         '\n\nElas vão ao Tiny agora, numa remessa só, e a fatura é gerada. Se faltou alguma peça na ' +
-        'prateleira, cancele aqui e use "Retirar peças" no detalhe antes.',
+        'prateleira, cancele aqui; com o pedido ainda Pendente, use "Retirar peças" no detalhe antes.',
       'Entregue': 'Marcar o pedido ' + num + ' como ENTREGUE?\n\nÉ um status final: o pedido não muda mais.',
       'Cancelado': 'CANCELAR o pedido ' + num + '?\n\nO pedido é cancelado também no Tiny (inclusive remessas já ' +
         'enviadas: o estoque volta lá) e as faturas são anuladas. Não dá para desfazer.',
@@ -1496,8 +1497,9 @@
     var st = itemStatus(it);
     var cancelado = ped.status === 'Cancelado';
     // Grava a quantidade enviada; em pré-venda consome estoque.
-    // Peça normal: só "Retirar peças" (remessa única). Garantia sem estoque (pré-venda) mantém o envio por peça.
-    var retirar = editavel && ped.faturaNaRemessa && !it.backorder && it.qtdEnviada < it.qtd
+    // Peça normal: só "Retirar peças" (remessa única), e só com o pedido Pendente (aprovado = conferido).
+    // Garantia sem estoque (pré-venda) mantém o envio por peça.
+    var retirar = editavel && ped.status === 'Pendente' && ped.faturaNaRemessa && !it.backorder && it.qtdEnviada < it.qtd
       ? '<button class="btn-line btn-mini it-nf" data-ped="' + esc(ped.id) + '" data-item="' + it.itemId +
         '" data-max="' + (it.qtd - it.qtdEnviada) + '">Retirar peças</button>' : '';
     var ctrl = !it.backorder
@@ -1617,8 +1619,11 @@
     var aEnviar = emEstoque.reduce(function (s, it) { return s + Math.max(0, it.qtd - (it.qtdEnviada || 0)); }, 0);
     return '<div class="venda-det">' +
       (editavel && aEnviar
-        ? '<div class="adm-banner">Confira as peças na prateleira. O que não estiver lá, use <b>Retirar peças</b> ' +
-          '(com o que aconteceu): sai do pedido ou vai para a black order do cliente. Depois, <b>Confirmar envio</b> ' +
+        ? '<div class="adm-banner">' + (o.status === 'Pendente'
+            ? 'Confira as peças na prateleira. O que não estiver lá, use <b>Retirar peças</b> ' +
+              '(com o que aconteceu): sai do pedido ou vai para a black order do cliente. Depois de aprovar, ' +
+              'as peças não podem mais ser retiradas. <b>Confirmar envio</b> '
+            : 'Pedido conferido: as peças não podem mais ser retiradas. <b>Confirmar envio</b> ') +
           'manda as <b>' + aEnviar + ' peça(s)</b> restantes ao Tiny numa remessa só' +
           (o.faturaNaRemessa ? ' e gera a fatura' : '') + '.' +
           '<button class="btn-orange btn-mini vd-remessa" data-ped="' + esc(o.id) + '" style="margin-left:8px;">Confirmar envio</button></div>'

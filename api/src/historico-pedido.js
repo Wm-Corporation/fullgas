@@ -39,19 +39,41 @@ export async function registrarEventoPedido(ev) {
 }
 
 // Linha do tempo de um pedido, do mais recente para o mais antigo.
-export async function historicoDoPedido(pedidoId) {
+// `cliente` (EmpresaId de quem vê, não admin): só o que é da conta dele (ver paraCliente).
+export async function historicoDoPedido(pedidoId, { cliente = null } = {}) {
   const rows = await query(
-    `SELECT HistoricoId, Tipo, Titulo, Detalhe, UsuarioNome, Referencia, DataEvento
-       FROM dbo.PedidoHistorico
-      WHERE PedidoId = @pid
-      ORDER BY DataEvento DESC, HistoricoId DESC`,
+    `SELECT h.HistoricoId, h.Tipo, h.Titulo, h.Detalhe, h.UsuarioNome, h.Referencia, h.DataEvento,
+            u.EmpresaId AS EmpresaDoAutor
+       FROM dbo.PedidoHistorico h
+       LEFT JOIN dbo.Usuario u ON u.UsuarioId = h.UsuarioId
+      WHERE h.PedidoId = @pid
+      ORDER BY h.DataEvento DESC, h.HistoricoId DESC`,
     { pid: pedidoId }
   );
-  return rows.map(r => ({
+  const lista = rows.map(r => ({
     id: r.HistoricoId, tipo: r.Tipo, titulo: r.Titulo, detalhe: r.Detalhe || '',
     usuario: r.UsuarioNome || '', referencia: r.Referencia || '',
-    data: r.DataEvento instanceof Date ? r.DataEvento.toISOString() : r.DataEvento
+    data: r.DataEvento instanceof Date ? r.DataEvento.toISOString() : r.DataEvento,
+    empresaDoAutor: r.EmpresaDoAutor ?? null
   }));
+  return lista.map(ev => cliente == null ? semAutor(ev) : paraCliente(ev, cliente)).filter(Boolean);
+}
+
+function semAutor({ empresaDoAutor, ...ev }) { return ev; }
+
+// Visão do revendedor: sem Tiny (exportação, falhas, avisos), sem conferência interna e sem
+// quem da Fullgas fez (aparece "Fullgas"). Vale também para os registros antigos.
+const RE_INTERNO = /tiny|confira se|revise no painel|identidade assumida/i;
+export function paraCliente(ev, empresaId) {
+  if (ev.tipo === 'tiny' || (ev.tipo === 'aviso' && RE_INTERNO.test(ev.titulo + ' ' + ev.detalhe))) return null;
+  const doCliente = ev.empresaDoAutor === empresaId && !/identidade assumida/i.test(ev.usuario);
+  const detalhe = ev.tipo === 'cancelado' && ev.titulo === 'Pedido cancelado' ? '' : ev.detalhe;
+  return {
+    ...semAutor(ev),
+    detalhe: RE_INTERNO.test(detalhe) ? '' : detalhe,
+    usuario: doCliente ? ev.usuario : (ev.usuario && ev.usuario !== 'Sistema' ? 'Fullgas' : ''),
+    referencia: ev.tipo === 'garantia' ? ev.referencia : ''
+  };
 }
 
 // "2× T4008016, 1× A1" — resumo curto das peças para o detalhe do evento.

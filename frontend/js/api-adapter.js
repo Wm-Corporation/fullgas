@@ -695,11 +695,12 @@
     });
   };
 
-  // Gravação de pedido que mexe em estoque: recarrega pedidos e produtos.
+  // Gravação de pedido que mexe em estoque e fatura (remessa, cancelamento): recarrega pedidos, produtos e faturas.
   function putPedido(path, body, metodo) {
     return req(metodo || 'PUT', path, body).then(function (r) {
       if (!r.ok) return r;
-      return Promise.all([recarregarPedidos(), recarregarProdutos()]).then(function () { return r; });
+      var faturas = LISTAS_DA_PAGINA && LISTAS_DA_PAGINA.indexOf('invoices') < 0 ? null : recarregarFaturas().catch(function () {});
+      return Promise.all([recarregarPedidos(), recarregarProdutos(), faturas]).then(function () { return r; });
     });
   }
 

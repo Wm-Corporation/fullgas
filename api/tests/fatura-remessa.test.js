@@ -119,7 +119,7 @@ function bancoNaoEncontrada(extra = {}) {
   const resp = (t, p) => {
     if (/pi\.QuantidadeEnviada, pi\.EmBackorder,\s+p\.NumeroPedido/.test(t))
       return [{ PedidoId: 10, PedidoItemId: 5, ProdutoId: 200, Sku: 'B2', NomeProduto: 'PECA B', PrecoUnitario: 20,
-        Quantidade: 4, QuantidadeEnviada: 1, EmBackorder: 0, NumeroPedido: '0005041900', Status: 'Aprovado',
+        Quantidade: 4, QuantidadeEnviada: 1, EmBackorder: 0, NumeroPedido: '0005041900', Status: 'Pendente',
         EmpresaId: 7, UsuarioId: 3, FaturaNaRemessa: 1, ...extra }];
     if (/SET Quantidade = Quantidade - @q/.test(t)) { st.item = p; return []; }
     if (/SET Total = Total - @v/.test(t)) { st.total = p; return []; }
@@ -189,6 +189,16 @@ describe('peça não encontrada', () => {
     const r = await marcar({ quantidade: 4, motivo: 'Não foi encontrado', destino: 'remover' });
     expect(r.status).toBe(409);
     expect(r.body.erro).toMatch(/Só 3 un\./);
+    expect(b.st.item).toBeNull();
+    expect(transacoes).toEqual(['begin', 'rollback']);
+  });
+
+  it.each(['Aprovado', 'Parcial', 'Enviado'])('pedido %s: as peças já foram conferidas, não dá para retirar', async (st) => {
+    const b = bancoNaoEncontrada({ Status: st });
+    responder = b.resp;
+    const r = await marcar({ quantidade: 1, motivo: 'Não foi encontrado', destino: 'remover' });
+    expect(r.status).toBe(409);
+    expect(r.body.erro).toMatch(/não podem mais ser retiradas/);
     expect(b.st.item).toBeNull();
     expect(transacoes).toEqual(['begin', 'rollback']);
   });
