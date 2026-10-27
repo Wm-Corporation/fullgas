@@ -299,6 +299,12 @@
     return req('PATCH', '/notificacoes/' + encodeURIComponent(id) + '/lida', { lida: !!lida });
   };
 
+  // Abriu a caixa de notificações: todas viram lidas (uma chamada só).
+  FG.marcarNotifsLidas = function () {
+    CACHE.notifications.forEach(function (n) { n.lida = true; });   // otimista
+    return req('POST', '/notificacoes/lidas', {});
+  };
+
   // Admin envia notificação: { titulo, texto, tipo, empresaId?, anexo? }. Promise<{ ok, msg? }>.
   FG.notifEnviar = function (dados) {
     var fd = new FormData();

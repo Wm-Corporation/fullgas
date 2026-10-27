@@ -215,17 +215,12 @@
         (n.texto ? '<div style="white-space:pre-line;">' + esc(n.texto) + '</div>' : '') +
         anexo + linkChamado + linkInterno +
         '<div class="nt-date">' + FG.fmtDateTime(n.data) + '</div></div>' +
-        (n.lida ? '' : '<button class="link-action" data-id="' + n.id + '" data-lida="true">Marcar como lida</button>') +
         '</div>';
     });
     view.innerHTML = html;
     FG.carregarArquivos(view);       // busca os anexos protegidos
-    Array.prototype.forEach.call(view.querySelectorAll('[data-id]'), function (b) {
-      b.addEventListener('click', function () {
-        FG.markNotif(b.getAttribute('data-id'), b.getAttribute('data-lida') === 'true');
-        refreshPill(); renderNotifs();
-      });
-    });
+    // Abriu a caixa = viu: marca tudo como lido (o destaque das novas fica só nesta visita).
+    if (list.some(function (n) { return !n.lida; })) FG.marcarNotifsLidas().then(refreshPill);
   }
 
   /* =========================================================
