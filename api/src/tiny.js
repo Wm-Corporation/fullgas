@@ -175,6 +175,53 @@ export async function listarProdutos(pagina = 1, pesquisa = '') {
   };
 }
 
+// "dd/mm/aaaa hh:mm:ss" no horário de Brasília (formato que o Tiny espera nas datas).
+export function dataTiny(d) {
+  const f = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+  }).formatToParts(d).reduce((o, p) => (o[p.type] = p.value, o), {});
+  return `${f.day}/${f.month}/${f.year} ${f.hour === '24' ? '00' : f.hour}:${f.minute}:${f.second}`;
+}
+
+// Saldos que mudaram no Tiny desde `desde`: [{ tinyId, saldo }] (saldo já sem o reservado).
+// Uma chamada traz até 100 produtos; nada mudou = codigo_erro 20.
+export async function listarEstoquesAlterados(desde) {
+  const out = [];
+  for (let pagina = 1; pagina <= 20; pagina++) {
+    let ret;
+    try {
+      ret = await tinyPost('lista.atualizacoes.estoque.php', { dataAlteracao: dataTiny(desde), pagina });
+    } catch (e) {
+      if (e instanceof TinyError && e.codigo === '20') break;
+      throw e;
+    }
+    for (const w of ret.produtos || []) {
+      const p = w.produto || w;
+      if (p?.id != null) out.push({ tinyId: String(p.id), saldo: saldoLivre(p) });
+    }
+    if (pagina >= (Number(ret.numero_paginas) || 1)) break;
+  }
+  return out;
+}
+
+// Aplica os saldos alterados só nos produtos importados e ligados (o resto do Tiny é ignorado, sem log).
+export async function aplicarSaldosAlterados(alterados) {
+  if (!alterados.length) return [];
+  const params = {};
+  const marks = alterados.map((a, i) => { params['t' + i] = a.tinyId; return '@t' + i; });
+  const locais = new Set((await query(
+    `SELECT TinyId FROM dbo.Produto WHERE TinyAtivo = 1 AND TinyId IN (${marks.join(',')})`, params
+  )).map(r => String(r.TinyId)));
+  const feitos = [];
+  for (const a of alterados) {
+    if (!locais.has(a.tinyId)) continue;
+    try { feitos.push(await aplicarAtualizacao(a.tinyId, { estoque: a.saldo }, 'cron')); }
+    catch (e) { console.warn(`⚠ Estoque do Tiny ${a.tinyId} não aplicado: ${e.message}`); }
+  }
+  return feitos;
+}
+
 // Detalhe + saldo de estoque, nas colunas do portal.
 export async function obterProdutoCompleto(tinyId) {
   const p = (await tinyPost('produto.obter.php', { id: tinyId })).produto;

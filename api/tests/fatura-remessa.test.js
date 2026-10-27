@@ -221,3 +221,43 @@ describe('vigia da black order (a cada 2 min)', () => {
     expect(lotes).toHaveLength(1);                           // sem fila, não chama o Tiny
   });
 });
+
+describe('estoque alterado no Tiny (lido a cada 1 min)', () => {
+  it('data no formato do Tiny, no horário de Brasília', () => {
+    expect(tiny.dataTiny(new Date('2026-10-27T12:05:09Z'))).toBe('27/10/2026 09:05:09');
+    expect(tiny.dataTiny(new Date('2026-10-27T03:00:00Z'))).toBe('27/10/2026 00:00:00');
+  });
+
+  it('lista as páginas até o fim, já com saldo − reservado; nada mudou (erro 20) = lista vazia', async () => {
+    process.env.TINY_TOKEN = 'teste';
+    const corpos = [];
+    const respostas = [
+      { retorno: { status: 'OK', numero_paginas: 2, produtos: [{ produto: { id: 1, saldo: 10, saldoReservado: 3 } }] } },
+      { retorno: { status: 'OK', numero_paginas: 2, produtos: [{ produto: { id: 2, saldo: 4, saldoReservado: 0 } }] } },
+      { retorno: { status: 'Erro', codigo_erro: 20, erros: [{ erro: 'A consulta não retornou registros' }] } }
+    ];
+    vi.stubGlobal('fetch', async (url, opt) => {
+      corpos.push(String(url) + '?' + opt.body);
+      return { ok: true, status: 200, json: async () => respostas.shift() };
+    });
+    try {
+      const l = await tiny.listarEstoquesAlterados(new Date('2026-10-27T12:00:00Z'));
+      expect(l).toEqual([{ tinyId: '1', saldo: 7 }, { tinyId: '2', saldo: 4 }]);
+      expect(corpos[0]).toMatch(/lista\.atualizacoes\.estoque\.php\?.*dataAlteracao=27%2F10%2F2026\+09%3A00%3A00.*pagina=1/);
+      expect(corpos[1]).toMatch(/pagina=2/);
+      expect(await tiny.listarEstoquesAlterados(new Date())).toEqual([]);
+    } finally { vi.unstubAllGlobals(); }
+  }, 15000);
+
+  it('aplica só nos produtos importados e ligados (o resto do Tiny é ignorado)', async () => {
+    responder = (t, p) => {
+      if (/SELECT TinyId FROM dbo\.Produto WHERE TinyAtivo = 1 AND TinyId IN/.test(t)) return [{ TinyId: '1' }];
+      if (/SELECT ProdutoId, Sku, TinyAtivo FROM dbo\.Produto WHERE TinyId/.test(t)) return p.tid === '1' ? [{ ProdutoId: 4, Sku: 'A1', TinyAtivo: 1 }] : [];
+      return [];
+    };
+    const r = await tiny.aplicarSaldosAlterados([{ tinyId: '1', saldo: 7 }, { tinyId: '999', saldo: 2 }]);
+    expect(r.map(x => x.sku)).toEqual(['A1']);
+    expect(achar(/UPDATE dbo\.Produto SET/)[0].p).toMatchObject({ pid: 4, est: 7 });
+    expect(achar(/TinySyncLog/).some(c => c.p.sku === undefined && /ignorado/.test(JSON.stringify(c.p)))).toBe(false);
+  });
+});
