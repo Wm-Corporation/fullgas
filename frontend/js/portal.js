@@ -184,12 +184,73 @@
   /* =========================================================
      NOTIFICAÇÕES
      ========================================================= */
-  function renderNotifs() {
+  var NT_CATS = [
+    { id: 'comunicados', rotulo: 'Comunicados', icone: '📣' },
+    { id: 'pedidos', rotulo: 'Pedidos', icone: '📦' },
+    { id: 'blackorder', rotulo: 'Black order', icone: '⏳' },
+    { id: 'suporte', rotulo: 'Suporte', icone: '💬' }
+  ];
+  var ntFiltro = 'todas';
+  var ntNovas = {};      // ids não lidos ao abrir a caixa: o destaque sobrevive à troca de filtro
+
+  function ntCategoria(n) {
+    if (n.chamadoId || n.origem === 'suporte') return 'suporte';
+    if (n.link && n.link.indexOf('#pedido/') === 0) return 'pedidos';
+    if (n.origem === 'blackorder') return 'blackorder';
+    return 'comunicados';
+  }
+
+  // Hoje / Ontem / Últimos 7 dias / Mais antigas.
+  function ntPeriodo(data) {
+    var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    var antes = (hoje - new Date(data)) / 86400000;      // dias antes da meia-noite de hoje
+    if (antes <= 0) return 'Hoje';
+    if (antes <= 1) return 'Ontem';
+    if (antes <= 6) return 'Últimos 7 dias';
+    return 'Mais antigas';
+  }
+
+  function renderNotifs(manterNovas) {
     setCrumb(['Notificações']); setTabOn('notificacoes');
-    var list = FG.all('notifications').slice().sort(function (a, b) { return a.data < b.data ? 1 : -1; });
-    var html = '<h2>Notificações</h2>';
-    if (!list.length) html += '<p class="muted">Nenhuma notificação.</p>';
+    var todas = FG.all('notifications').slice().sort(function (a, b) { return a.data < b.data ? 1 : -1; });
+    if (!manterNovas) ntNovas = {};
+    todas.forEach(function (n) { if (!n.lida) ntNovas[n.id] = true; });
+    var conta = { todas: todas.length, critica: 0 }, novas = { todas: 0, critica: 0 };
+    todas.forEach(function (n) {
+      var c = ntCategoria(n), nova = ntNovas[n.id] ? 1 : 0;
+      conta[c] = (conta[c] || 0) + 1; novas[c] = (novas[c] || 0) + nova; novas.todas += nova;
+      if (n.tipo === 'critica') { conta.critica++; novas.critica += nova; }
+    });
+    // Filtro de uma categoria que esvaziou volta para "Todas".
+    if (ntFiltro !== 'todas' && !conta[ntFiltro]) ntFiltro = 'todas';
+
+    function chip(id, rotulo) {
+      return '<button class="nt-chip' + (ntFiltro === id ? ' on' : '') + (id === 'critica' ? ' crit' : '') +
+        '" data-nt-filtro="' + id + '">' + rotulo + ' <span class="nt-chip-n">' + conta[id] + '</span>' +
+        (novas[id] ? '<span class="nt-chip-novas">' + novas[id] + ' nova' + (novas[id] > 1 ? 's' : '') + '</span>' : '') +
+        '</button>';
+    }
+
+    var list = todas.filter(function (n) {
+      return ntFiltro === 'todas' || (ntFiltro === 'critica' ? n.tipo === 'critica' : ntCategoria(n) === ntFiltro);
+    });
+    var html = '<div class="nt-cab"><h2>Notificações</h2>' +
+      (novas.todas ? '<span class="nt-resumo">' + novas.todas + ' nova' + (novas.todas > 1 ? 's' : '') + '</span>' : '') +
+      '</div>';
+    if (!todas.length) {
+      view.innerHTML = html + '<div class="empty-box">Nenhuma notificação por aqui.</div>';
+      return;
+    }
+    html += '<div class="nt-chips">' + chip('todas', 'Todas') +
+      (conta.critica ? chip('critica', '⚠ Importantes') : '') +
+      NT_CATS.filter(function (c) { return conta[c.id]; }).map(function (c) { return chip(c.id, c.icone + ' ' + c.rotulo); }).join('') +
+      '</div>';
+
+    var periodo = null;
     list.forEach(function (n) {
+      var p = ntPeriodo(n.data);
+      if (p !== periodo) { periodo = p; html += '<div class="nt-periodo">' + p + '</div>'; }
+      var cat = NT_CATS.filter(function (c) { return c.id === ntCategoria(n); })[0];
       // Anexo privado: data-arquivo, preenchido por FG.carregarArquivos.
       var anexo = '';
       if (n.anexo) {
@@ -207,20 +268,29 @@
       // Link interno (só rotas do portal, começando por '#'), ex.: carrinho da black order.
       var linkInterno = n.link && /^#[\w/-]+$/.test(n.link)
         ? '<a class="link-action nt-chamado" href="' + esc(n.link) + '">' +
-          (n.link.indexOf('carrinho') >= 0 ? 'Abrir carrinho da black order' : 'Abrir') + ' &rsaquo;</a>'
+          (n.link.indexOf('carrinho') >= 0 ? 'Abrir carrinho da black order'
+            : n.link.indexOf('#pedido/') === 0 ? 'Abrir pedido'
+            : n.link === '#blackorder' ? 'Ver minhas black orders' : 'Abrir') + ' &rsaquo;</a>'
         : '';
 
-      html += '<div class="notif ' + n.tipo + (n.lida ? '' : ' unread') + '">' +
-        '<div class="nt-body"><div class="nt-title">' + (n.tipo === 'critica' ? '⚠ ' : '') + esc(n.titulo) + '</div>' +
-        (n.texto ? '<div style="white-space:pre-line;">' + esc(n.texto) + '</div>' : '') +
+      html += '<div class="notif cat-' + cat.id + ' ' + n.tipo + (ntNovas[n.id] ? ' unread' : '') + '">' +
+        '<div class="nt-icone" aria-hidden="true">' + (n.tipo === 'critica' ? '⚠' : cat.icone) + '</div>' +
+        '<div class="nt-body"><div class="nt-meta"><span class="nt-cat">' + cat.rotulo + '</span>' +
+        (n.tipo === 'critica' ? '<span class="nt-crit">Importante</span>' : '') +
+        (ntNovas[n.id] ? '<span class="nt-nova">Nova</span>' : '') +
+        '<span class="nt-date">' + FG.fmtDateTime(n.data) + '</span></div>' +
+        '<div class="nt-title">' + esc(n.titulo) + '</div>' +
+        (n.texto ? '<div class="nt-texto">' + esc(n.texto) + '</div>' : '') +
         anexo + linkChamado + linkInterno +
-        '<div class="nt-date">' + FG.fmtDateTime(n.data) + '</div></div>' +
-        '</div>';
+        '</div></div>';
     });
     view.innerHTML = html;
+    Array.prototype.forEach.call(view.querySelectorAll('[data-nt-filtro]'), function (b) {
+      b.addEventListener('click', function () { ntFiltro = b.getAttribute('data-nt-filtro'); renderNotifs(true); });
+    });
     FG.carregarArquivos(view);       // busca os anexos protegidos
     // Abriu a caixa = viu: marca tudo como lido (o destaque das novas fica só nesta visita).
-    if (list.some(function (n) { return !n.lida; })) FG.marcarNotifsLidas().then(refreshPill);
+    if (todas.some(function (n) { return !n.lida; })) FG.marcarNotifsLidas().then(refreshPill);
   }
 
   /* =========================================================
@@ -1513,10 +1583,7 @@
     var comPreco = disp.every(function (b) { return b.preco !== undefined; });
     view.innerHTML =
       '<h2>Carrinho da black order</h2>' +
-      '<p class="muted">Estas peças chegaram e estão separadas para você. Escolha quanto quer de cada uma: ' +
-      'você paga só o que comprar, pelo preço de hoje, e vira um pedido normal (faturado quando as peças saírem). ' +
-      'Comprando tudo o que chegou, o que ainda não chegou continua na sua black order. ' +
-      'Comprando menos, essa passa a ser a sua quantidade final e a black order da peça é encerrada.</p>' +
+      '<p class="muted">Suas peças chegaram: escolha quanto quer de cada uma e pague só o que comprar.</p>' +
       '<table class="table bo-carrinho"><thead><tr><th>Foto</th><th>Peça</th><th>Compra de origem</th>' +
       '<th class="right">Disponível</th><th class="right">Aguardando chegada</th><th class="right">Comprar</th>' +
       (comPreco ? '<th class="right">Preço un.</th><th class="right">Subtotal</th>' : '') + '</tr></thead><tbody>' +
@@ -2884,7 +2951,7 @@
         // Pisca só quando sobe.
         if (mudou.chegouNotificacao) piscarPill();
         // A caixa de entrada aberta na tela também fica velha.
-        if (location.hash === '#notificacoes') renderNotifs();
+        if (location.hash === '#notificacoes') renderNotifs(true);
       });
     }
 
