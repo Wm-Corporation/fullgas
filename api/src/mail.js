@@ -86,7 +86,7 @@ export function emailRecuperacaoSenha(nome, link, minutos) {
     '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1c1c1c;line-height:1.5;">' +
     `<p>Olá, <b>${escHtml(nome)}</b>.</p>` +
     '<p>Recebemos um pedido para redefinir a senha da sua conta no portal <b>Fullgas B2B</b>.</p>' +
-    `<p><a href="${escHtml(link)}" style="display:inline-block;background:#E5B100;color:#1c1c1c;` +
+    `<p><a href="${escHtml(link)}" style="display:inline-block;background:#D7AF0C;color:#1c1c1c;` +
     'font-weight:700;text-decoration:none;padding:12px 22px;border-radius:4px;">Criar nova senha</a></p>' +
     `<p style="font-size:12px;color:#666;">O link vale por ${minutos} minutos. ` +
     `Se o botão não funcionar, copie e cole no navegador:<br>${escHtml(link)}</p>` +

@@ -5,7 +5,7 @@
   --adm-side: #373330;
   --adm-side-hover: #4a4542;
   /* "--adm-orange" é histórico (tema Magento): hoje é o AMARELO da marca. */
-  --adm-orange: #e5b100;
+  --adm-orange: #d7af0c;
   --adm-blue: #007bdb;
   --adm-bg: #f8f8f8;
   --adm-line: #e3e3e3;
@@ -60,7 +60,7 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .adm-bar .grow { flex: 1; }
 
 .btn-orange { background: var(--adm-orange); color: #1c1c1c; border: none; padding: 10px 20px; font-size: 14px; font-weight: 600; border-radius: 2px; cursor: pointer; }
-.btn-orange:hover { background: #c69a00; }
+.btn-orange:hover { background: var(--red-hover); }
 .btn-line { background: #fff; border: 1px solid #adadad; color: #514943; padding: 9px 18px; font-size: 13px; border-radius: 2px; cursor: pointer; }
 .btn-line:hover { border-color: #514943; }
 .btn-mini { font-size: 12px; padding: 5px 10px; }
@@ -138,7 +138,7 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 /* Tons por gravidade: destaque (identidade), ok, aviso, perigo. */
 .usr-acao.destaque { border-left-color: var(--adm-orange); background: #fffdf3; }
 .usr-acao.destaque .usr-acao-btn { background: var(--adm-orange); border-color: var(--adm-orange); color: #1c1c1c; }
-.usr-acao.destaque .usr-acao-btn:hover { background: #cf9f00; }
+.usr-acao.destaque .usr-acao-btn:hover { background: var(--red-hover); }
 .usr-acao.ok { border-left-color: #15803d; }
 .usr-acao.ok .usr-acao-btn { background: #15803d; border-color: #15803d; color: #fff; }
 .usr-acao.aviso { border-left-color: #c2410c; }
@@ -201,7 +201,7 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .chart-tabs button { border: 1px solid #ccc; background: #f1f1f1; padding: 9px 18px; font-size: 13px; cursor: pointer; }
 .chart-tabs button.on { background: #fff; border-bottom-color: #fff; font-weight: 600; }
 .chart { display: flex; align-items: flex-end; gap: 6px; height: 190px; border-bottom: 1px solid #ccc; border-left: 1px solid #ccc; padding: 6px 8px 0; }
-.chart .bar { flex: 1; background: #faf0cc; border: 1px solid var(--adm-orange); min-height: 2px; position: relative; }
+.chart .bar { flex: 1; background: var(--red-soft); border: 1px solid var(--adm-orange); min-height: 2px; position: relative; }
 .chart .bar:hover::after { content: attr(data-v); position: absolute; top: -22px; left: 50%; transform: translateX(-50%); background: #333; color: #fff; font-size: 10px; padding: 2px 6px; white-space: nowrap; }
 .chart-x { display: flex; gap: 6px; padding: 4px 8px 0; }
 .chart-x span { flex: 1; text-align: center; font-size: 10px; color: #888; }
@@ -272,16 +272,16 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .ha-canvas { position: relative; width: 100%; line-height: 0; }
 .ha-canvas img { display: block; width: 100%; height: auto; user-select: none; }
 .ha-box {
-  position: absolute; border: 2px solid var(--adm-orange); background: rgba(229, 177, 0, .18);
+  position: absolute; border: 2px solid var(--adm-orange); background: rgba(215, 175, 12, .18);
   cursor: move; display: flex; align-items: flex-start; justify-content: flex-end;
   box-sizing: border-box; border-radius: 2px;
 }
 .ha-box span {
-  font-size: 10px; font-weight: 700; color: #7a6200; background: rgba(255, 255, 255, .85);
+  font-size: 10px; font-weight: 700; color: var(--red-dark); background: rgba(255, 255, 255, .85);
   padding: 0 3px; line-height: 1.3; pointer-events: none;
 }
 /* seleção em PRETO: a caixa base já é amarela, o accent amarelo não destaca */
-.ha-box.sel, .ha-box:hover { border-color: #1c1c1c; background: rgba(229, 177, 0, .34); }
+.ha-box.sel, .ha-box:hover { border-color: #1c1c1c; background: rgba(215, 175, 12, .34); }
 /* Botão "#": oculta o número de posição das áreas do diagrama. */
 .ha-canvas.ha-nonum .ha-box span { display: none; }
 

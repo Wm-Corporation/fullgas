@@ -51,7 +51,7 @@ body.auth .auth-glow::before {
   width: 70vw; height: 70vw; max-width: 900px; max-height: 900px;
   top: -22vh; left: -14vw;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%, rgba(229, 177, 0, .22), rgba(229, 177, 0, 0) 68%);
+  background: radial-gradient(circle at 50% 50%, rgba(215, 175, 12, .22), rgba(215, 175, 12, 0) 68%);
   filter: blur(80px);
   /* Camada própria na placa de vídeo. */
   will-change: transform;
@@ -102,7 +102,7 @@ body.auth .auth-marca {
   padding: 44px 34px;
   border-right: 1px solid var(--ac-linha);
   background:
-    radial-gradient(120% 100% at 0% 0%, rgba(229, 177, 0, .10), transparent 62%),
+    radial-gradient(120% 100% at 0% 0%, rgba(215, 175, 12, .10), transparent 62%),
     linear-gradient(160deg, rgba(255, 255, 255, .03), rgba(0, 0, 0, .25));
 }
 body.auth .auth-logo {
@@ -111,7 +111,7 @@ body.auth .auth-logo {
   max-width: 210px;
   height: auto;
   /* O brilho acompanha o desenho do logo, não uma caixa atrás dele. */
-  filter: drop-shadow(0 0 26px rgba(229, 177, 0, .22));
+  filter: drop-shadow(0 0 26px rgba(215, 175, 12, .22));
   position: sticky;
   top: 50%;
   /* O -50% da centralização fica dentro do keyframe (a animação substitui o transform). */
@@ -199,7 +199,7 @@ body.auth .field input:focus {
   outline: none;                 /* o próprio anel abaixo marca o foco */
   border-color: var(--ac-ouro);
   background: rgba(255, 255, 255, .06);
-  box-shadow: 0 0 0 3px rgba(229, 177, 0, .16);
+  box-shadow: 0 0 0 3px rgba(215, 175, 12, .16);
 }
 /* Autopreenchimento do Chrome: sem isto o texto some no tema escuro. */
 body.auth .field input:-webkit-autofill,
@@ -222,7 +222,7 @@ body.auth .muted { color: var(--ac-suave); }
 body.auth .btn.red {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(135deg, #f0c62a, var(--ac-ouro) 55%, #b98f00);
+  background: linear-gradient(135deg, #e6c53e, var(--ac-ouro) 55%, var(--red-dark));
   border: none;
   border-radius: 12px;
   color: #17140a;
@@ -232,15 +232,15 @@ body.auth .btn.red {
   letter-spacing: .12em;
   text-transform: uppercase;
   padding: 13px 20px;
-  box-shadow: 0 10px 26px rgba(229, 177, 0, .18);
+  box-shadow: 0 10px 26px rgba(215, 175, 12, .18);
   transition: transform .2s cubic-bezier(.2, .7, .2, 1), box-shadow .25s ease, filter .2s ease;
 }
 body.auth .btn.red:hover {
   transform: translateY(-2px);
-  box-shadow: 0 16px 34px rgba(229, 177, 0, .30);
+  box-shadow: 0 16px 34px rgba(215, 175, 12, .30);
   filter: brightness(1.04);
 }
-body.auth .btn.red:active { transform: translateY(0); box-shadow: 0 8px 18px rgba(229, 177, 0, .22); }
+body.auth .btn.red:active { transform: translateY(0); box-shadow: 0 8px 18px rgba(215, 175, 12, .22); }
 body.auth .btn.red:disabled { opacity: .55; transform: none; box-shadow: none; cursor: not-allowed; }
 /* Brilho que atravessa o botão ao passar o mouse. */
 body.auth .btn.red::after {
@@ -279,7 +279,7 @@ body.auth .link-btn {
   padding-bottom: 1px;
   transition: color .2s ease, border-color .2s ease;
 }
-body.auth .link-btn:hover { color: var(--ac-ouro); border-bottom-color: rgba(229, 177, 0, .5); }
+body.auth .link-btn:hover { color: var(--ac-ouro); border-bottom-color: rgba(215, 175, 12, .5); }
 
 /* Campos entram em sequência ao trocar de aba. */
 body.auth #form-login .field,
