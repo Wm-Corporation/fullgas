@@ -292,7 +292,8 @@ router.get('/pedidos/:numero', requireAuth, requireAreaAny(['loja', 'pedidos']),
 
     // Faturas do pedido (via PedidoFatura). Entregas/rastreios saíram do fluxo.
     const faturaRows = await query(
-      `SELECT f.NumeroFatura, f.DataEmissao, f.Valor, f.Status
+      `SELECT f.NumeroFatura, f.DataEmissao, f.Valor,
+              CASE WHEN p.Status = N'Cancelado' THEN 'Anulada' ELSE f.Status END AS Status
          FROM dbo.PedidoFatura pf
          JOIN dbo.Fatura f ON f.FaturaId = pf.FaturaId
          JOIN dbo.Pedido p ON p.PedidoId = pf.PedidoId
@@ -352,7 +353,7 @@ router.get('/pedidos/:numero', requireAuth, requireAreaAny(['loja', 'pedidos']),
 
     // Linha do tempo (migration 047); sem 'financeiro', eventos com valor saem sem detalhe.
     const verValores = podeVerFinanceiro(req.user);
-    detalhe.historico = (await historicoDoPedido(p.PedidoId)).map(ev =>
+    detalhe.historico = (await historicoDoPedido(p.PedidoId, { cliente: admin ? null : req.user.empresaId })).map(ev =>
       verValores || !/R\$/.test(ev.detalhe) ? ev : { ...ev, detalhe: '' });
 
     // Sem 'financeiro': sem total, preços e faturas.
@@ -868,8 +869,8 @@ export const MOTIVOS_RETIRADA = ['Não foi encontrado', 'Estoque incorreto', 'Pe
 // POST /api/pedidos/:numero/itens/:itemId/retirar (admin) — { quantidade, motivo, descricao?, destino }.
 // Retira peças do pedido antes do envio (não serão faturadas), com o que aconteceu. destino:
 //   'remover'    → saem do pedido;   'blackorder' → viram black order do cliente (aguardando chegada).
-// Só pedidos com fatura por remessa (os antigos já têm fatura cheia) e só o que ainda não saiu.
-// Retirou tudo = pedido cancelado (nada foi ao Tiny). '/nao-encontrada' é o nome antigo da rota.
+// Só pedido Pendente (aprovar = tudo conferido no estoque), com fatura por remessa (os antigos já têm
+// fatura cheia) e só o que ainda não saiu. Retirou tudo = pedido cancelado (nada foi ao Tiny). '/nao-encontrada' é o nome antigo da rota.
 router.post(['/pedidos/:numero/itens/:itemId/retirar', '/pedidos/:numero/itens/:itemId/nao-encontrada'],
   requireAuth, requireAdmin, async (req, res, next) => {
   const q = Number(req.body?.quantidade);
@@ -899,6 +900,9 @@ router.post(['/pedidos/:numero/itens/:itemId/retirar', '/pedidos/:numero/itens/:
     const it = cur.recordset[0];
     if (STATUS_FINAIS.includes(it.Status))
       return recusar(409, `Pedido ${it.Status.toLowerCase()} — as peças não podem mais ser alteradas.`);
+    if (it.Status !== 'Pendente')
+      return recusar(409, `Pedido ${it.Status.toLowerCase()}: as peças já foram conferidas e não podem mais ser retiradas. ` +
+        'Se ainda nada foi ao Tiny, volte o pedido para Pendente antes.');
     if (!it.FaturaNaRemessa || it.EmBackorder)
       return recusar(409, 'Pedido anterior à fatura por remessa: a fatura dele já foi emitida cheia. Ajuste pelo cancelamento ou à mão.');
     const naoSaiu = it.Quantidade - it.QuantidadeEnviada;

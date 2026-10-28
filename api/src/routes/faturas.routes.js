@@ -108,13 +108,22 @@ async function empresasPorId(empresaIds) {
   return map;
 }
 
+// Fatura de pedido cancelado é Anulada, mesmo que o registro tenha ficado 'Emitida' (migration 052).
+const STATUS_EFETIVO =
+  `CASE WHEN f.Status = 'Emitida'
+         AND EXISTS (SELECT 1 FROM dbo.PedidoFatura pf JOIN dbo.Pedido p ON p.PedidoId = pf.PedidoId
+                      WHERE pf.FaturaId = f.FaturaId)
+         AND NOT EXISTS (SELECT 1 FROM dbo.PedidoFatura pf JOIN dbo.Pedido p ON p.PedidoId = pf.PedidoId
+                          WHERE pf.FaturaId = f.FaturaId AND p.Status <> N'Cancelado')
+        THEN 'Anulada' ELSE f.Status END`;
+
 // GET /api/faturas — cliente vê as da empresa; admin vê todas. Exige a área 'financeiro'.
 router.get('/faturas', requireAuth, requireArea('financeiro'), async (req, res, next) => {
   try {
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
     const faturas = await query(
       `SELECT f.FaturaId, f.NumeroFatura, f.Tipo, f.DataEmissao, f.Valor, f.Moeda,
-              f.Status, f.EmpresaId, f.ReferenciaReivindicacao
+              ${STATUS_EFETIVO} AS Status, f.EmpresaId, f.ReferenciaReivindicacao
          FROM dbo.Fatura f
         WHERE f.Tipo = 'Fatura'
           AND (@eid IS NULL OR f.EmpresaId = @eid)
