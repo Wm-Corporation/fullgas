@@ -1491,3 +1491,181 @@ body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
 .bo-encerra { display: block; margin-top: 4px; font-size: 11px; color: #b45309; max-width: 220px; margin-left: auto; text-align: right; }
 .nf-info { margin-top: 3px; font-size: 11px; color: #b45309; }
 .cart-fat { text-align: right; font-size: 12px; margin: 2px 0 8px; }
+
+/* =========================================================
+   FINDER — identidade do Manual de Marca (body.fd-marca)
+   Cores: amarelo #d7af0c (60%), carvão #2e2d2c (30%), dourado #917709 (10%).
+   Fonte: Poppins (a Eurostile do manual é paga). Padrão: o símbolo em contorno.
+   ========================================================= */
+@font-face { font-family: 'Poppins'; font-weight: 400; font-style: normal; font-display: swap; src: url(../fonts/poppins-400.woff2) format('woff2'); }
+@font-face { font-family: 'Poppins'; font-weight: 600; font-style: normal; font-display: swap; src: url(../fonts/poppins-600.woff2) format('woff2'); }
+@font-face { font-family: 'Poppins'; font-weight: 800; font-style: normal; font-display: swap; src: url(../fonts/poppins-800.woff2) format('woff2'); }
+@font-face { font-family: 'Poppins'; font-weight: 800; font-style: italic; font-display: swap; src: url(../fonts/poppins-800-italic.woff2) format('woff2'); }
+
+body.fd-marca {
+  --fg-amarelo: #d7af0c; --fg-carvao: #2e2d2c; --fg-ouro: #917709; --fg-creme: #fbf5dc;
+  font-family: 'Poppins', var(--font); background: #f6f5f2;
+}
+.fd-marca h1, .fd-marca h2, .fd-marca .finder-model-name { font-family: 'Poppins', var(--font); }
+
+/* ---- faixa do topo ---- */
+.fd-marca .finder-top {
+  position: relative; background: var(--fg-carvao); color: #fff;
+  padding: 22px 28px 74px; align-items: flex-start; gap: 20px;
+}
+.fd-marca .fd-deco {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  background: url(../img/finder-padrao.svg) repeat; background-size: 200px 110px;
+}
+/* Asa amarela vazando à direita + listra diagonal (velocidade, como nas tendas do manual). */
+.fd-marca .fd-deco::before {
+  content: ""; position: absolute; left: max(640px, 47%); bottom: -36px; width: 420px; height: 200px;
+  background: url(../img/fullgas-simbolo.svg) no-repeat center / contain;
+}
+/* Sem espaço entre o texto e o logo, a asa sai (o padrão fica). */
+@media (max-width: 1240px) { .fd-marca .fd-deco::before { display: none; } }
+.fd-marca .fd-deco::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 6px;
+  background: linear-gradient(90deg, var(--fg-ouro), var(--fg-amarelo) 55%, #f2d34a);
+}
+.fd-marca .fd-hero-txt, .fd-marca .finder-top-right { position: relative; }
+.fd-marca .finder-top .btn-voltar { background: rgba(255,255,255,.12); margin-bottom: 18px; }
+.fd-marca .finder-top .btn-voltar + * { margin-left: 0; }
+.fd-marca .finder-top .btn-voltar:hover { background: var(--fg-amarelo); color: var(--fg-carvao); }
+.fd-marca .fd-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .22em; text-transform: uppercase; color: var(--fg-amarelo); }
+.fd-marca .finder-top h1 {
+  font-size: 34px; font-weight: 800; font-style: italic; letter-spacing: -.01em; line-height: 1.1;
+  margin: 4px 0 6px; color: #fff;
+}
+.fd-marca .fd-sub { margin: 0 0 10px; font-size: 14px; color: #d9d6cf; max-width: 520px; }
+.fd-marca .finder-top .who { font-size: 12px; font-weight: 400; color: #a9a59c; }
+.fd-marca .finder-top-right { flex-direction: column; align-items: flex-end; gap: 14px; z-index: 1; }
+.fd-marca .fd-logo img { height: 56px; width: auto; display: block; }
+.fd-marca .fd-cart { order: -1; color: #fff; }
+.fd-marca .usage-btn {
+  margin: 0; background: transparent; color: #fff; border: 1.5px solid var(--fg-amarelo);
+  border-radius: 20px; padding: 7px 16px; font: 600 13px 'Poppins', var(--font); cursor: pointer; text-decoration: none;
+  transition: background .15s, color .15s;
+}
+.fd-marca .usage-btn:hover { background: var(--fg-amarelo); color: var(--fg-carvao); }
+
+/* ---- cartões e painel de busca (sobem sobre a faixa) ---- */
+.fd-marca main.finder { padding-top: 0; }
+.fd-marca .search-panel, .fd-marca .fd-card {
+  background: #fff; border: 1px solid #e7e4dc; border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(46,45,44,.10);
+}
+.fd-marca .search-panel { position: relative; z-index: 2; margin: -50px 0 26px; padding: 18px 28px 24px; border-top: 4px solid var(--fg-amarelo); }
+.fd-marca .search-panel .sp-title { color: var(--fg-carvao); font: 800 16px 'Poppins', var(--font); }
+.fd-marca .search-panel .reset { top: 20px; right: 24px; font-size: 12px; font-weight: 600; color: var(--fg-ouro); }
+.fd-marca .sp-grid { gap: 18px 0; }
+.fd-marca .sp-grid > div { padding-right: 34px; }
+.fd-marca .sp-grid > div + div { padding: 0 0 0 34px; border-left: 1px solid #ece9e1; }
+@media (max-width: 860px) { .fd-marca .sp-grid > div, .fd-marca .sp-grid > div + div { padding: 0; border: 0; } }
+.fd-marca .sp-grid label, .fd-marca .usage-filtros label {
+  font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #6f6b62;
+}
+.fd-marca .sp-grid input[type=text], .fd-marca .model-cascade select, .fd-marca .usage-filtros input, .fd-marca .usage-quick input {
+  height: 42px; border: 1px solid #d9d5cb; border-radius: 8px; padding: 0 12px; font: 14px 'Poppins', var(--font); background: #fff;
+}
+.fd-marca .sp-grid input[type=text]:focus, .fd-marca .model-cascade select:focus, .fd-marca .usage-filtros input:focus, .fd-marca .usage-quick input:focus, .fd-marca .pt-busca input:focus {
+  outline: none; border-color: var(--fg-amarelo); box-shadow: 0 0 0 3px rgba(215,175,12,.22);
+}
+.fd-marca .model-cascade select:disabled { background: #f4f3ef; }
+/* Motor | Chassi como botões de alternar (os rádios continuam lá, invisíveis). */
+.fd-marca .fd-seg { display: inline-flex; gap: 0; border: 1px solid #d9d5cb; border-radius: 22px; padding: 3px; margin: 8px 0 16px; }
+.fd-marca .fd-seg label { margin: 0; padding: 6px 18px; border-radius: 18px; cursor: pointer; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: #6f6b62; }
+.fd-marca .fd-seg input { position: absolute; opacity: 0; pointer-events: none; }
+.fd-marca .fd-seg label:has(input:checked) { background: var(--fg-carvao); color: var(--fg-amarelo); }
+.fd-marca .fd-seg label:has(input:focus-visible) { outline: 2px solid var(--fg-amarelo); }
+.fd-marca .fd-btn-buscar {
+  display: block; width: 100%; height: 44px; background: var(--fg-amarelo); border: 0; border-radius: 8px;
+  color: var(--fg-carvao); font: 800 14px 'Poppins', var(--font); letter-spacing: .08em; text-transform: uppercase;
+}
+.fd-marca .fd-btn-buscar:hover { background: #c49f08; }
+
+/* Sem modelo escolhido: um convite no lugar do vazio. */
+.fd-marca #fd-view:empty {
+  min-height: 190px; border: 2px dashed #e1ddd2; border-radius: 12px; text-align: center;
+  background: url(../img/fullgas-simbolo.svg) no-repeat center 40px / 180px auto;
+  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 34px;
+}
+.fd-marca #fd-view:empty::after { content: "Digite o chassi ou escolha o modelo para ver as peças."; color: #8b867a; font-size: 14px; }
+
+/* ---- tela do modelo ---- */
+.fd-marca .finder-model-name { font-size: 28px; font-weight: 800; font-style: italic; color: var(--fg-carvao); margin: 4px 0 4px; }
+.fd-marca .finder-model-name::after {
+  content: ""; display: block; width: 150px; height: 4px; margin-top: 6px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--fg-ouro), var(--fg-amarelo));
+}
+.fd-marca .finder-links { gap: 10px; margin: 14px 0 22px; }
+.fd-marca .finder-links a:not(.btn-voltar), .fd-marca .finder-links button:not(.btn-voltar) {
+  color: var(--fg-carvao); background: #fff; border: 1px solid #d9d5cb; border-radius: 20px;
+  padding: 7px 16px; font: 600 13px 'Poppins', var(--font);
+}
+.fd-marca .finder-links a:not(.btn-voltar):hover, .fd-marca .finder-links button:not(.btn-voltar):hover {
+  background: var(--fg-amarelo); border-color: var(--fg-amarelo); text-decoration: none;
+}
+.fd-marca .sec-list { background: #fff; border: 1px solid #e7e4dc; border-radius: 12px; overflow: hidden; }
+.fd-marca .sec-list .sec-item { background: #fff; border-bottom: 1px solid #f0ede5; font: 600 14px 'Poppins', var(--font); color: var(--fg-carvao); padding: 12px 16px; position: relative; }
+.fd-marca .sec-list .sec-item:last-child { border-bottom: 0; }
+.fd-marca .sec-list .sec-item:nth-child(even) { background: #fff; }
+.fd-marca .sec-list .sec-item:hover { background: var(--fg-creme); }
+.fd-marca .sec-list .sec-item:hover::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--fg-amarelo); }
+.fd-marca .sec-list .sec-item .n, .fd-marca .thumb .tn {
+  flex: none; width: 38px; padding: 3px 0; border-radius: 6px; text-align: center;
+  background: var(--fg-carvao); color: var(--fg-amarelo); font-weight: 800; font-size: 13px;
+}
+.fd-marca .sec-list .sec-item .chev { color: var(--fg-ouro); transition: transform .15s; }
+.fd-marca .sec-list .sec-item:hover .chev { transform: translateX(3px); }
+.fd-marca .thumb-grid { gap: 16px; }
+.fd-marca .thumb {
+  flex-direction: column; gap: 10px; padding: 40px 12px 12px; border: 1px solid #e7e4dc; border-radius: 12px;
+  transition: transform .15s, border-color .15s; will-change: transform;
+}
+.fd-marca .thumb:hover { border-color: var(--fg-amarelo); transform: translateY(-3px); }
+.fd-marca .thumb .tn { top: 10px; left: 10px; right: auto; }
+.fd-marca .thumb .tnome { font-size: 12px; font-weight: 600; color: var(--fg-carvao); text-align: center; line-height: 1.3; }
+.fd-marca .thumb .thumb-bg { background: #f4f3ef; border-radius: 8px; }
+
+/* ---- tela da seção ---- */
+.fd-marca .finder-crumb, .fd-marca .finder-crumb a { color: var(--fg-carvao); font-size: 15px; }
+.fd-marca .finder-crumb a:hover { color: var(--fg-ouro); }
+.fd-marca .finder-crumb .chev { color: var(--fg-amarelo); }
+.fd-marca .finder-crumb .crumb-print { color: var(--fg-ouro); }
+.fd-marca .fnd-actions .btn, .fd-marca .part-toolbar .btn {
+  border-radius: 20px; border: 1px solid #d9d5cb; background: #fff; color: var(--fg-carvao);
+  font: 600 12px 'Poppins', var(--font); letter-spacing: .04em; padding: 8px 16px;
+}
+.fd-marca .fnd-actions .btn:hover:not([disabled]) { background: var(--fg-carvao); border-color: var(--fg-carvao); color: var(--fg-amarelo); }
+.fd-marca .part-toolbar .btn { background: var(--fg-amarelo); border-color: var(--fg-amarelo); font-weight: 800; }
+.fd-marca .part-toolbar .btn:hover { background: #c49f08; }
+.fd-marca .pt-busca input { border-radius: 8px; font-family: 'Poppins', var(--font); }
+.fd-marca .part-row { border-color: #e7e4dc; border-radius: 12px; }
+.fd-marca .part-row .pr-num { background: var(--fg-carvao); color: var(--fg-amarelo); border-radius: 8px; font-weight: 800; }
+.fd-marca .part-row.sel { border-color: var(--fg-amarelo); background: #fffcef; }
+.fd-marca .part-row.sel .pr-num { background: var(--fg-amarelo); color: var(--fg-carvao); }
+.fd-marca .part-row .pr-nome a:hover, .fd-marca .part-row .pr-sku:hover { color: var(--fg-ouro); }
+.fd-marca .part-row .pr-preco { color: var(--fg-carvao); }
+.fd-marca .part-row .pr-sel input { accent-color: var(--fg-carvao); }
+.fd-marca .part-list::-webkit-scrollbar-thumb:hover { background: var(--fg-amarelo); }
+.fd-marca .diagram-box { background: #fff; border: 1px solid #e7e4dc; border-radius: 12px; overflow: hidden; }
+
+/* ---- "Onde a peça é usada" ---- */
+.fd-marca .usage-page { margin-top: -50px; position: relative; z-index: 2; }
+.fd-marca .usage-filtros { padding: 20px 20px 22px; border-top: 4px solid var(--fg-amarelo); }
+.fd-marca .usage-result { overflow: hidden; }
+.fd-marca .usage-result-head { background: #faf9f6; border-bottom-color: #ece9e1; }
+.fd-marca .usage-table th { color: var(--fg-ouro); border-bottom-color: #ece9e1; }
+.fd-marca .usage-row:hover { background: var(--fg-creme) !important; }
+.fd-marca .usage-go a { color: var(--fg-ouro); }
+
+@media (max-width: 700px) {
+  .fd-marca .finder-top { flex-direction: column; padding: 18px 16px 70px; }
+  .fd-marca .finder-top h1 { font-size: 26px; }
+  .fd-marca .finder-top-right { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .fd-marca .fd-logo img { height: 40px; }
+  .fd-marca #fd-view:empty { background-size: 140px auto; background-position: center 28px; padding: 0 20px 26px; text-align: center; }
+  .fd-marca main.finder { padding-left: 14px; padding-right: 14px; }
+  .fd-marca .search-panel { padding: 16px 16px 20px; }
+}

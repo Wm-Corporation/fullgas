@@ -60,11 +60,11 @@
   /* ---------- painel de busca: expandir/recolher e reset ---------- */
   var spBody = document.getElementById('sp-body');
   var spToggle = document.getElementById('sp-toggle');
-  function recolherBusca() { spBody.classList.add('hidden'); spToggle.textContent = '▸ Buscar'; }
+  function recolherBusca() { spBody.classList.add('hidden'); spToggle.textContent = '▸ Buscar peças'; }
   spToggle.addEventListener('click', function () {
     var aberto = !spBody.classList.contains('hidden');
     spBody.classList.toggle('hidden', aberto);
-    spToggle.textContent = (aberto ? '▸' : '▾') + ' Buscar';
+    spToggle.textContent = (aberto ? '▸' : '▾') + ' Buscar peças';
   });
   document.getElementById('sp-reset').addEventListener('click', function (e) {
     e.preventDefault();
@@ -75,7 +75,7 @@
     atual = { modelo: null, lado: 'chassi' };
     fdView.innerHTML = '';
     spBody.classList.remove('hidden');
-    spToggle.textContent = '▾ Buscar';
+    spToggle.textContent = '▾ Buscar peças';
   });
 
   /* ---------- árvore de seleção: Marca › Modalidade › Categoria › Modelo › Ano ---------- */
@@ -254,7 +254,8 @@
             }).join('') + '</div>' +
             '<div class="thumb-grid">' + secoes.map(function (s) {
               return '<div class="thumb" data-id="' + s.id + '" role="button" tabindex="0">' +
-                '<span class="tn">' + esc(s.numero) + '</span>' + thumbHTML(s, 92) + '</div>';
+                '<span class="tn">' + esc(s.numero) + '</span>' + thumbHTML(s, 92) +
+                '<span class="tnome">' + esc(s.nome) + '</span></div>';
             }).join('') + '</div>' +
             '</div>'
           : '<p class="muted">Nenhuma seção cadastrada para o lado ' +
@@ -659,7 +660,7 @@
       // Tela inicial: limpa e reabre a busca.
       fdView.innerHTML = '';
       spBody.classList.remove('hidden');
-      spToggle.textContent = '▾ Buscar';
+      spToggle.textContent = '▾ Buscar peças';
     }
     window.scrollTo(0, 0);
   }
