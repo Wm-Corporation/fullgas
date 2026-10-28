@@ -6,39 +6,42 @@
   <title>Fullgas — Onde a peça é usada</title>
   <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
   <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
-  <link rel="stylesheet" href="css/styles.css?v=20261028a">
+  <link rel="stylesheet" href="css/styles.css?v=20261028b">
 </head>
-<body data-cache="">
+<body class="fd-marca" data-cache="">
 
   <div class="finder-top">
-    <div>
+    <!-- Fundo da faixa (padrão + símbolo) num irmão com overflow próprio: não afeta sticky. -->
+    <div class="fd-deco" aria-hidden="true"></div>
+    <div class="fd-hero-txt">
       <button class="btn-voltar" id="uso-voltar" type="button">Voltar</button>
-      <h1>Localizador de Peças</h1>
+      <div class="fd-eyebrow">Localizador de Peças</div>
+      <h1>Onde a peça é usada</h1>
+      <p class="fd-sub">Digite o código ou a descrição e veja em quais modelos e seções a peça aparece.</p>
       <div class="who" id="uso-who"></div>
     </div>
     <div class="finder-top-right">
       <a class="fd-cart" href="/loja#/carrinho" title="Ir ao carrinho da loja">🛒<span class="cart-n" id="uso-cart-n">0</span></a>
-      <a href="/portal" title="Voltar ao portal" style="text-decoration:none;display:inline-flex;align-items:center;"><img src="img/Fullgas_logo003.png?v=20260730a" alt="FULLGAS" style="height:30px;width:auto;display:block;"></a>
+      <a class="fd-logo" href="/portal" title="Voltar ao portal"><img src="img/logo-fullgas-marca.png" alt="FULLGAS"></a>
+      <a class="usage-btn" href="/finder">‹ Voltar ao Localizador</a>
     </div>
   </div>
-
-  <a class="btn usage-btn" href="/finder">‹ Voltar ao Localizador</a>
 
   <main class="finder">
     <div class="usage-page">
       <!-- Coluna esquerda: filtros de busca por número do artigo / descrição. -->
-      <aside class="usage-filtros">
+      <aside class="usage-filtros fd-card">
         <label for="uso-sku">Código da peça</label>
         <input id="uso-sku" type="text" placeholder="Ex.: A46003053000">
 
         <label for="uso-desc" style="margin-top:12px;">Descrição da peça</label>
         <input id="uso-desc" type="text" placeholder="">
 
-        <button class="btn" id="uso-search" type="button" style="margin-top:16px;">Buscar</button>
+        <button class="btn fd-btn-buscar" id="uso-search" type="button" style="margin-top:16px;">Buscar</button>
       </aside>
 
       <!-- Resultado: todas as seções que possuem aquele SKU anexado. -->
-      <section class="usage-result">
+      <section class="usage-result fd-card">
         <div class="usage-result-head">
           <h2 id="uso-titulo">Busca:</h2>
           <div class="usage-quick">

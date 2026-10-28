@@ -7,6 +7,13 @@ Jost* (jost-variable.woff2)
   Uso aqui: interface (rotulos, campos, botoes) da tela de acesso.
   Arquivo: subconjunto latino, formato variavel (pesos 300-500).
 
+Poppins (poppins-400/600/800/800-italic.woff2)
+  Autor: Indian Type Foundry / The Poppins Project Authors — https://github.com/itfoundry/Poppins
+  Licenca: SIL Open Font License 1.1 (mesmo texto abaixo)
+  Uso aqui: Localizador de Pecas (finder.html e finder-uso.html), fonte do
+  Manual de Marca. A Eurostile, a outra fonte do manual, e paga e nao vem aqui.
+  Arquivos: subconjunto latino, baixados em 28/10/2026.
+
 Baixadas do Google Fonts em 17/09/2026 e servidas pelo proprio site: a
 Content-Security-Policy usa `font-src 'self'`, entao fonte de outro dominio
 seria bloqueada pelo navegador (ver deploy/nginx/fullgas.conf).

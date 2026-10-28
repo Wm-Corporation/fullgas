@@ -6,32 +6,35 @@
   <title>Fullgas — Localizador de Peças</title>
   <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
   <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
-  <link rel="stylesheet" href="css/styles.css?v=20261028a">
+  <link rel="stylesheet" href="css/styles.css?v=20261028b">
 </head>
-<body data-cache="products">
+<body class="fd-marca" data-cache="products">
 
   <div class="finder-top">
-    <div>
+    <!-- Fundo da faixa (padrão + símbolo) num irmão com overflow próprio: não afeta sticky. -->
+    <div class="fd-deco" aria-hidden="true"></div>
+    <div class="fd-hero-txt">
       <!-- Único botão VOLTAR do finder (o comportamento está no finder.js). -->
       <button class="btn-voltar" id="fd-voltar" type="button">Voltar</button>
+      <div class="fd-eyebrow">Peças originais Fullgas</div>
       <h1>Localizador de Peças</h1>
+      <p class="fd-sub">Encontre a peça certa pelo chassi, pelo motor ou pelo modelo da moto.</p>
       <div class="who" id="fd-who"></div>
     </div>
     <div class="finder-top-right">
       <!-- mesma cesta da loja: as peças marcadas aqui viram pedido lá -->
       <a class="fd-cart" href="/loja#/carrinho" title="Ir ao carrinho da loja">🛒<span class="cart-n" id="fd-cart-n">0</span></a>
-      <a href="/portal" title="Voltar ao portal" style="text-decoration:none;display:inline-flex;align-items:center;"><img src="img/Fullgas_logo003.png?v=20260730a" alt="FULLGAS" style="height:30px;width:auto;display:block;"></a>
+      <a class="fd-logo" href="/portal" title="Voltar ao portal"><img src="img/logo-fullgas-marca.png" alt="FULLGAS"></a>
+      <button class="usage-btn" id="btn-usage" type="button">Onde a peça é usada?</button>
     </div>
   </div>
-
-  <button class="btn usage-btn" id="btn-usage" type="button">Onde a peça é usada</button>
 
   <main class="finder">
 
     <!-- ====== painel de busca ====== -->
     <div class="search-panel" id="search-panel">
-      <button class="sp-title" id="sp-toggle" type="button">▾ Buscar</button>
-      <a href="#" class="reset" id="sp-reset">[Limpar]</a>
+      <button class="sp-title" id="sp-toggle" type="button">▾ Buscar peças</button>
+      <a href="#" class="reset" id="sp-reset">Limpar</a>
 
       <div id="sp-body">
         <div class="sp-grid">
@@ -43,16 +46,16 @@
             <input id="sp-eng" type="text" placeholder="">
 
             <label style="margin-top:12px;">Parte da moto</label>
-            <div class="radio-line">
+            <div class="radio-line fd-seg">
               <label><input type="radio" name="sp-cat" value="engine"> Motor</label>
               <label><input type="radio" name="sp-cat" value="chassi" checked> Chassi</label>
             </div>
 
-            <button class="btn" id="sp-search" type="button">Buscar</button>
+            <button class="btn fd-btn-buscar" id="sp-search" type="button">Buscar</button>
           </div>
 
           <div>
-            <label>Escolher o modelo</label>
+            <label>Ou escolha o modelo</label>
             <!-- Cascata: Marca › Modalidade › Categoria › Modelo › Ano -->
             <div class="model-cascade" id="model-cascade">
               <select id="mc-marca"><option value="">Marca…</option></select>
@@ -73,7 +76,7 @@
   <script src="js/store.js?v=20261027c"></script>
   <script src="js/api-adapter.js?v=20261027d"></script>
   <script src="js/ao-vivo.js?v=20260831a"></script>
-  <script src="js/finder.js?v=20261027c"></script>
+  <script src="js/finder.js?v=20261028a"></script>
   <script src="js/suporte.js?v=20260831a"></script>
 </body>
 </html>
