@@ -2,17 +2,19 @@
    FULLGAS B2B — estilos (auth + portal + loja + finder)
    ========================================================= */
 :root {
-  /* Cores da marca. "--red*" é nome histórico: --red = amarelo, --red-dark = dourado para texto. */
-  --red: #e5b100;
-  --red-dark: #c69a00;
-  --red-soft: #fdf3d3;
+  /* Cores do Manual de Marca. "--red*" é nome histórico: --red = amarelo #d7af0c, --red-dark = dourado #917709
+     (texto e bordas), --red-hover = amarelo escurecido para o hover de botões. */
+  --red: #d7af0c;
+  --red-dark: #917709;
+  --red-hover: #c49f08;
+  --red-soft: #f9f2d6;
   --ink: #1c1c1c;
   --gray: #6e6e6e;
   --tab: #e9e9e9;
   --line: #d9d9d9;
   --bg: #ffffff;
   --green: #2e9e44;
-  --yellow: #e0b400;
+  --yellow: #d7af0c;
   --shadow: 0 2px 10px rgba(0, 0, 0, .12);
   --font: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   /* Zoom da interface. Dentro do body 100vh = 110% da janela: use calc(100vh / var(--zoom-ui)). */
@@ -69,7 +71,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
 }
 .btn:hover { background: #e8e8e8; }
 .btn.red { background: var(--red); border-color: var(--red); color: var(--ink); font-weight: 600; }
-.btn.red:hover { background: var(--red-dark); }
+.btn.red:hover { background: var(--red-hover); }
 .btn.dark { background: #4a4a4a; border-color: #4a4a4a; color: #fff; text-transform: uppercase; font-weight: 600; }
 .btn.dark:hover { background: #333; }
 .btn.ghost { background: transparent; border: none; color: var(--red); padding: 4px 6px; }
@@ -139,7 +141,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .badge.proc { border-color: #999; }
 .badge.ok { border-color: var(--green); color: var(--green); }
 .badge.bad { border-color: #b91c1c; color: #b91c1c; } /* estado ruim: vermelho semântico */
-.badge.draft { border-color: var(--yellow); color: #9c7e00; }
+.badge.draft { border-color: var(--yellow); color: var(--red-dark); }
 
 .stock-ok { color: var(--green); font-weight: 600; }
 .stock-ok::before { content: "■ "; }
@@ -356,7 +358,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
   background: var(--red); color: var(--ink); border: none; border-radius: 3px;
   padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
 }
-.imp-bar .imp-sair:hover { background: var(--red-dark); }
+.imp-bar .imp-sair:hover { background: var(--red-hover); }
 @media print { .imp-bar { display: none; } }
 
 /* Link-botão discreto do card de acesso ("Esqueci minha senha", "Voltar"). */
@@ -396,8 +398,8 @@ img.logo { display: block; height: 38px; width: auto; }
 .icon-btn .pill.novo { animation: notif-chegou 1.2s ease-in-out 5; }
 @keyframes notif-chegou {
   0%, 100% { transform: scale(1); box-shadow: none; }
-  30%      { transform: scale(1.35); box-shadow: 0 0 0 6px rgba(229, 177, 0, .35); }
-  60%      { transform: scale(1); box-shadow: 0 0 0 10px rgba(229, 177, 0, 0); }
+  30%      { transform: scale(1.35); box-shadow: 0 0 0 6px rgba(215, 175, 12, .35); }
+  60%      { transform: scale(1); box-shadow: 0 0 0 10px rgba(215, 175, 12, 0); }
 }
 @media (prefers-reduced-motion: reduce) {
   .icon-btn .pill.novo { animation: none; outline: 2px solid var(--ink); outline-offset: 2px; }
@@ -672,11 +674,24 @@ th[aria-sort="descending"] .th-ord::after { content: "▼"; opacity: 1; color: v
 .shop-head .sh-user { font-size: 11px; opacity: .95; }
 .shop-head a { color: #fff; }
 .shop-head .menu-btn { background: none; border: none; color: var(--ink); font-weight: 700; cursor: pointer; font-size: 14px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
-/* Busca no meio do cabeçalho (260 a 560px). */
-.shop-head .sh-search { display: flex; align-items: center; border-bottom: 1px solid var(--ink); flex: 1 1 260px; max-width: 560px; }
-.shop-head .sh-search input { background: transparent; border: none; color: var(--ink); padding: 7px 4px; width: 100%; min-width: 0; font-size: 14px; }
-.shop-head .sh-search input::placeholder { color: rgba(28, 28, 28, .55); }
-.shop-head .sh-search button { background: none; border: none; color: var(--ink); cursor: pointer; }
+/* Busca no meio do cabeçalho (280 a 620px): caixa branca com borda escura, bem visível sobre o amarelo. */
+.shop-head .sh-search {
+  display: flex; align-items: stretch; flex: 1 1 280px; max-width: 620px; height: 44px;
+  background: #fff; border: 2px solid var(--ink); border-radius: 24px; overflow: hidden;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .14); transition: box-shadow .15s;
+}
+.shop-head .sh-search:focus-within { box-shadow: 0 0 0 4px rgba(255, 255, 255, .7), 0 3px 12px rgba(0, 0, 0, .2); }
+.shop-head .sh-search input {
+  background: transparent; border: none; outline: none; color: var(--ink);
+  padding: 0 8px 0 18px; width: 100%; min-width: 0; font-size: 15px;
+}
+.shop-head .sh-search input::placeholder { color: #8a8780; }
+.shop-head .sh-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.shop-head .sh-search button {
+  flex: none; width: 52px; background: var(--ink); border: none; color: var(--red);
+  cursor: pointer; display: grid; place-items: center; transition: background .15s;
+}
+.shop-head .sh-search button:hover { background: #000; }
 /* Bloco da direita (Localizador + ícones), empurrado para a ponta. */
 .shop-head .sh-direita { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 12px 20px; margin-left: auto; }
 .shop-head .sh-icons { display: flex; align-items: center; gap: 12px; }
@@ -1044,16 +1059,16 @@ main.finder { padding: 8px 28px 70px; }
   width: 100%; padding: 11px 34px 11px 36px; font-size: 14px;
   border: 1px solid #ddd; border-radius: 8px; background: #fff;
 }
-.pt-busca input:focus { outline: none; border-color: var(--red); box-shadow: 0 0 0 3px rgba(229,177,0,.18); }
+.pt-busca input:focus { outline: none; border-color: var(--red); box-shadow: 0 0 0 3px rgba(215, 175, 12,.18); }
 .pt-busca .lupa { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #9a9a9a; font-size: 14px; pointer-events: none; }
 .pt-busca .limpa { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #999; font-size: 16px; cursor: pointer; line-height: 1; padding: 4px; }
 .pt-busca .limpa:hover { color: var(--red); }
 .part-row.oculta { display: none; }
 
 /* Hotspot sempre visível; preto no hover/seleção. O número não aparece ao cliente. */
-.hotspot { position: absolute; background: rgba(229, 177, 0, .14); border: 2px solid var(--red); cursor: pointer; padding: 0; border-radius: 3px; }
-.hotspot:hover, .hotspot.hover { border-color: var(--ink); background: rgba(229, 177, 0, .28); }
-.hotspot.on { border-color: var(--ink); background: rgba(229, 177, 0, .38); box-shadow: 0 0 0 1px rgba(28, 28, 28, .45); }
+.hotspot { position: absolute; background: rgba(215, 175, 12, .14); border: 2px solid var(--red); cursor: pointer; padding: 0; border-radius: 3px; }
+.hotspot:hover, .hotspot.hover { border-color: var(--ink); background: rgba(215, 175, 12, .28); }
+.hotspot.on { border-color: var(--ink); background: rgba(215, 175, 12, .38); box-shadow: 0 0 0 1px rgba(28, 28, 28, .45); }
 
 /* modal com a foto do modelo (Show Image) */
 .modal.modal-img { max-width: 720px; }
@@ -1310,7 +1325,7 @@ body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
 .sup-fab.tem-novidade { animation: sup-pulso 2.4s ease-in-out infinite; }
 @keyframes sup-pulso {
   0%, 100% { box-shadow: 0 4px 16px rgba(0, 0, 0, .28); }
-  50% { box-shadow: 0 4px 16px rgba(0, 0, 0, .28), 0 0 0 8px rgba(229, 177, 0, .28); }
+  50% { box-shadow: 0 4px 16px rgba(0, 0, 0, .28), 0 0 0 8px rgba(215, 175, 12, .28); }
 }
 @media (prefers-reduced-motion: reduce) {
   .sup-fab.tem-novidade { animation: none; }
@@ -1375,7 +1390,7 @@ body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
   font-weight: 700; font-size: 13px; padding: 9px; border-radius: 6px;
   cursor: pointer; font-family: inherit;
 }
-.sup-enviar:hover { background: var(--red-dark); }
+.sup-enviar:hover { background: var(--red-hover); }
 .sup-enviar:disabled { opacity: .55; cursor: not-allowed; }
 .sup-cancelar {
   background: #f1f1f1; border: 1px solid var(--line); color: var(--ink);
@@ -1503,7 +1518,7 @@ body:has(.modal-back, .midia-viewer) .sup-widget { display: none; }
 @font-face { font-family: 'Poppins'; font-weight: 800; font-style: italic; font-display: swap; src: url(../fonts/poppins-800-italic.woff2) format('woff2'); }
 
 body.fd-marca {
-  --fg-amarelo: #d7af0c; --fg-carvao: #2e2d2c; --fg-ouro: #917709; --fg-creme: #fbf5dc;
+  --fg-amarelo: var(--red); --fg-carvao: #2e2d2c; --fg-ouro: var(--red-dark); --fg-creme: #fbf5dc;
   font-family: 'Poppins', var(--font); background: #f6f5f2;
 }
 .fd-marca h1, .fd-marca h2, .fd-marca .finder-model-name { font-family: 'Poppins', var(--font); }
@@ -1669,3 +1684,5 @@ body.fd-marca {
   .fd-marca main.finder { padding-left: 14px; padding-right: 14px; }
   .fd-marca .search-panel { padding: 16px 16px 20px; }
 }
+/* Registrar venda: subtítulo do bloco de endereço. */
+.vd-sec { margin: 18px 0 8px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--gray); }

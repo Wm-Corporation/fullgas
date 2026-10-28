@@ -1660,6 +1660,17 @@
   /* =========================================================
      AÇÕES DO VEÍCULO
      ========================================================= */
+  // O banco guarda o endereço do comprador numa coluna só (Veiculo.ClienteEndereco, até 300
+  // caracteres), exibida como uma linha na ficha do veículo. Recebe { cep, logradouro, numero,
+  // complemento, bairro, cidade, uf } (strings, podem vir vazias) e devolve essa linha.
+  function montarEnderecoVenda(e) {
+    var rua = [e.logradouro, e.numero, e.complemento].filter(Boolean).join(', ');
+    var cidade = [e.cidade, e.uf].filter(Boolean).join(' / ');
+    var cep = e.cep ? 'CEP ' + e.cep : '';
+    var partes = [rua, e.bairro, cidade, cep];
+    return partes.filter(Boolean).join(' - ').slice(0,300);
+  }
+
   // Registrar a venda. onDone() após sucesso.
   function modalVenda(v, onDone) {
     var back = document.createElement('div');
@@ -1674,7 +1685,17 @@
       '<div class="field"><label>CPF</label><input id="vd-cpf" type="text" inputmode="numeric" placeholder="000.000.000-00" maxlength="14"></div>' +
       '<div class="field"><label>Telefone</label><input id="vd-tel" type="tel" placeholder="(00) 00000-0000"></div>' +
       '<div class="field full"><label>E-mail pessoal</label><input id="vd-email" type="email" placeholder="cliente@email.com"></div>' +
-      '<div class="field full"><label>Endereço</label><input id="vd-end" type="text" placeholder="Rua, número, bairro, cidade/UF, CEP"></div>' +
+      '</div>' +
+      // Endereço em campos separados, como no cadastro: o CEP preenche o resto pelo ViaCEP.
+      '<h4 class="vd-sec">Endereço do comprador</h4>' +
+      '<div class="form-grid">' +
+      '<div class="field"><label for="vd-cep">CEP</label><input id="vd-cep" type="text" inputmode="numeric" maxlength="9" placeholder="00000-000"></div>' +
+      '<div class="field"><label for="vd-bairro">Bairro</label><input id="vd-bairro" type="text" placeholder="Bairro"></div>' +
+      '<div class="field full"><label for="vd-log">Logradouro</label><input id="vd-log" type="text" placeholder="Rua / Avenida"></div>' +
+      '<div class="field"><label for="vd-num">Número</label><input id="vd-num" type="text" inputmode="numeric" placeholder="123"></div>' +
+      '<div class="field"><label for="vd-comp">Complemento</label><input id="vd-comp" type="text" placeholder="Apto, bloco (opcional)"></div>' +
+      '<div class="field"><label for="vd-cidade">Cidade</label><input id="vd-cidade" type="text" placeholder="Cidade"></div>' +
+      '<div class="field"><label for="vd-uf">UF</label><input id="vd-uf" type="text" maxlength="2" placeholder="SP" style="text-transform:uppercase;"></div>' +
       '</div></div>' +
       '<div class="modal-foot"><button class="btn-line" id="vd-canc">Cancelar</button>' +
       '<button class="btn red" id="vd-ok">Confirmar venda</button></div></div>';
@@ -1696,15 +1717,46 @@
       cpf.value = out;
     });
 
+    // Mesmas máscaras e busca de CEP da "Minha conta".
+    FG.bindMask('vd-num', FG.maskNumero);
+    FG.bindMask('vd-cidade', FG.maskCidade);
+    var cepBuscado = '';
+    FG.bindMask('vd-cep', FG.maskCep, function (valor, el) {
+      var dig = valor.replace(/\D/g, '');
+      if (dig.length !== 8 || dig === cepBuscado) return;
+      cepBuscado = dig;
+      el.classList.add('buscando');
+      fetch('https://viacep.com.br/ws/' + dig + '/json/')
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.erro) { FG.toast('CEP não encontrado — preencha o endereço manualmente.', 'erro'); return; }
+          if (d.logradouro) document.getElementById('vd-log').value = d.logradouro;
+          if (d.bairro) document.getElementById('vd-bairro').value = d.bairro;
+          if (d.localidade) document.getElementById('vd-cidade').value = d.localidade;
+          if (d.uf) document.getElementById('vd-uf').value = d.uf;
+          document.getElementById('vd-num').focus();
+        })
+        .catch(function () { })
+        .then(function () { el.classList.remove('buscando'); });
+    });
+
     document.getElementById('vd-ok').addEventListener('click', async function () {
-      var nome = document.getElementById('vd-nome').value.trim();
+      var val = function (id) { return document.getElementById(id).value.trim(); };
+      var nome = val('vd-nome');
       if (!nome) { FG.toast('Informe o nome do cliente.'); return; }
+      var end = {
+        cep: val('vd-cep'), logradouro: val('vd-log'), numero: val('vd-num'), complemento: val('vd-comp'),
+        bairro: val('vd-bairro'), cidade: val('vd-cidade'), uf: val('vd-uf').toUpperCase()
+      };
+      // Endereço é opcional; se começou a preencher, o CEP tem de estar completo.
+      var algum = Object.keys(end).some(function (k) { return end[k]; });
+      if (algum && end.cep.replace(/\D/g, '').length !== 8) { FG.toast('CEP incompleto.', 'erro'); return; }
       var r = await FG.registrarVenda(v.niv, {
         cliente: nome,
-        cpf: document.getElementById('vd-cpf').value.trim(),
-        telefone: document.getElementById('vd-tel').value.trim(),
-        email: document.getElementById('vd-email').value.trim(),
-        endereco: document.getElementById('vd-end').value.trim()
+        cpf: val('vd-cpf'),
+        telefone: val('vd-tel'),
+        email: val('vd-email'),
+        endereco: algum ? montarEnderecoVenda(end) : ''
       });
       if (!r.ok) { FG.toast(r.msg || 'Não foi possível registrar a venda.'); return; }
       fechar();
@@ -2190,7 +2242,7 @@
     var bos = i.blackOrders || [];
 
     // Estilos inline (o print-area é isolado), tamanhos para A4.
-    var thBase = 'text-align:left;padding:9px 8px;border-bottom:2px solid #e5b100;font-size:14px;';
+    var thBase = 'text-align:left;padding:9px 8px;border-bottom:2px solid #d7af0c;font-size:14px;';
     var tdBase = 'padding:9px 8px;border-bottom:1px solid #e5e5e5;font-size:14px;vertical-align:top;';
     var lbl = 'font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.4px;';
     var val = 'font-size:15px;font-weight:700;color:#222;';
@@ -2205,7 +2257,7 @@
     var logo = window.FG_LOGO
       ? '<img src="' + window.FG_LOGO + '" alt="FULLGAS" width="110" height="70" ' +
         'style="width:110px;height:70px;display:block;flex:0 0 110px;">'
-      : '<div style="font-size:26px;font-weight:800;font-style:italic;color:#e5b100;">FULLGAS</div>';
+      : '<div style="font-size:26px;font-weight:800;font-style:italic;color:#d7af0c;">FULLGAS</div>';
 
     // Padding lateral na raiz: o html2pdf clona só este elemento (sem ele, a logo sai cortada).
     return '<div style="font-family:Arial,Helvetica,sans-serif;color:#222;' +
@@ -2277,13 +2329,13 @@
       '<td style="padding:8px 12px;text-align:right;font-size:15px;">' + itens.length + '</td></tr>' +
       '<tr><td style="padding:8px 12px;font-size:15px;">Total de peças</td>' +
       '<td style="padding:8px 12px;text-align:right;font-size:15px;">' + pecas + '</td></tr>' +
-      '<tr><td style="padding:12px;font-size:19px;font-weight:800;border-top:2px solid #e5b100;">Total</td>' +
-      '<td style="padding:12px;text-align:right;font-size:19px;font-weight:800;border-top:2px solid #e5b100;">' + FG.fmtMoney(total) + '</td></tr>' +
+      '<tr><td style="padding:12px;font-size:19px;font-weight:800;border-top:2px solid #d7af0c;">Total</td>' +
+      '<td style="padding:12px;text-align:right;font-size:19px;font-weight:800;border-top:2px solid #d7af0c;">' + FG.fmtMoney(total) + '</td></tr>' +
       '</table></div>' +
 
       /* ---- peças da compra em black order (não cobradas) ---- */
       (bos.length
-        ? '<div style="margin-top:20px;border:1px solid #e5e5e5;border-left:4px solid #e5b100;padding:10px 14px;">' +
+        ? '<div style="margin-top:20px;border:1px solid #e5e5e5;border-left:4px solid #d7af0c;padding:10px 14px;">' +
           '<div style="' + lbl + '">Peças desta compra em black order — não cobradas nesta fatura</div>' +
           '<div style="font-size:14px;line-height:1.6;margin-top:4px;">' +
           bos.map(function (b) { return esc(b.sku) + ' — ' + esc(b.nome) + ': ' + b.qtd + ' un.'; }).join('<br>') +
