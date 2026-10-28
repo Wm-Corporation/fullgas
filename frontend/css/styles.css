@@ -15,13 +15,13 @@
   --yellow: #e0b400;
   --shadow: 0 2px 10px rgba(0, 0, 0, .12);
   --font: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  /* Zoom da interface. Dentro do body 100vh = 115% da janela: use calc(100vh / var(--zoom-ui)). */
-  --zoom-ui: 1.15;
+  /* Zoom da interface. Dentro do body 100vh = 110% da janela: use calc(100vh / var(--zoom-ui)). */
+  --zoom-ui: 1.10;
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-/* Zoom geral de 15%. Impressão e PDF voltam para 1. */
+/* Zoom geral de 10% (o site abre como se o navegador estivesse em 110%). Impressão e PDF voltam para 1. */
 body { font-family: var(--font); font-size: 14px; color: var(--ink); background: var(--bg); zoom: var(--zoom-ui); }
 a { color: var(--red); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -508,13 +508,35 @@ main.portal { padding: 0 22px 60px; }
 .claim-filters .cl-filter { width: 100%; min-width: 0; font-size: 11px; padding: 3px 5px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
 @media (max-width: 1000px) { .row-claim, .claim-head { grid-template-columns: 1fr 1fr 1fr; } .claim-head, .claim-filters { display: none; } }
 
-/* notificações */
-.notif { border: 1px solid var(--line); border-left: 4px solid #bbb; padding: 13px 16px; margin-bottom: 10px; display: flex; gap: 14px; align-items: flex-start; background: #fff; }
+/* notificações: filtros por categoria, agrupadas por período */
+.nt-cab { display: flex; align-items: center; gap: 10px; }
+.nt-resumo { background: var(--ink); color: #fff; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 12px; }
+.nt-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 18px; }
+.nt-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 18px; padding: 6px 13px; font: inherit; font-size: 13px; cursor: pointer; }
+.nt-chip:hover { border-color: var(--ink); }
+.nt-chip.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.nt-chip.crit:not(.on) { border-color: #f1c4c4; color: #b91c1c; }
+.nt-chip-n { font-size: 12px; opacity: .7; }
+.nt-chip-novas { background: var(--red); color: var(--ink); font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; }
+.nt-periodo { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--gray); margin: 18px 0 8px; }
+.nt-periodo:first-of-type { margin-top: 0; }
+.notif { border: 1px solid var(--line); border-left: 4px solid #bbb; border-radius: 6px; padding: 13px 16px; margin-bottom: 10px; display: flex; gap: 14px; align-items: flex-start; background: #fff; }
+.notif.cat-comunicados { border-left-color: var(--red); }
+.notif.cat-pedidos { border-left-color: #2563eb; }
+.notif.cat-blackorder { border-left-color: var(--ink); }
+.notif.cat-suporte { border-left-color: var(--green); }
 .notif.critica { border-left-color: #b91c1c; } /* crítica: vermelho semântico */
-.notif.unread { background: #fdf6f4; }
-.notif .nt-body { flex: 1; }
+.notif.unread { background: #fffbea; }
+.notif .nt-icone { flex: none; width: 36px; height: 36px; border-radius: 50%; background: #f3f3f3; display: grid; place-items: center; font-size: 17px; }
+.notif.critica .nt-icone { background: #fde8e8; color: #b91c1c; }
+.notif .nt-body { flex: 1; min-width: 0; }
+.notif .nt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 3px; }
+.notif .nt-cat { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--gray); }
+.notif .nt-crit { font-size: 11px; font-weight: 700; color: #b91c1c; background: #fde8e8; padding: 1px 7px; border-radius: 10px; }
+.notif .nt-nova { font-size: 11px; font-weight: 700; color: var(--ink); background: var(--red); padding: 1px 7px; border-radius: 10px; }
 .notif .nt-title { font-weight: 700; }
-.notif .nt-date { font-size: 12px; color: var(--gray); }
+.notif .nt-texto { white-space: pre-line; margin-top: 2px; }
+.notif .nt-date { font-size: 12px; color: var(--gray); margin-left: auto; }
 
 /* ações do veículo */
 .veh-card { border: 1px solid var(--line); padding: 18px 20px; max-width: 720px; background: #fff; box-shadow: var(--shadow); }
