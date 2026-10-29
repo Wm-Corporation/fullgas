@@ -669,15 +669,16 @@ th[aria-sort="descending"] .th-ord::after { content: "▼"; opacity: 1; color: v
 /* =========================================================
    LOJA (loja.html)
    ========================================================= */
-/* Cabeçalho: linha amarela (marca, busca, atalhos) + barra escura de categorias. */
+/* Cabeçalho: marca, MENU, busca e atalhos. */
 .shop-head { background: var(--red); color: var(--ink); position: relative; z-index: 70; }
 .shop-head .sh-linha { display: flex; align-items: center; gap: 22px; padding: 10px 18px; }
-.shop-head .sh-title { font-weight: 800; font-size: 19px; color: var(--ink); white-space: nowrap; letter-spacing: .3px; }
-.shop-head .sh-title span { font-weight: 500; }
+.shop-head .sh-marca { flex: none; min-width: 0; }
+.shop-head .sh-title { display: inline-block; font-weight: 800; font-size: 19px; color: var(--ink); text-decoration: none; }
 .shop-head .sh-title:hover { text-decoration: none; }
+.shop-head .sh-user { font-size: 11px; opacity: .95; }
 .shop-head .menu-btn {
-  display: none; flex: none; width: 42px; height: 42px; border-radius: 10px; border: none;
-  background: var(--ink); color: var(--red); cursor: pointer; place-items: center;
+  flex: none; background: none; border: none; color: var(--ink); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; letter-spacing: 1px; padding: 6px 4px;
 }
 /* Busca no meio do cabeçalho: caixa branca com borda escura, bem visível sobre o amarelo. */
 .shop-head .sh-search {
@@ -712,29 +713,7 @@ th[aria-sort="descending"] .th-ord::after { content: "▼"; opacity: 1; color: v
   font-size: 11px; font-weight: 800; line-height: 20px; text-align: center;
 }
 
-/* Barra de categorias */
-.sh-nav { background: var(--ink); display: flex; align-items: stretch; justify-content: space-between; padding: 0 10px; min-height: 42px; }
-.sh-nav .sn-cats, .sh-nav .sn-dir { display: flex; align-items: stretch; }
-.sh-nav .sn-item { position: relative; display: flex; }
-.sh-nav .sn-link, .sh-nav .sn-dir a {
-  display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; color: #fff;
-  font-size: 12.5px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; white-space: nowrap;
-  border-bottom: 3px solid transparent;
-}
-.sh-nav .sn-link:hover, .sh-nav .sn-item:focus-within > .sn-link, .sh-nav .sn-dir a:hover { color: var(--red); text-decoration: none; }
-.sh-nav .sn-link.on { color: var(--red); border-bottom-color: var(--red); }
-.sh-nav .sn-dir .sn-user { font-weight: 500; text-transform: none; letter-spacing: 0; color: #cfcac0; font-size: 12px; }
-/* Subcategorias: abrem ao passar o mouse ou ao focar pelo teclado. */
-.sh-nav .sn-drop {
-  position: absolute; top: 100%; left: 0; min-width: 240px; background: #fff; border-radius: 0 0 10px 10px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, .18); padding: 6px 0; display: none; z-index: 80;
-}
-.sh-nav .sn-item.tem-sub:hover .sn-drop, .sh-nav .sn-item.tem-sub:focus-within .sn-drop { display: block; }
-.sh-nav .sn-drop a { display: flex; justify-content: space-between; gap: 18px; padding: 10px 16px; color: var(--ink); font-size: 13px; }
-.sh-nav .sn-drop a:hover { background: var(--red-soft); text-decoration: none; }
-.sh-nav .sn-drop a span { color: #999; font-size: 12px; }
-
-/* Gaveta do menu (celular) */
+/* Menu lateral (botão MENU) */
 .drawer-back { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 300; }
 .shop-drawer {
   position: fixed; top: 0; bottom: 0; left: 0; width: min(330px, 86vw); background: #fff; z-index: 310;
@@ -811,13 +790,19 @@ main.shop { padding: 0 18px 70px; }
 
 .shop-layout { display: grid; grid-template-columns: 280px 1fr; gap: 34px; align-items: start; }
 @media (max-width: 940px) { .shop-layout { grid-template-columns: 1fr; } }
-.shop-side h4 { font-size: 13px; letter-spacing: 1px; margin-bottom: 14px; }
-.shop-side .cat-link { display: block; padding: 7px 4px; font-size: 12px; font-weight: 600; color: var(--ink); text-transform: uppercase; border: none; background: none; cursor: pointer; text-align: left; width: 100%; }
+.shop-side { position: sticky; top: 16px; }
+.shop-side h4 { font-size: 13px; letter-spacing: 1px; margin-bottom: 10px; }
+.shop-side .side-grupo { padding: 6px 0 8px; border-bottom: 1px solid #eee; }
+.shop-side .side-grupo:last-child { border-bottom: 0; }
+.shop-side .cat-link { display: block; padding: 7px 8px; font-size: 12px; font-weight: 700; color: var(--ink); text-transform: uppercase; border: none; background: none; cursor: pointer; text-align: left; width: 100%; border-radius: 6px; }
+.shop-side .cat-link:hover { background: #f6f4ee; }
 .shop-side .cat-link.on { color: var(--red); }
 .shop-side .cat-link.on::before { content: "● "; font-size: 9px; vertical-align: 2px; }
 .shop-side .cat-link span { color: #999; font-weight: 400; }
-.shop-side .cat-link.sub { padding-left: 18px; font-size: 11px; text-transform: none; font-weight: 500; color: #555; }
-.shop-side .cat-link.sub.on { color: var(--red); font-weight: 700; }
+.shop-side .cat-link.sub { padding: 6px 8px 6px 20px; font-size: 12.5px; text-transform: none; font-weight: 500; color: #555; border-left: 2px solid #eee; border-radius: 0 6px 6px 0; margin-left: 8px; width: calc(100% - 8px); }
+.shop-side .cat-link.sub:hover { color: var(--ink); border-left-color: var(--ink); }
+.shop-side .cat-link.sub.on { color: var(--red-dark); font-weight: 700; border-left-color: var(--red); background: var(--red-soft); }
+.shop-side .cat-link.sub.on::before { content: none; }
 
 /* chips de subcategoria acima da lista de produtos (drill-in rápido) */
 .subcat-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
@@ -1736,16 +1721,16 @@ body.fd-marca {
    ========================================================= */
 @media (max-width: 1100px) {
   .shop-head .sh-acao:not(.sh-cart) span { display: none; }
-  .sh-nav .sn-user { display: none !important; }
 }
 @media (max-width: 900px) {
   /* Celular/tablet: ☰ + marca + carrinho; a busca desce para a linha de baixo; categorias na gaveta. */
   .shop-head .sh-linha { flex-wrap: wrap; gap: 10px 12px; padding: 10px 14px 12px; }
-  .shop-head .menu-btn { display: grid; }
-  .shop-head .sh-title { margin-right: auto; }
+  .shop-head .menu-btn { order: -1; width: 42px; height: 42px; padding: 0; border-radius: 10px; background: var(--ink); color: var(--red); justify-content: center; }
+  .shop-head .menu-btn .mb-txt { display: none; }
+  .shop-head .sh-marca { flex: 1 1 0; }
+  .shop-head .sh-user { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .shop-head .sh-search { order: 3; flex-basis: 100%; max-width: none; height: 42px; }
   .shop-head .sh-acao:not(.sh-cart) { display: none; }
-  .sh-nav { display: none; }
   .shop-layout .shop-side { display: none; }
   .page-band { margin-bottom: 14px; }
   .page-band .bc { padding: 10px 14px; }
