@@ -54,28 +54,14 @@
     return FG.all('products').filter(function (p) { return ids.indexOf(p.cat) >= 0; }).length;
   }
 
-  /* ---------- barra de categorias (computador) e gaveta (celular) ---------- */
-  var nav = document.getElementById('sh-nav');
+  /* ---------- menu lateral ---------- */
   var drawer = document.getElementById('shop-drawer');
   var drawerBack = document.getElementById('drawer-back');
   var menuBtn = document.getElementById('menu-btn');
   var usuario = esc(sess.nome) + ' · ' + esc(FG.empresaDaSessao(sess));
+  document.getElementById('sh-user').innerHTML = esc(sess.nome) + '  -  ' + esc(FG.empresaDaSessao(sess)) + '  ›';
 
-  nav.innerHTML = '<div class="sn-cats">' + FG.categoriasTopo().map(function (c) {
-    var subs = FG.subcategorias(c.id);
-    var link = '<a class="sn-link" data-topo="' + esc(c.id) + '" href="#/categoria/' + esc(c.id) + '">' + esc(c.nome) +
-      (subs.length ? ' <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>' : '') + '</a>';
-    if (!subs.length) return '<div class="sn-item">' + link + '</div>';
-    return '<div class="sn-item tem-sub">' + link + '<div class="sn-drop">' +
-      '<a href="#/categoria/' + esc(c.id) + '"><b>Tudo em ' + esc(c.nome) + '</b><span>' + contaCategoria(c.id) + '</span></a>' +
-      subs.map(function (s) {
-        return '<a href="#/categoria/' + esc(s.id) + '">' + esc(s.nome) + '<span>' + contaCategoria(s.id) + '</span></a>';
-      }).join('') + '</div></div>';
-  }).join('') + '</div>' +
-    '<div class="sn-dir"><a class="sn-loc" href="/finder">Localizador de peças</a>' +
-    '<a class="sn-user" href="/portal" title="Voltar ao portal">' + usuario + ' · Portal ›</a></div>';
-
-  // Gaveta: categorias em sanfona, depois os atalhos.
+  // Menu lateral: categorias em sanfona, depois os atalhos.
   drawer.innerHTML = '<div class="dw-head"><div><b>Menu da loja</b><small>' + usuario + '</small></div>' +
     '<button type="button" class="dw-x" id="dw-x" aria-label="Fechar o menu">✕</button></div>' +
     '<div class="dw-corpo"><h5>Categorias</h5>' + FG.categoriasTopo().map(function (c) {
@@ -103,7 +89,7 @@
   drawerBack.addEventListener('click', function () { abrirMenu(false); });
   document.getElementById('dw-x').addEventListener('click', function () { abrirMenu(false); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !drawer.hidden) abrirMenu(false); });
-  // Escolher um destino fecha a gaveta (o hashchange redesenha a página).
+  // Escolher um destino fecha o menu (o hashchange redesenha a página).
   drawer.addEventListener('click', function (e) { if (e.target.closest('a')) abrirMenu(false); });
 
   // Categoria de topo da página atual (ou null) — usada para marcar o menu.
@@ -119,7 +105,7 @@
     return cat.pai || cat.id;
   }
 
-  // Marca no menu e na gaveta onde o cliente está.
+  // Marca no menu lateral onde o cliente está.
   function marcarMenu(partes) {
     var topo = topoDaRota(partes);
     Array.prototype.forEach.call(document.querySelectorAll('[data-topo]'), function (el) {
@@ -258,25 +244,24 @@
     if (pagina > totalPag) pagina = totalPag;
     var lista = todos.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
 
-    // Sidebar: categorias de topo e as subcategorias da ativa.
+    // Barra lateral: todas as categorias de topo, cada uma com as suas subcategorias.
     function contaCat(id) {
       var ids = FG.categoriaEDescendentes(id);
       return FG.all('products').filter(function (p) { return ids.indexOf(p.cat) >= 0; }).length;
     }
     var side = '<aside class="shop-side"><h4>CATEGORIAS</h4>' +
       FG.categoriasTopo().map(function (c) {
-        var ativa = c.id === catId || (cat && cat.pai === c.id);
-        var html = '<button class="cat-link' + (c.id === catId ? ' on' : '') + '" data-cat="' + esc(c.id) + '">' +
+        var html = '<div class="side-grupo"><button class="cat-link' + (c.id === catId ? ' on' : '') + '" data-cat="' + esc(c.id) + '">' +
           esc(c.nome) + ' <span>(' + contaCat(c.id) + ')</span></button>';
         var subs = FG.subcategorias(c.id);
-        if (subs.length && ativa) {
+        if (subs.length) {
           html += subs.map(function (s) {
             var ns = FG.all('products').filter(function (p) { return p.cat === s.id; }).length;
-            return '<button class="cat-link sub' + (s.id === catId ? ' on' : '') + '" data-cat="' + esc(s.id) + '">↳ ' +
+            return '<button class="cat-link sub' + (s.id === catId ? ' on' : '') + '" data-cat="' + esc(s.id) + '">' +
               esc(s.nome) + ' <span>(' + ns + ')</span></button>';
           }).join('');
         }
-        return html;
+        return html + '</div>';
       }).join('') + '</aside>';
 
     // Chips de subcategoria acima da lista (drill-in rápido).

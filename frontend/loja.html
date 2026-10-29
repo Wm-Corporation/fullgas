@@ -6,17 +6,21 @@
   <title>Fullgas — Loja do revendedor</title>
   <link rel="icon" type="image/png" href="img/favicon.png?v=20261028a">
   <link rel="apple-touch-icon" href="img/favicon.png?v=20261028a">
-  <link rel="stylesheet" href="css/styles.css?v=20261029a">
+  <link rel="stylesheet" href="css/styles.css?v=20261029b">
 </head>
 <body data-cache="products categories models orders">
 
-  <!-- ====== cabeçalho: marca, busca e atalhos; abaixo, a barra de categorias ====== -->
+  <!-- ====== cabeçalho: marca, menu, busca e atalhos ====== -->
   <header class="shop-head">
     <div class="sh-linha">
+      <div class="sh-marca">
+        <a href="/portal" class="sh-title" title="Sair da loja e voltar ao portal">FULLGAS Loja</a>
+        <div class="sh-user" id="sh-user"></div>
+      </div>
       <button class="menu-btn" id="menu-btn" type="button" aria-label="Abrir o menu" aria-expanded="false" aria-controls="shop-drawer">
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+        <span class="mb-txt">MENU</span>
       </button>
-      <a href="#/" class="sh-title" title="Início da loja">FULLGAS <span>Loja</span></a>
 
       <form class="sh-search" id="sh-search">
         <input id="sh-q" type="search" placeholder="Buscar peça por nome ou código" aria-label="Buscar peça por nome ou código" autocomplete="off">
@@ -30,11 +34,9 @@
       </nav>
     </div>
 
-    <!-- Barra de categorias (computador). No celular, o mesmo conteúdo vai para a gaveta. -->
-    <nav class="sh-nav" id="sh-nav" aria-label="Categorias"></nav>
   </header>
 
-  <!-- Gaveta do menu (celular) -->
+  <!-- Menu lateral (aberto pelo botão MENU) -->
   <div class="drawer-back" id="drawer-back" hidden></div>
   <aside class="shop-drawer" id="shop-drawer" aria-label="Menu da loja" hidden></aside>
 
@@ -56,7 +58,7 @@
   <script src="js/store.js?v=20261027c"></script>
   <script src="js/api-adapter.js?v=20261027d"></script>
   <script src="js/ao-vivo.js?v=20260831a"></script>
-  <script src="js/shop.js?v=20261029a"></script>
+  <script src="js/shop.js?v=20261029b"></script>
   <script src="js/suporte.js?v=20260831a"></script>
 </body>
 </html>
