@@ -6,37 +6,37 @@
   <title>Fullgas — Loja do revendedor</title>
   <link rel="icon" type="image/png" href="img/favicon.png?v=20261028a">
   <link rel="apple-touch-icon" href="img/favicon.png?v=20261028a">
-  <link rel="stylesheet" href="css/styles.css?v=20261028c">
+  <link rel="stylesheet" href="css/styles.css?v=20261029a">
 </head>
 <body data-cache="products categories models orders">
 
-  <!-- ====== cabeçalho vermelho ====== -->
+  <!-- ====== cabeçalho: marca, busca e atalhos; abaixo, a barra de categorias ====== -->
   <header class="shop-head">
-    <div>
-      <a href="/portal" class="sh-title" title="Sair da loja e voltar ao portal" style="display:inline-block;text-decoration:none;color:var(--ink);">FULLGAS Loja</a>
-      <div class="sh-user" id="sh-user"></div>
+    <div class="sh-linha">
+      <button class="menu-btn" id="menu-btn" type="button" aria-label="Abrir o menu" aria-expanded="false" aria-controls="shop-drawer">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+      </button>
+      <a href="#/" class="sh-title" title="Início da loja">FULLGAS <span>Loja</span></a>
+
+      <form class="sh-search" id="sh-search">
+        <input id="sh-q" type="search" placeholder="Buscar peça por nome ou código" aria-label="Buscar peça por nome ou código" autocomplete="off">
+        <button type="submit" aria-label="Buscar"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/></svg></button>
+      </form>
+
+      <nav class="sh-acoes" aria-label="Atalhos">
+        <a class="sh-acao" href="#/quick-order" data-rota="quick-order"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><span>Pedido rápido</span></a>
+        <a class="sh-acao" href="#/pedidos" data-rota="pedidos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/></svg><span>Meus pedidos</span></a>
+        <a class="sh-acao sh-cart" href="#/carrinho" data-rota="carrinho" aria-label="Carrinho"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.4 11h10.2L20 8H6.3M9 20h.01M17 20h.01"/></svg><span>Carrinho</span><b class="cart-n" id="cart-n">0</b></a>
+      </nav>
     </div>
 
-    <button class="menu-btn" id="menu-btn" type="button"><span id="menu-x">☰</span> MENU</button>
-    <nav class="shop-mega" id="shop-mega"></nav>
-
-    <form class="sh-search" id="sh-search">
-      <input id="sh-q" type="search" placeholder="Buscar peça por nome ou código" aria-label="Buscar peça por nome ou código" autocomplete="off">
-      <button type="submit" aria-label="Buscar"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/></svg></button>
-    </form>
-
-    <!-- Localizador à direita, junto dos ícones. -->
-    <div class="sh-direita">
-      <a class="pf-link" href="/finder">🔍 LOCALIZADOR DE PEÇAS</a>
-
-      <div class="sh-icons">
-        <a href="#/carrinho" title="Carrinho">🛒<span class="cart-n" id="cart-n">0</span></a>
-        <a href="#/quick-order" title="Pedido rápido">⚡</a>
-        <a href="#/pedidos" title="Histórico de pedidos">🧾</a>
-        <a class="sh-brand" href="/portal" title="Voltar ao portal" style="text-decoration:none;display:inline-flex;align-items:center;"><img src="img/Fullgas_logo003.png?v=20261028a" alt="FULLGAS" style="height:28px;width:auto;display:block;"></a>
-      </div>
-    </div>
+    <!-- Barra de categorias (computador). No celular, o mesmo conteúdo vai para a gaveta. -->
+    <nav class="sh-nav" id="sh-nav" aria-label="Categorias"></nav>
   </header>
+
+  <!-- Gaveta do menu (celular) -->
+  <div class="drawer-back" id="drawer-back" hidden></div>
+  <aside class="shop-drawer" id="shop-drawer" aria-label="Menu da loja" hidden></aside>
 
   <!-- ====== faixa de página ====== -->
   <div class="page-band">
@@ -48,7 +48,7 @@
 
   <!-- Carrinho flutuante -->
   <a href="#/carrinho" class="cart-fab" id="cart-fab" title="Ver carrinho" aria-label="Ver carrinho">
-    <span class="cart-fab-ico">🛒</span>
+    <svg class="cart-fab-ico" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M3 4h2l2.4 11h10.2L20 8H6.3M9 20h.01M17 20h.01"/></svg>
     <span class="cart-n" id="cart-fab-n">0</span>
   </a>
 
@@ -56,7 +56,7 @@
   <script src="js/store.js?v=20261027c"></script>
   <script src="js/api-adapter.js?v=20261027d"></script>
   <script src="js/ao-vivo.js?v=20260831a"></script>
-  <script src="js/shop.js?v=20261027c"></script>
+  <script src="js/shop.js?v=20261029a"></script>
   <script src="js/suporte.js?v=20260831a"></script>
 </body>
 </html>
