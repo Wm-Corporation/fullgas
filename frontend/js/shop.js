@@ -19,8 +19,6 @@
   var view = document.getElementById('view');
   var esc = FG.esc;
 
-  document.getElementById('sh-user').innerHTML = FG.esc(sess.nome) + '  -  ' + FG.empresaDaSessao(sess) + '  ›';
-
   /* ---------- ícones de categoria (line-art próprio) ---------- */
   var ICONS = {
     escape: '<path d="M8 38 L40 22 q14 -6 22 0 l6 5" /><ellipse cx="14" cy="36" rx="9" ry="7"/><path class="acc" d="M30 20 l4 -7 M40 17 l4 -7"/>',
@@ -42,6 +40,8 @@
     var n = FG.cartCount();
     var head = document.getElementById('cart-n');
     if (head) head.textContent = n;
+    var dw = document.getElementById('dw-cart-n');
+    if (dw) dw.textContent = n;
     var fabN = document.getElementById('cart-fab-n');
     if (fabN) fabN.textContent = n;
     var fab = document.getElementById('cart-fab');
@@ -54,21 +54,83 @@
     return FG.all('products').filter(function (p) { return ids.indexOf(p.cat) >= 0; }).length;
   }
 
-  var mega = document.getElementById('shop-mega');
-  mega.innerHTML = FG.categoriasTopo().map(function (c) {
-    return '<a href="#/categoria/' + esc(c.id) + '">' + esc(c.nome) + ' <span>' + contaCategoria(c.id) + ' ›</span></a>';
-  }).join('');
-
+  /* ---------- barra de categorias (computador) e gaveta (celular) ---------- */
+  var nav = document.getElementById('sh-nav');
+  var drawer = document.getElementById('shop-drawer');
+  var drawerBack = document.getElementById('drawer-back');
   var menuBtn = document.getElementById('menu-btn');
-  menuBtn.addEventListener('click', function (e) {
-    e.stopPropagation();
-    mega.classList.toggle('open');
-    document.getElementById('menu-x').textContent = mega.classList.contains('open') ? '✕' : '☰';
-  });
-  document.addEventListener('click', function () {
-    mega.classList.remove('open');
-    document.getElementById('menu-x').textContent = '☰';
-  });
+  var usuario = esc(sess.nome) + ' · ' + esc(FG.empresaDaSessao(sess));
+
+  nav.innerHTML = '<div class="sn-cats">' + FG.categoriasTopo().map(function (c) {
+    var subs = FG.subcategorias(c.id);
+    var link = '<a class="sn-link" data-topo="' + esc(c.id) + '" href="#/categoria/' + esc(c.id) + '">' + esc(c.nome) +
+      (subs.length ? ' <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>' : '') + '</a>';
+    if (!subs.length) return '<div class="sn-item">' + link + '</div>';
+    return '<div class="sn-item tem-sub">' + link + '<div class="sn-drop">' +
+      '<a href="#/categoria/' + esc(c.id) + '"><b>Tudo em ' + esc(c.nome) + '</b><span>' + contaCategoria(c.id) + '</span></a>' +
+      subs.map(function (s) {
+        return '<a href="#/categoria/' + esc(s.id) + '">' + esc(s.nome) + '<span>' + contaCategoria(s.id) + '</span></a>';
+      }).join('') + '</div></div>';
+  }).join('') + '</div>' +
+    '<div class="sn-dir"><a class="sn-loc" href="/finder">Localizador de peças</a>' +
+    '<a class="sn-user" href="/portal" title="Voltar ao portal">' + usuario + ' · Portal ›</a></div>';
+
+  // Gaveta: categorias em sanfona, depois os atalhos.
+  drawer.innerHTML = '<div class="dw-head"><div><b>Menu da loja</b><small>' + usuario + '</small></div>' +
+    '<button type="button" class="dw-x" id="dw-x" aria-label="Fechar o menu">✕</button></div>' +
+    '<div class="dw-corpo"><h5>Categorias</h5>' + FG.categoriasTopo().map(function (c) {
+      var subs = FG.subcategorias(c.id);
+      if (!subs.length) return '<a class="dw-link" data-topo="' + esc(c.id) + '" href="#/categoria/' + esc(c.id) + '">' + esc(c.nome) + '<span>' + contaCategoria(c.id) + '</span></a>';
+      return '<details class="dw-grupo" data-topo="' + esc(c.id) + '"><summary class="dw-link">' + esc(c.nome) + '<span>' + contaCategoria(c.id) + '</span></summary>' +
+        '<a class="dw-sub" href="#/categoria/' + esc(c.id) + '">Tudo em ' + esc(c.nome) + '</a>' +
+        subs.map(function (s) { return '<a class="dw-sub" href="#/categoria/' + esc(s.id) + '">' + esc(s.nome) + '</a>'; }).join('') +
+        '</details>';
+    }).join('') +
+    '<h5>Atalhos</h5>' +
+    '<a class="dw-link" href="#/quick-order">Pedido rápido</a>' +
+    '<a class="dw-link" href="#/pedidos">Meus pedidos</a>' +
+    '<a class="dw-link" href="#/carrinho">Carrinho<span id="dw-cart-n">0</span></a>' +
+    '<a class="dw-link" href="/finder">Localizador de peças</a>' +
+    '<a class="dw-link" href="/portal">Voltar ao portal</a></div>';
+
+  function abrirMenu(abrir) {
+    drawer.hidden = drawerBack.hidden = !abrir;
+    menuBtn.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+    document.body.classList.toggle('menu-aberto', abrir);
+    if (abrir) document.getElementById('dw-x').focus(); else menuBtn.focus({ preventScroll: true });
+  }
+  menuBtn.addEventListener('click', function () { abrirMenu(drawer.hidden); });
+  drawerBack.addEventListener('click', function () { abrirMenu(false); });
+  document.getElementById('dw-x').addEventListener('click', function () { abrirMenu(false); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !drawer.hidden) abrirMenu(false); });
+  // Escolher um destino fecha a gaveta (o hashchange redesenha a página).
+  drawer.addEventListener('click', function (e) { if (e.target.closest('a')) abrirMenu(false); });
+
+  // Categoria de topo da página atual (ou null) — usada para marcar o menu.
+  // `partes` é a rota quebrada por "/": ['categoria', id], ['produto', artigo], ['busca', termo]…
+  function topoDaRota(partes) {
+    var cat = null;
+    if (partes[0] === 'categoria') cat = FG.category(partes[1]);
+    else if (partes[0] === 'produto') {
+      var p = FG.product(decodeURIComponent(partes[1] || ''));
+      cat = p && FG.category(p.cat);
+    }
+    if (!cat) return null;
+    return cat.pai || cat.id;
+  }
+
+  // Marca no menu e na gaveta onde o cliente está.
+  function marcarMenu(partes) {
+    var topo = topoDaRota(partes);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-topo]'), function (el) {
+      var on = el.getAttribute('data-topo') === topo;
+      el.classList.toggle('on', on);
+      if (el.tagName === 'DETAILS' && on) el.open = true;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.sh-acao'), function (a) {
+      a.classList.toggle('on', a.getAttribute('data-rota') === partes[0]);
+    });
+  }
 
   document.getElementById('sh-search').addEventListener('submit', function (e) {
     e.preventDefault();
@@ -576,6 +638,7 @@
       case 'busca': pagina = 1; renderCategoria(null, decodeURIComponent(partes.slice(1).join('/'))); break;
       default: renderCats();
     }
+    marcarMenu(partes);
     refreshCart();
     window.scrollTo(0, 0);
   }
