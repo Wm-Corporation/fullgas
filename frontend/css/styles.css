@@ -672,10 +672,11 @@ th[aria-sort="descending"] .th-ord::after { content: "▼"; opacity: 1; color: v
 /* Cabeçalho: marca, MENU, busca e atalhos. */
 .shop-head { background: var(--red); color: var(--ink); position: relative; z-index: 70; }
 .shop-head .sh-linha { display: flex; align-items: center; gap: 22px; padding: 10px 18px; }
-.shop-head .sh-marca { flex: none; min-width: 0; }
+/* O nome encolhe (com "…") antes de empurrar a busca e o carrinho para fora. */
+.shop-head .sh-marca { flex: 0 1 auto; min-width: 0; max-width: 360px; }
 .shop-head .sh-title { display: inline-block; font-weight: 800; font-size: 19px; color: var(--ink); text-decoration: none; }
 .shop-head .sh-title:hover { text-decoration: none; }
-.shop-head .sh-user { font-size: 11px; opacity: .95; }
+.shop-head .sh-user { font-size: 11px; opacity: .95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .shop-head .menu-btn {
   flex: none; background: none; border: none; color: var(--ink); cursor: pointer;
   display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; letter-spacing: 1px; padding: 6px 4px;

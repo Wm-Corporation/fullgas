@@ -58,8 +58,9 @@
   var drawer = document.getElementById('shop-drawer');
   var drawerBack = document.getElementById('drawer-back');
   var menuBtn = document.getElementById('menu-btn');
-  var usuario = esc(sess.nome) + ' · ' + esc(FG.empresaDaSessao(sess));
-  document.getElementById('sh-user').innerHTML = esc(sess.nome) + '  -  ' + esc(FG.empresaDaSessao(sess)) + '  ›';
+  // empresaDaSessao já devolve HTML seguro (o selo da Fábrica ou o nome escapado): não escapar de novo.
+  var usuario = esc(sess.nome) + ' · ' + FG.empresaDaSessao(sess);
+  document.getElementById('sh-user').innerHTML = esc(sess.nome) + '  -  ' + FG.empresaDaSessao(sess) + '  ›';
 
   // Menu lateral: categorias em sanfona, depois os atalhos.
   drawer.innerHTML = '<div class="dw-head"><div><b>Menu da loja</b><small>' + usuario + '</small></div>' +
