@@ -254,11 +254,15 @@
   }
 
   /* ---- Aba Clientes (papel 'cliente') ---- */
+  // Grupo aberto/fechado por empresa (empresaId → bool), sobrevive aos re-renders.
+  // Zera quando o filtro muda, para as internas encontradas abrirem sozinhas.
+  var gruposAbertos = {}, filtroDosGrupos = '';
+
   function renderClientes() {
     h1.textContent = 'Clientes'; setOn('clientes');
     var todos = FG.all('users').filter(function (u) { return u.papel === 'cliente'; });
     var f = filtros.clientes;
-    var users = todos.filter(function (u) {
+    function passa(u) {
       if (f.status && u.status !== f.status) return false;
       if (f.tipo === 'interna' && u.gestor !== false) return false;
       if (f.tipo === 'gestor' && u.gestor === false) return false;
@@ -266,50 +270,114 @@
       if (f.lista === 'tiny' && !(u.listaPreco && u.listaPreco.origem === 'tiny')) return false;
       if (f.lista === 'manual' && !(u.listaPreco && u.listaPreco.origem !== 'tiny')) return false;
       return casaBusca('clientes', [u.nome, u.email, u.empresa, u.cnpj]);
+    }
+    var users = todos.filter(passa);
+    var filtrando = filtroAtivo('clientes');
+    if (JSON.stringify(f) !== filtroDosGrupos) { gruposAbertos = {}; filtroDosGrupos = JSON.stringify(f); }
+
+    // Um grupo por empresa: conta(s) principal(is) em cima, internas embaixo.
+    // A ordem segue a da API (pendentes primeiro, depois as mais novas).
+    var grupos = [], porEmpresa = {};
+    todos.forEach(function (u) {
+      var k = String(u.empresaId);
+      var g = porEmpresa[k];
+      if (!g) { g = porEmpresa[k] = { id: k, principais: [], internas: [] }; grupos.push(g); }
+      (u.gestor === false ? g.internas : g.principais).push(u);
     });
+    grupos.forEach(function (g) {
+      g.principaisVis = g.principais.filter(passa);
+      g.internasVis = g.internas.filter(passa);
+      g.pendentes = g.internas.filter(function (u) { return u.status === 'pendente'; }).length;
+      // Aberto por padrão quando há interna pendente ou quando o filtro achou uma interna.
+      g.aberto = g.id in gruposAbertos ? gruposAbertos[g.id]
+        : g.pendentes > 0 || (filtrando && g.internasVis.length > 0);
+    });
+    var visiveis = grupos.filter(function (g) { return g.principaisVis.length || g.internasVis.length; });
+    var nInternas = todos.filter(function (u) { return u.gestor === false; }).length;
+    var comInternas = visiveis.filter(function (g) { return g.internasVis.length; });
+    var todasAbertas = comInternas.length && comInternas.every(function (g) { return g.aberto; });
+
+    function dd(rotulo, valor) {
+      return '<div class="usr-dd"><b>' + rotulo + '</b><span>' +
+        (valor ? esc(valor) : '<i class="muted">—</i>') + '</span></div>';
+    }
+
+    // Conta principal. `contexto` = não casou com o filtro, aparece só para situar as internas.
+    function linhaPrincipal(u, g, contexto) {
+      var e = u.endereco;
+      // Resumo na tabela; detalhes na linha expansível.
+      var endTxt = e ? (esc(e.cidade || '') + (e.uf ? '/' + esc(e.uf) : '')) : '<span class="muted">—</span>';
+      var det =
+        '<div class="usr-det-sec">Empresa</div><div class="usr-det-grid">' +
+        dd('Razão social', u.empresa) + dd('CNPJ', u.cnpj) +
+        dd('Inscrição estadual', u.inscricaoEstadual) + dd('Telefone', u.telefone) +
+        '<div class="usr-dd"><b>Contato Tiny</b><span>' + (u.tinyContatoId
+          ? 'vinculado <span class="muted">(#' + esc(u.tinyContatoId) + ')</span>'
+          : '<i class="muted">não vinculado</i>') + '</span></div>' +
+        '</div>' +
+        '<div class="usr-det-sec">Endereço</div>' +
+        (e ? '<div class="usr-det-grid">' +
+          dd('CEP', e.cep) + dd('Logradouro', e.logradouro) + dd('Número', e.numero) +
+          dd('Complemento', e.complemento) + dd('Bairro', e.bairro) +
+          dd('Cidade', e.cidade) + dd('UF', e.uf) +
+          '</div>' : '<p class="muted" style="margin:4px 0 0;">Sem endereço cadastrado.</p>');
+      // Botão do grupo só na última principal, logo acima das internas.
+      var ultima = g.principaisVis.concat(contexto ? [u] : []).slice(-1)[0] === u;
+      var tot = g.internas.length, vis = g.internasVis.length;
+      var grp = ultima && vis
+        ? '<button class="btn-line btn-mini cli-grp" data-grp="' + esc(g.id) + '" aria-expanded="' + g.aberto + '">' +
+          (g.aberto ? '▾ ' : '▸ ') + (filtrando && vis !== tot ? vis + ' de ' + tot : tot) +
+          (tot === 1 ? ' interna' : ' internas') + '</button>' +
+          (g.pendentes ? ' <span class="cli-pend">' + g.pendentes + (g.pendentes === 1 ? ' pendente' : ' pendentes') + '</span>' : '')
+        : (ultima && !tot ? '<div class="muted cli-sem">sem contas internas</div>' : '');
+      return '<tr class="cli-pri' + (contexto ? ' cli-ctx' : '') + '"><td><b>' + esc(u.nome) + '</b></td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) +
+        (u.fabrica ? ' ' + FG.seloFabrica() : '') + '</td>' +
+        '<td>' + (u.cnpj ? esc(u.cnpj) : '<span class="muted">—</span>') + '</td>' +
+        '<td style="font-size:12px;">' + endTxt +
+        ' <button class="btn-line btn-mini usr-exp" data-exp="' + u.id + '">Expandir ▾</button></td>' +
+        '<td><span class="pill-status ps-gestor">Conta principal</span>' + (grp ? '<div class="cli-grp-l">' + grp + '</div>' : '') + '</td>' +
+        '<td>' + celulaLista(u) + '</td>' +
+        '<td>' + pill(u.status) + '</td><td>' + acoesUsuario(u) + '</td></tr>' +
+        '<tr class="usr-det hidden" data-det="' + u.id + '"><td colspan="9">' + det + '</td></tr>';
+    }
+
+    // Conta interna: empresa, endereço e lista são os da principal, então não se repetem.
+    function linhaInterna(u, g, orfa) {
+      return '<tr class="cli-int' + (g.aberto ? '' : ' hidden') + '" data-grupo="' + esc(g.id) + '">' +
+        '<td><span class="cli-ramo" aria-hidden="true">↳</span>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td>' +
+        '<td colspan="3" class="muted cli-mesma">' + (orfa
+          ? esc(u.empresa) + (u.cnpj ? ' · ' + esc(u.cnpj) : '') + ' — <span class="cli-pend">sem conta principal</span>'
+          : 'Mesma empresa da conta principal') + '</td>' +
+        '<td><span class="pill-status ps-interna">Conta interna</span></td>' +
+        '<td><span class="muted" style="font-size:12px;">a da empresa</span></td>' +
+        '<td>' + pill(u.status) + '</td><td>' + acoesUsuario(u) + '</td></tr>';
+    }
+
+    var corpo = visiveis.map(function (g) {
+      // Interna casou e a principal não: a principal entra como contexto (esmaecida).
+      var pri = g.principaisVis.length ? g.principaisVis
+        : (g.internasVis.length ? g.principais : []);
+      var contexto = !g.principaisVis.length;
+      if (!pri.length) g.aberto = true;   // sem principal não há botão para abrir
+      return pri.map(function (u) { return linhaPrincipal(u, g, contexto); }).join('') +
+        g.internasVis.map(function (u) { return linhaInterna(u, g, !g.principais.length); }).join('');
+    }).join('');
+
     view.innerHTML =
       '<div class="adm-card"><div class="c-head">Clientes cadastrados (' + contagem('clientes', users.length, todos.length) + ')</div><div class="c-body">' +
-      '<p class="adm-hint">Contas das concessionárias: a <b>conta principal</b> nasce no cadastro do site e as <b>contas internas</b> são criadas pelo próprio cliente em "Minha conta". Administradores da Fullgas ficam na aba <a href="#administradores">Administradores</a>.</p>' +
+      '<p class="adm-hint">Contas das concessionárias, agrupadas por empresa: a <b>conta principal</b> nasce no cadastro do site e as <b>contas internas</b> (criadas pelo próprio cliente em "Minha conta") ficam logo abaixo dela. Administradores da Fullgas ficam na aba <a href="#administradores">Administradores</a>.</p>' +
       barraFiltro('clientes', [
         { k: 'status', rotulo: 'Status', opcoes: [['pendente', 'Pendente'], ['aprovado', 'Aprovado'], ['bloqueado', 'Bloqueado']] },
         { k: 'tipo', rotulo: 'Tipo', opcoes: [['gestor', 'Conta principal'], ['interna', 'Conta interna']] },
         { k: 'lista', rotulo: 'Lista de preço', opcoes: [['sem', 'Sem lista'], ['tiny', 'Do Tiny'], ['manual', 'Escolhida no painel']] }
       ], 'Buscar por nome, e-mail, empresa ou CNPJ') +
-      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>CNPJ</th><th>Endereço</th><th>Tipo</th><th>Lista de preço</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
-      (users.length ? users.map(function (u) {
-        var e = u.endereco;
-        // Resumo na tabela; detalhes na linha expansível.
-        var endTxt = e ? (esc(e.cidade || '') + (e.uf ? '/' + esc(e.uf) : '')) : '<span class="muted">—</span>';
-        function dd(rotulo, valor) {
-          return '<div class="usr-dd"><b>' + rotulo + '</b><span>' +
-            (valor ? esc(valor) : '<i class="muted">—</i>') + '</span></div>';
-        }
-        var det =
-          '<div class="usr-det-sec">Empresa</div><div class="usr-det-grid">' +
-          dd('Razão social', u.empresa) + dd('CNPJ', u.cnpj) +
-          dd('Inscrição estadual', u.inscricaoEstadual) + dd('Telefone', u.telefone) +
-          '<div class="usr-dd"><b>Contato Tiny</b><span>' + (u.tinyContatoId
-            ? 'vinculado <span class="muted">(#' + esc(u.tinyContatoId) + ')</span>'
-            : '<i class="muted">não vinculado</i>') + '</span></div>' +
-          '</div>' +
-          '<div class="usr-det-sec">Endereço</div>' +
-          (e ? '<div class="usr-det-grid">' +
-            dd('CEP', e.cep) + dd('Logradouro', e.logradouro) + dd('Número', e.numero) +
-            dd('Complemento', e.complemento) + dd('Bairro', e.bairro) +
-            dd('Cidade', e.cidade) + dd('UF', e.uf) +
-            '</div>' : '<p class="muted" style="margin:4px 0 0;">Sem endereço cadastrado.</p>');
-        return '<tr><td>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) +
-          (u.fabrica ? ' ' + FG.seloFabrica() : '') + '</td>' +
-          '<td>' + (u.cnpj ? esc(u.cnpj) : '<span class="muted">—</span>') + '</td>' +
-          '<td style="font-size:12px;">' + endTxt +
-          ' <button class="btn-line btn-mini usr-exp" data-exp="' + u.id + '">Expandir ▾</button></td>' +
-          '<td>' + (u.gestor === false
-            ? '<span class="pill-status ps-interna">Conta interna</span>'
-            : '<span class="pill-status ps-gestor">Conta principal</span>') + '</td>' +
-          '<td>' + celulaLista(u) + '</td>' +
-          '<td>' + pill(u.status) + '</td><td>' + acoesUsuario(u) + '</td></tr>' +
-          '<tr class="usr-det hidden" data-det="' + u.id + '"><td colspan="9">' + det + '</td></tr>';
-      }).join('') : vazioFiltro(9, 'Nenhum cliente com esse filtro.')) + '</tbody></table></div></div>';
+      '<div class="cli-resumo"><span>' + grupos.length + (grupos.length === 1 ? ' empresa' : ' empresas') + ' · ' +
+        nInternas + (nInternas === 1 ? ' conta interna' : ' contas internas') + '</span>' +
+        (comInternas.length ? '<button class="btn-line btn-mini" id="cli-todas">' +
+          (todasAbertas ? 'Recolher todas as internas ▴' : 'Mostrar todas as internas ▾') + '</button>' : '') +
+      '</div>' +
+      '<table class="tbl tbl-clientes"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>CNPJ</th><th>Endereço</th><th>Tipo</th><th>Lista de preço</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
+      (corpo || vazioFiltro(9, 'Nenhum cliente com esse filtro.')) + '</tbody></table></div></div>';
 
     bindFiltro(renderClientes);
 
@@ -322,6 +390,20 @@
         det.classList.toggle('hidden', aberto);
         b.textContent = aberto ? 'Expandir ▾' : 'Recolher ▴';
       });
+    });
+
+    // Abrir/fechar as internas de uma empresa, ou de todas.
+    Array.prototype.forEach.call(view.querySelectorAll('[data-grp]'), function (b) {
+      b.addEventListener('click', function () {
+        var g = porEmpresa[b.getAttribute('data-grp')];
+        gruposAbertos[g.id] = !g.aberto;
+        renderClientes();
+      });
+    });
+    var bTodas = document.getElementById('cli-todas');
+    if (bTodas) bTodas.addEventListener('click', function () {
+      comInternas.forEach(function (g) { gruposAbertos[g.id] = !todasAbertas; });
+      renderClientes();
     });
 
     bindGerenciar(renderClientes);
