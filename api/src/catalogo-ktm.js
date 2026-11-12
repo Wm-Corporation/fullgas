@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { erroSku } from './validacao.js';
 
 export const MARCAS = {
   ktm: { nome: 'KTM', host: 'https://sparepartsfinder.ktm.com' },
@@ -165,10 +166,15 @@ export function lerPecas(json) {
       quantidade: Number(a.Quantidade ?? a.Quantity) || 0,
       adicional: espacos(a.ArticleAdditionalText),
       novo: !!a.IsNew,
-      // "SPNO" = peça não vendida avulsa (vem só dentro de um conjunto).
-      pedivel: !!sku && sku !== 'SPNO' && /^[A-Za-z0-9._/-]{1,40}$/.test(sku)
+      pedivel: pedivel(sku)
     };
   });
+}
+
+// Peça que se pede avulsa. "SPNO" = só vem dentro de um conjunto. Kit de pistão traz a classe no código
+// ("55430007000 I"), igual ao Tiny — por isso a regra é a mesma do SKU do portal.
+export function pedivel(sku) {
+  return !!sku && sku !== 'SPNO' && !erroSku(sku);
 }
 
 // Nome de arquivo de prancha: só o que a KTM usa (evita caminho estranho no disco).

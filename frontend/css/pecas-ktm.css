@@ -61,6 +61,10 @@
 .kt-selo.fora { background: #fdecec; color: #b91c1c; }
 .kt-selo.novo { background: var(--red-soft); color: var(--red-dark); }
 .kt-selo.conjunto { background: #eee; color: #555; }
+.kt-selo.tiny { background: #e8f1fb; color: #1d4f91; }
+.kt-selo.verificar { background: #f1f1f1; color: #555; }
+.kt-classe { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--gray); }
+.kt-classe select { padding: 3px 6px; border: 1px solid var(--line); background: #fff; font-size: 12.5px; }
 .part-row.nao-pedivel { opacity: .75; }
 
 /* Pontos da KTM são círculos sobre o número da peça */

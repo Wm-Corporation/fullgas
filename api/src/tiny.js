@@ -4,6 +4,7 @@ import 'dotenv/config';
 import { query } from './db.js';
 import { prepararMiniaturas } from './miniaturas.js';
 import { reservaBlackOrders } from './black-order.js';
+import { erroSku } from './validacao.js';
 
 const BASE = 'https://api.tiny.com.br/api2';
 
@@ -151,10 +152,10 @@ export function saldoLivre(est) {
 /* ---------------- consultas ao Tiny ---------------- */
 
 // Produtos do Tiny, 100 por página. Página vazia vem como codigo_erro 20.
-export async function listarProdutos(pagina = 1, pesquisa = '') {
+export async function listarProdutos(pagina = 1, pesquisa = '', { prioritario = false } = {}) {
   let ret;
   try {
-    ret = await tinyPost('produtos.pesquisa.php', { pagina, pesquisa });
+    ret = await tinyPost('produtos.pesquisa.php', { pagina, pesquisa }, { prioritario });
   } catch (e) {
     if (e instanceof TinyError && e.codigo === '20') {
       return { pagina: Number(pagina) || 1, totalPaginas: 0, produtos: [] };
@@ -222,13 +223,13 @@ export async function aplicarSaldosAlterados(alterados) {
   return feitos;
 }
 
-// Detalhe + saldo de estoque, nas colunas do portal.
-export async function obterProdutoCompleto(tinyId) {
-  const p = (await tinyPost('produto.obter.php', { id: tinyId })).produto;
+// Detalhe + saldo de estoque, nas colunas do portal. prioritario = alguém está esperando na tela.
+export async function obterProdutoCompleto(tinyId, { prioritario = false } = {}) {
+  const p = (await tinyPost('produto.obter.php', { id: tinyId }, { prioritario })).produto;
   if (!p) throw new TinyError('Produto não encontrado no Tiny.');
 
   // produto.obter não traz saldo: vem de produto.obter.estoque, já sem o reservado.
-  const est = (await tinyPost('produto.obter.estoque.php', { id: tinyId })).produto;
+  const est = (await tinyPost('produto.obter.estoque.php', { id: tinyId }, { prioritario })).produto;
   const saldo = saldoLivre(est);
 
   return {
@@ -240,6 +241,60 @@ export async function obterProdutoCompleto(tinyId) {
     descricao: limparDescricao(p.descricao_complementar),
     foto: primeiraFoto(p.anexos)
   };
+}
+
+// Importa (ou vincula, se o SKU já existe no portal) um produto do Tiny. Usado pelo botão de importação
+// do admin e pelo catálogo de peças KTM. Devolve { tinyId, sku?, status: 'ok'|'ignorado'|'erro', msg }.
+// Produto novo entra na categoriaId; SKU que já existia mantém a categoria dele.
+export async function importarProduto(tinyId, categoriaId, { prioritario = false } = {}) {
+  try {
+    const jaVinculado = await query('SELECT Sku FROM dbo.Produto WHERE TinyId = @tid', { tid: tinyId });
+    if (jaVinculado.length) return { tinyId, sku: jaVinculado[0].Sku, status: 'ignorado', msg: 'Já importado.' };
+
+    const dados = await obterProdutoCompleto(tinyId, { prioritario });
+    if (!dados.sku) {
+      await registrarLog(tinyId, null, 'importacao', 'erro', 'Produto sem código (SKU) no Tiny.');
+      return { tinyId, status: 'erro', msg: 'Produto sem código (SKU) no Tiny.' };
+    }
+
+    // SKU do Tiny passa pela mesma validação do cadastro manual.
+    const errSku = erroSku(dados.sku);
+    if (errSku) {
+      await registrarLog(tinyId, dados.sku, 'importacao', 'erro', errSku);
+      return { tinyId, sku: dados.sku, status: 'erro', msg: errSku };
+    }
+
+    const existente = await query('SELECT ProdutoId FROM dbo.Produto WHERE Sku = @sku', { sku: dados.sku });
+    if (existente.length) {
+      await query(
+        'UPDATE dbo.Produto SET TinyId = @tid, TinyAtivo = 1 WHERE ProdutoId = @pid',
+        { tid: tinyId, pid: existente[0].ProdutoId }
+      );
+    } else {
+      await query(
+        `INSERT INTO dbo.Produto
+           (Sku, Nome, CategoriaId, Descricao, Preco, Estoque, ImagemUrl,
+            TinyId, TinyAtivo, TinySincronizadoEm)
+         VALUES (@sku, @nome, @catId, @desc, @preco, @est, @foto,
+                 @tid, 1, SYSUTCDATETIME())`,
+        {
+          sku: dados.sku, nome: dados.nome || dados.sku, catId: categoriaId,
+          desc: dados.descricao, preco: dados.preco, est: dados.estoque,
+          foto: dados.foto, tid: tinyId
+        }
+      );
+    }
+    // Vincular também espelha os campos na hora (e carimba a sincronização).
+    const r = await aplicarAtualizacao(tinyId, dados, 'importacao');
+    return {
+      tinyId, sku: dados.sku,
+      status: r.status === 'ok' ? 'ok' : r.status,
+      msg: existente.length ? 'SKU já existia — vinculado ao Tiny.' : 'Importado.'
+    };
+  } catch (e) {
+    await registrarLog(tinyId, null, 'importacao', 'erro', e.message);
+    return { tinyId, status: 'erro', msg: e.message };
+  }
 }
 
 /* ---------------- listas de preço ---------------- */
