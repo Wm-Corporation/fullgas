@@ -26,6 +26,7 @@ import finderRoutes from './routes/finder.routes.js';
 import tinyRoutes from './routes/tiny.routes.js';
 import listasPrecoRoutes from './routes/listas-preco.routes.js';
 import arquivosRoutes from './routes/arquivos.routes.js';
+import catalogoKtmRoutes from './routes/catalogo-ktm.routes.js';
 import { PASTA_MINIATURAS } from './miniaturas.js';
 
 const app = express();
@@ -169,6 +170,7 @@ app.use('/api', finderRoutes);
 app.use('/api', tinyRoutes);
 app.use('/api', listasPrecoRoutes);
 app.use('/api', arquivosRoutes);
+app.use('/api', catalogoKtmRoutes);
 
 // Front estático com URLs limpas (/portal → portal.html). Em produção quem serve é o Nginx.
 const FRONT_DIR = path.join(__dirname, '..', '..', 'frontend');

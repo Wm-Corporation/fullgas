@@ -917,6 +917,25 @@
       }, function () { return { ok: false, msg: 'Falha no envio da imagem.' }; });
   }
 
+  // ---- Catálogo de peças KTM / Husqvarna / GASGAS (admin, em teste; rejeitam em erro) ----
+  function ktm(marca) { return '/catalogo-ktm/' + encodeURIComponent(marca); }
+  FG.ktmModelos = function (marca) { return api(ktm(marca) + '/modelos'); };
+  FG.ktmVin = function (marca, vin) { return api(ktm(marca) + '/vin/' + encodeURIComponent(vin)); };
+  FG.ktmGrupos = function (marca, modelo, lado) {
+    return api(ktm(marca) + '/modelos/' + encodeURIComponent(modelo) + '/' + lado);
+  };
+  FG.ktmGrupo = function (marca, modelo, lado, grupo) {
+    return api(ktm(marca) + '/modelos/' + encodeURIComponent(modelo) + '/' + lado + '/grupos/' + encodeURIComponent(grupo));
+  };
+  // Imagens (prancha e foto da moto) passam pela API: só abrem com sessão de admin.
+  FG.ktmMapaUrl = function (marca, arquivo) { return API_BASE + ktm(marca) + '/mapas/' + encodeURIComponent(arquivo); };
+  FG.ktmFotoUrl = function (marca, modelo) { return API_BASE + ktm(marca) + '/fotos/' + encodeURIComponent(modelo); };
+  // Cadastra no portal as peças que ainda não existem e recarrega o catálogo da cesta.
+  FG.ktmGarantirPecas = function (marca, itens) {
+    return api('/catalogo-ktm/pecas', { method: 'POST', body: { marca: marca, itens: itens } })
+      .then(function (r) { return recarregarProdutos().then(function () { return r; }); });
+  };
+
   // ---- Leituras do Finder (rejeitam em erro) ----
   // Modelos com árvore. todos=true (admin) inclui inativos.
   FG.finderModelos = function (todos) {

@@ -411,3 +411,46 @@ describe('fatura completa', () => {
     expect(r.body[0].itens).toEqual([{ sku: 'A1', nome: 'PECA A1', preco: 10, qtd: 4, subtotal: 40 }]);
   });
 });
+
+describe('peças do catálogo KTM fora do Tiny', () => {
+  it('admin não libera black order de peça sem preço (o cliente compraria de graça)', async () => {
+    responder = (t) => {
+      if (/FROM dbo\.BlackOrder WHERE BlackOrderId IN/.test(t)) return abertasProduto100();
+      if (/UPDATE dbo\.Produto SET Estoque = Estoque - @q/.test(t)) {
+        expect(t).toMatch(/AND Preco > 0/);
+        return [];
+      }
+      if (/SELECT Preco FROM dbo\.Produto WHERE ProdutoId/.test(t)) return [{ Preco: 0 }];
+      return [];
+    };
+    const r = await request(app(rotasBO, ADMIN)).post('/api/blackorders/liberar').send({ itens: [{ id: 1 }] });
+    expect(r.status).toBe(409);
+    expect(r.body.erro).toMatch(/peça sem preço\. Cadastre no Tiny/);
+    expect(achar(/UPDATE dbo\.BlackOrder/)).toHaveLength(0);
+    expect(transacoes).toEqual(['begin', 'rollback']);
+  });
+
+  it('cliente não compra peça do catálogo em teste, mesmo digitando o SKU', async () => {
+    responder = (t) => (/c\.Codigo = @cod AND p\.Sku IN/.test(t) ? [{ Sku: 'A46001035001' }] : []);
+    const r = await request(app(rotasPedidos, CLIENTE)).post('/api/pedidos').send({ itens: [{ sku: 'A46001035001', quantidade: 1 }] });
+    expect(r.status).toBe(400);
+    expect(r.body.erro).toBe('Produto não encontrado: A46001035001');
+    expect(achar(/UPDATE dbo\.Produto/)).toHaveLength(0);
+    expect(transacoes).toEqual([]);
+  });
+
+  it('admin compra: a peça sem estoque vira black order', async () => {
+    responder = (t, p) => {
+      if (/c\.Codigo = @cod AND p\.Sku IN/.test(t)) throw new Error('admin não deveria consultar o catálogo');
+      if (/UPDATE dbo\.Produto/.test(t)) return [{ ProdutoId: 300, Nome: 'Rubber bushing', Preco: 0, EstoqueAntes: 0 }];
+      if (/Seq_NumeroPedido/.test(t)) return [{ NumeroPedido: '0005042000', Agora: new Date('2026-11-12T12:00:00Z') }];
+      if (/INSERT INTO dbo\.BlackOrder /.test(t)) return [{ BlackOrderId: 950 }];
+      if (/SELECT RazaoSocial FROM dbo\.Empresa/.test(t)) return [{ RazaoSocial: 'FULLGAS' }];
+      return [];
+    };
+    const r = await request(app(rotasPedidos, ADMIN)).post('/api/pedidos').send({ itens: [{ sku: 'A46001035001', quantidade: 2 }] });
+    expect(r.status).toBe(201);
+    expect(r.body).toMatchObject({ pedidoCriado: false, blackOrders: [{ id: 950, sku: 'A46001035001', quantidade: 2 }] });
+    expect(achar(/INSERT INTO dbo\.Pedido /)).toHaveLength(0);
+  });
+});

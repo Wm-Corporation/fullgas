@@ -1,9 +1,12 @@
 // Controller de Categoria: HTTP ↔ serviço.
 import * as service from '../services/categoria.service.js';
+import { CATEGORIA_CATALOGO, ehAdmin } from '../catalogo-produto.js';
 
-export async function listar(_req, res, next) {
+export async function listar(req, res, next) {
   try {
-    res.json(await service.listar());
+    const todas = await service.listar();
+    // A categoria do catálogo KTM (em teste) só aparece para o admin.
+    res.json(ehAdmin(req.user) ? todas : todas.filter(c => c.id !== CATEGORIA_CATALOGO));
   } catch (e) { next(e); }
 }
 

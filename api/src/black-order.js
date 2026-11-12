@@ -58,14 +58,21 @@ export async function liberarBlackOrders(pedidos, adminId) {
     const tx = new sql.Transaction(pool);
     await tx.begin();
     try {
+      // Peça sem preço (ex.: veio do catálogo KTM fora do Tiny) não é liberada: o cliente compraria de graça.
       const baixa = await new sql.Request(tx)
         .input('pid', sql.Int, l.ProdutoId).input('q', sql.Int, q)
         .query(`UPDATE dbo.Produto SET Estoque = Estoque - @q, AtualizadoEm = SYSUTCDATETIME()
                 OUTPUT inserted.Estoque
-                 WHERE ProdutoId = @pid AND Estoque >= @q`);
+                 WHERE ProdutoId = @pid AND Estoque >= @q AND Preco > 0`);
       if (!baixa.recordset.length) {
         await tx.rollback();
-        recusadas.push({ id: ped.id, erro: `${l.NomeProduto} (${l.Sku}): o estoque não tem ${q} un. livres.` });
+        const semPreco = (await query('SELECT Preco FROM dbo.Produto WHERE ProdutoId = @pid', { pid: l.ProdutoId }))[0];
+        recusadas.push({
+          id: ped.id,
+          erro: semPreco && !(Number(semPreco.Preco) > 0)
+            ? `${l.NomeProduto} (${l.Sku}): peça sem preço. Cadastre no Tiny (mesmo código) e importe antes de liberar.`
+            : `${l.NomeProduto} (${l.Sku}): o estoque não tem ${q} un. livres.`
+        });
         continue;
       }
       const res = l.QuantidadeReservada + q;
