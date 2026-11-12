@@ -1,0 +1,74 @@
+/* Catálogo de Peças KTM (pecas-ktm.html). O resto do visual vem das classes do Localizador em styles.css. */
+
+.kt-marcas { display: flex; gap: 8px; margin: 14px 0 4px; flex-wrap: wrap; }
+.kt-marcas button {
+  border: 1px solid var(--line); background: #fff; color: var(--ink); padding: 8px 18px;
+  font-weight: 700; letter-spacing: .04em; cursor: pointer; border-radius: 3px;
+}
+.kt-marcas button:hover { border-color: var(--red); }
+.kt-marcas button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+#kt-busca { width: 100%; padding: 8px 10px; border: 1px solid var(--line); }
+#kt-busca:focus { outline: none; border-color: var(--red); }
+.kt-resultados {
+  border: 1px solid var(--line); border-top: none; max-height: 320px; overflow-y: auto; background: #fff;
+}
+.kt-resultados button {
+  display: block; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid #f0f0f0;
+  padding: 7px 10px; cursor: pointer; font-size: 13px; color: var(--ink);
+}
+.kt-resultados button:hover, .kt-resultados button:focus { background: var(--red-soft); outline: none; }
+.kt-resultados .kt-cam { display: block; font-size: 11.5px; color: var(--gray); }
+.kt-resultados .kt-vazio { padding: 8px 10px; color: var(--gray); font-size: 13px; }
+.kt-arvore-btn { margin-top: 10px; font-size: 12.5px; }
+#kt-arvore { margin-top: 8px; }
+
+/* Cabeçalho do modelo: foto da moto + nome + códigos */
+.kt-modelo { display: flex; gap: 22px; align-items: center; margin: 4px 0 18px; flex-wrap: wrap; }
+.kt-modelo .kt-foto {
+  width: 260px; max-width: 100%; aspect-ratio: 5 / 3; background: #f4f4f4; display: flex;
+  align-items: center; justify-content: center; border: 1px solid #eee; cursor: zoom-in;
+}
+.kt-modelo .kt-foto img { max-width: 100%; max-height: 100%; }
+.kt-modelo .kt-foto.sem { cursor: default; }
+.kt-modelo .kt-foto.sem span { color: var(--gray); font-size: 12px; }
+.kt-modelo .kt-dados { min-width: 0; }
+.kt-modelo .finder-model-name { font-size: 20px; margin: 0 0 4px; }
+.kt-modelo .kt-cod { color: var(--gray); font-size: 13px; }
+.kt-modelo .finder-links { margin-top: 10px; }
+
+/* Grupos: miniatura = a própria prancha */
+.kt-grupos { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+.kt-grupo {
+  border: 1px solid #ccc; background: #fff; cursor: pointer; padding: 0; text-align: left;
+  display: flex; flex-direction: column; font-family: inherit;
+}
+.kt-grupo:hover, .kt-grupo:focus { border-color: var(--red); outline: none; }
+.kt-grupo .kt-mini { height: 150px; display: flex; align-items: center; justify-content: center; background: #fff; overflow: hidden; }
+.kt-grupo .kt-mini img { max-width: 100%; max-height: 100%; }
+.kt-grupo .kt-rot { padding: 8px 10px; border-top: 1px solid #eee; font-size: 12.5px; font-weight: 600; text-transform: uppercase; }
+.kt-grupo .kt-rot b { color: var(--red-dark); margin-right: 6px; }
+
+/* Linha de peça: foto da peça (do nosso produto) e selos do catálogo */
+.part-row .kt-foto-peca {
+  flex: 0 0 52px; width: 52px; height: 52px; border: 1px solid #eee; background: #fff;
+  display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: zoom-in;
+}
+.part-row .kt-foto-peca img { max-width: 100%; max-height: 100%; }
+.part-row .kt-foto-peca.sem { cursor: default; background: #f6f6f6; color: #bbb; font-size: 18px; }
+.part-row .kt-adic { display: block; font-size: 12px; color: var(--gray); margin-top: 2px; }
+.kt-selo { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 7px; border-radius: 3px; }
+.kt-selo.fora { background: #fdecec; color: #b91c1c; }
+.kt-selo.novo { background: var(--red-soft); color: var(--red-dark); }
+.kt-selo.conjunto { background: #eee; color: #555; }
+.part-row.nao-pedivel { opacity: .75; }
+
+/* Pontos da KTM são círculos sobre o número da peça */
+.diag-canvas .hotspot.kt-ponto { border-radius: 50%; }
+
+.kt-aviso { background: var(--red-soft); border-left: 4px solid var(--red); padding: 10px 14px; margin: 0 0 14px; font-size: 13px; }
+
+@media (max-width: 720px) {
+  .kt-modelo .kt-foto { width: 100%; }
+  .kt-grupos { grid-template-columns: repeat(2, 1fr); }
+}

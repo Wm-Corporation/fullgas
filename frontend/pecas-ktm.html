@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fullgas — Catálogo de Peças KTM</title>
+  <link rel="icon" type="image/png" href="img/favicon.png?v=20261028a">
+  <link rel="apple-touch-icon" href="img/favicon.png?v=20261028a">
+  <link rel="stylesheet" href="css/styles.css?v=20261112a">
+  <link rel="stylesheet" href="css/pecas-ktm.css?v=20261112a">
+</head>
+<body class="fd-marca protegida" data-cache="products">
+
+  <div class="finder-top">
+    <div class="fd-deco" aria-hidden="true"></div>
+    <div class="fd-hero-txt">
+      <button class="btn-voltar" id="fd-voltar" type="button">Voltar</button>
+      <div class="fd-eyebrow">Em teste · só administradores</div>
+      <h1>Catálogo de Peças KTM</h1>
+      <p class="fd-sub">Peças originais KTM, Husqvarna e GASGAS. O que tem em estoque vai para o pedido; o resto vira black order.</p>
+      <div class="who" id="fd-who"></div>
+    </div>
+    <div class="finder-top-right">
+      <a class="fd-cart" href="/loja#/carrinho" title="Ir ao carrinho da loja">🛒<span class="cart-n" id="fd-cart-n">0</span></a>
+      <a class="fd-logo" href="/admin" title="Voltar ao painel"><img src="img/logo-fullgas-marca.png?v=20261028a" alt="FULLGAS"></a>
+    </div>
+  </div>
+
+  <main class="finder">
+
+    <div class="search-panel" id="search-panel">
+      <button class="sp-title" id="sp-toggle" type="button">▾ Buscar peças</button>
+      <a href="#" class="reset" id="sp-reset">Limpar</a>
+
+      <div id="sp-body">
+        <div class="kt-marcas" id="kt-marcas" role="tablist" aria-label="Marca"></div>
+
+        <div class="sp-grid">
+          <div>
+            <label for="sp-vin">Buscar pelo chassi (VIN)</label>
+            <input id="sp-vin" type="text" autocomplete="off" maxlength="17" placeholder="Ex.: VBKV1940XNM123456">
+
+            <label style="margin-top:12px;">Parte da moto</label>
+            <div class="radio-line fd-seg">
+              <label><input type="radio" name="sp-cat" value="engine"> Motor</label>
+              <label><input type="radio" name="sp-cat" value="chassi" checked> Chassi</label>
+            </div>
+
+            <button class="btn fd-btn-buscar" id="sp-search" type="button">Buscar</button>
+          </div>
+
+          <div>
+            <label for="kt-busca">Ou escolha o modelo</label>
+            <input id="kt-busca" type="text" autocomplete="off" placeholder="Digite modelo e ano. Ex.: MC 250F 2025">
+            <div class="kt-resultados hidden" id="kt-resultados" role="listbox"></div>
+            <button class="link-action kt-arvore-btn" id="kt-arvore-btn" type="button">▸ Navegar pela árvore de modelos</button>
+            <div class="model-cascade hidden" id="kt-arvore"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="fd-view"></div>
+  </main>
+
+  <script src="js/config.js?v=20260727a"></script>
+  <script src="js/store.js?v=20261112a"></script>
+  <script src="js/api-adapter.js?v=20261112b"></script>
+  <script src="js/ao-vivo.js?v=20260831a"></script>
+  <script src="js/pecas-ktm.js?v=20261112a"></script>
+</body>
+</html>

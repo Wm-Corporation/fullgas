@@ -2,6 +2,7 @@
 import * as service from '../services/produto.service.js';
 import { miniaturaDe, prepararMiniaturas } from '../miniaturas.js';
 import { percentualDoUsuario, aplicarPercentual } from '../lista-preco.js';
+import { CATEGORIA_CATALOGO, ehAdmin } from '../catalogo-produto.js';
 
 // URL relativa (/uploads/...) → absoluta. URL já absoluta passa intacta.
 function urlAbs(req, rel) {
@@ -28,16 +29,20 @@ function toProduto(req, r, pct = 0) {
   };
 }
 
+// Peças do catálogo KTM fora do Tiny: só o admin vê (catálogo em teste).
+const visivel = (req) => (r) => ehAdmin(req.user) || r.CategoriaCodigo !== CATEGORIA_CATALOGO;
+
 export async function listar(req, res, next) {
   try {
     const [rows, pct] = await Promise.all([service.listar(req.query.categoria), percentualDoUsuario(req.user)]);
-    res.json(rows.map(r => toProduto(req, r, pct)));
+    res.json(rows.filter(visivel(req)).map(r => toProduto(req, r, pct)));
   } catch (e) { next(e); }
 }
 
 export async function obter(req, res, next) {
   try {
     const [row, pct] = await Promise.all([service.obter(req.params.sku), percentualDoUsuario(req.user)]);
+    if (!visivel(req)(row)) return res.status(404).json({ erro: 'Produto não encontrado.' });
     res.json(toProduto(req, row, pct));
   } catch (e) { next(e); }
 }

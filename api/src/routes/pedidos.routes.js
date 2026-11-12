@@ -11,6 +11,7 @@ import {
 import { registrarEventoPedido, historicoDoPedido, resumoPecas } from '../historico-pedido.js';
 import { listaDaEmpresa, aplicarPercentual } from '../lista-preco.js';
 import { criarBlackOrders } from '../black-order.js';
+import { ehAdmin, skusDoCatalogo } from '../catalogo-produto.js';
 import { criarNotificacao } from '../notificacoes.js';
 
 const router = Router();
@@ -419,6 +420,14 @@ router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async 
     if (!skuItem || !Number.isInteger(qtd) || qtd <= 0 || qtd > QTD_MAX)
       return res.status(400).json({ erro: 'Item inválido na cesta.' });
     merged.set(skuItem, (merged.get(skuItem) || 0) + qtd);
+  }
+
+  // Peça do catálogo KTM fora do Tiny: só admin compra enquanto o catálogo está em teste.
+  if (!ehAdmin(req.user)) {
+    try {
+      const doCatalogo = await skusDoCatalogo([...merged.keys()]);
+      if (doCatalogo.size) return res.status(400).json({ erro: 'Produto não encontrado: ' + [...doCatalogo][0] });
+    } catch (e) { return next(e); }
   }
 
   // Confere o saldo real no Tiny antes (estoque compartilhado com o Magento). Tiny fora não trava.
