@@ -24,6 +24,8 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 /* Zoom geral de 10% (o site abre como se o navegador estivesse em 110%). Impressão e PDF voltam para 1. */
+/* Páginas protegidas ficam invisíveis até o FG.guard() aprovar a sessão (sem 'flash' da casca). */
+body.protegida:not(.liberada) { visibility: hidden; }
 body { font-family: var(--font); font-size: 14px; color: var(--ink); background: var(--bg); zoom: var(--zoom-ui); }
 a { color: var(--red); text-decoration: none; }
 a:hover { text-decoration: underline; }

@@ -369,6 +369,7 @@
       if (papel === 'admin' && s.papel !== 'admin') {
         location.href = '/portal'; return null;   // sem alert(): ele travava a aba
       }
+      document.body.classList.add('liberada');
       return s;
     },
 
