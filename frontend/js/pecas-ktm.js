@@ -322,6 +322,14 @@
     }).join('') + '</select></label>';
   }
 
+  // A KTM manda quantidade 0 nas peças fora da montagem original: calços de regulagem, molas de outra
+  // carga, kits de reparo e de manutenção, acessórios. Pedem-se à parte, na quantidade que precisar.
+  function qtdConjunto(p) {
+    return p.quantidade > 0
+      ? '<span class="pr-ref">Qtd. no conjunto: <b>' + p.quantidade + '</b></span>'
+      : '<span class="kt-selo opcional" title="Não faz parte da montagem original da moto (calço de regulagem, mola alternativa, kit de reparo ou acessório). Peça na quantidade que precisar.">Opcional · fora da montagem original</span>';
+  }
+
   function renderGrupo(modeloId, lado, grupoId) {
     fdView.innerHTML = '<p class="muted">Carregando peças…</p>';
     var vigente = telaVigente();
@@ -349,7 +357,7 @@
             '<span class="pr-preco">' + precoDe(p) + '</span>' +
           '</div>' +
           '<div class="pr-bot">' +
-            '<span class="pr-info"><span class="pr-ref">Qtd. no conjunto: <b>' + p.quantidade + '</b></span>' +
+            '<span class="pr-info">' + qtdConjunto(p) +
               '<span class="kt-sit">' + situacao(p) + '</span>' + seletorClasse(p, i) + '</span>' +
             (p.pedivel
               ? '<span class="pr-acao"><label class="pr-sel"><input type="checkbox" class="pr-chk" data-row="' + i + '"> Selecionar</label>' +
