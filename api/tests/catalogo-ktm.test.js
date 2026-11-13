@@ -13,8 +13,29 @@ vi.mock('../src/db.js', () => ({
   sql: {}
 }));
 
+// Tiny falso: a lista de produtos (para o índice e a pesquisa) e a importação.
+let tinyLista = [];
+let tinyPesquisas = [];
+let importacoes = [];
+let listarTrava = null;          // Promise que segura a listagem (simula o índice ainda montando)
+let aoImportar = () => ({ status: 'ok', msg: 'Importado.' });
+vi.mock('../src/tiny.js', () => ({
+  listarProdutos: async (pagina, pesquisa = '') => {
+    if (listarTrava) await listarTrava;
+    if (pesquisa) tinyPesquisas.push(pesquisa);
+    const produtos = tinyLista.filter(p => !pesquisa || p.sku.startsWith(pesquisa.toUpperCase()));
+    return { pagina, totalPaginas: 1, produtos };
+  },
+  importarProduto: async (tinyId, categoriaId, opts) => {
+    importacoes.push({ tinyId, categoriaId, opts });
+    const t = tinyLista.find(p => p.tinyId === tinyId);
+    return { tinyId, sku: t?.sku, ...aoImportar(t) };
+  }
+}));
+
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'chave-de-teste-com-mais-de-32-caracteres-ok';
 const cat = await import('../src/catalogo-ktm.js');
+const indice = await import('../src/tiny-indice.js');
 const { default: rotas } = await import('../src/routes/catalogo-ktm.routes.js');
 const produtoCtl = await import('../src/controllers/produto.controller.js');
 const categoriaCtl = await import('../src/controllers/categoria.controller.js');
@@ -84,6 +105,13 @@ describe('leitura das páginas da KTM', () => {
     ]);
   });
 
+  it('kit de pistão com classe no código é pedível; espaço solto não', () => {
+    expect(cat.pedivel('55430007000 I')).toBe(true);
+    expect(cat.pedivel('A44030007010 II')).toBe(true);
+    expect(cat.pedivel('SPNO')).toBe(false);
+    expect(cat.pedivel('ABC DEF')).toBe(false);
+  });
+
   it('peças: SPNO não é pedível; espaços normalizados', () => {
     const p = cat.lerPecas(PECAS);
     expect(p[0]).toMatchObject({ sku: 'SPNO', pedivel: false, adicional: 'A460C105Y406000' });
@@ -121,11 +149,45 @@ cat._trocarFetch(async (url, opts) => {
   return new Response('nao', { status: 404 });
 });
 
+const T = (tinyId, sku, preco = 10) => ({ tinyId, sku, nome: 'PECA ' + sku, preco, situacao: 'A' });
+
+describe('índice de códigos do Tiny', () => {
+  beforeEach(() => { indice._limpar(); listarTrava = null; });
+
+  it('separa a classe do kit de pistão', () => {
+    expect(indice.separarClasse('55430007000 I')).toEqual({ base: '55430007000', classe: 'I' });
+    expect(indice.separarClasse('55430007000 ii')).toEqual({ base: '55430007000', classe: 'II' });
+    expect(indice.separarClasse('A46001035001')).toEqual({ base: 'A46001035001', classe: null });
+  });
+
+  it('monta pelas páginas do Tiny, ignora inativos e acha pelo código da KTM', async () => {
+    const paginas = {
+      1: { totalPaginas: 2, produtos: [T('1', '0025080256'), T('2', '55430007000 II'), { ...T('3', 'VELHO'), situacao: 'I' }] },
+      2: { totalPaginas: 2, produtos: [T('4', '55430007000 I')] }
+    };
+    const ix = await indice.montar(p => paginas[p]);
+    expect(ix.total).toBe(3);
+    expect(indice.buscar('0025080256', ix).map(t => t.tinyId)).toEqual(['1']);
+    expect(indice.buscar('55430007000', ix).map(t => t.sku)).toEqual(['55430007000 I', '55430007000 II']);
+    expect(indice.buscar('VELHO', ix)).toEqual([]);
+    expect(indice.buscar('NAOEXISTE', ix)).toEqual([]);
+  });
+
+  it('sem índice, buscar devolve null (ainda não sabe)', () => {
+    expect(indice.buscar('0025080256', null)).toBeNull();
+  });
+});
+
 describe('rotas do catálogo KTM', () => {
-  beforeEach(() => {
-    consultas = []; pedidas.length = 0;
+  beforeEach(async () => {
+    consultas = []; pedidas.length = 0; importacoes = []; tinyPesquisas = [];
     fs.rmSync(cat.PASTA + '/gasgas', { recursive: true, force: true });
     responder = () => [];
+    listarTrava = null;
+    aoImportar = () => ({ status: 'ok', msg: 'Importado.' });
+    tinyLista = [];
+    indice._limpar();
+    await indice.atualizar({ forcar: true });
   });
 
   it('cliente não entra (403)', async () => {
@@ -147,7 +209,9 @@ describe('rotas do catálogo KTM', () => {
     expect(pedidas).toHaveLength(1);
   });
 
-  it('grupo: cruza peças com o Produto; cookie da sessão volta ao site', async () => {
+  it('grupo: peça no portal mostra estoque e preço; cookie da sessão volta ao site', async () => {
+    tinyLista = [T('99', '0025080256')];
+    await indice.atualizar({ forcar: true });
     responder = (s) => /FROM dbo\.Produto p JOIN dbo\.Categoria/.test(s)
       ? [{ Sku: '0025080256', Nome: 'Parafuso', Preco: 12.5, Estoque: 3, TinyId: '99', ImagemUrl: null, Categoria: 'pecas' }]
       : [];
@@ -155,9 +219,33 @@ describe('rotas do catálogo KTM', () => {
     expect(r.status).toBe(200);
     expect(r.body.vizinhos).toEqual({ anterior: null, proxima: 67002 });
     expect(r.body.mapa).toEqual({ arquivo: '24A5400110.png', largura: 547, altura: 792 });
+    expect(r.body.indiceTiny).toMatchObject({ pronto: true, produtos: 1 });
     expect(r.body.pecas[0].loja).toBeNull();
-    expect(r.body.pecas[1].loja).toMatchObject({ existe: true, foraDoTiny: false, estoque: 3, preco: 12.5 });
+    expect(r.body.pecas[1].loja).toMatchObject({
+      origem: 'portal', opcoes: [{ artigo: '0025080256', noPortal: true, estoque: 3, preco: 12.5 }]
+    });
     expect(pedidas.slice(1).every(p => /ASP\.NET_SessionId=abc/.test(p.opts.headers.Cookie || ''))).toBe(true);
+  });
+
+  it('grupo: peça só no Tiny aparece como "tiny", com o preço do Tiny', async () => {
+    tinyLista = [T('77', '0025080256', 4.9)];
+    await indice.atualizar({ forcar: true });
+    const r = await request(app(ADMIN)).get('/api/catalogo-ktm/gasgas/modelos/1003420981/chassi/grupos/72726');
+    expect(r.body.pecas[1].loja).toEqual({
+      origem: 'tiny',
+      opcoes: [{ artigo: '0025080256', classe: null, tinyId: '77', noPortal: false, estoque: null, preco: 4.9, foto: null, miniatura: null }]
+    });
+  });
+
+  it('grupo: em nenhum lugar = "fora"; índice montando = "verificar"', async () => {
+    let r = await request(app(ADMIN)).get('/api/catalogo-ktm/gasgas/modelos/1003420981/chassi/grupos/72726');
+    expect(r.body.pecas[1].loja.origem).toBe('fora');
+    indice._limpar();
+    let soltar; listarTrava = new Promise(s => { soltar = s; });
+    r = await request(app(ADMIN)).get('/api/catalogo-ktm/gasgas/modelos/1003420981/chassi/grupos/72726');
+    expect(r.body.pecas[1].loja.origem).toBe('verificar');
+    expect(r.body.indiceTiny).toMatchObject({ pronto: false, montando: true });
+    soltar();
   });
 
   it('grupo de outro modelo = 404', async () => {
@@ -179,10 +267,101 @@ describe('rotas do catálogo KTM', () => {
       .send({ marca: 'gasgas', itens: [{ sku: 'a46001035001', nome: 'Rubber bushing' }] });
     expect(r.status).toBe(200);
     expect(r.body.criados).toBe(1);
-    expect(r.body.pecas[0]).toMatchObject({ sku: 'A46001035001', existe: true, foraDoTiny: true, preco: null });
+    expect(r.body.importados).toBe(0);
+    expect(r.body.pecas[0]).toMatchObject({ sku: 'A46001035001', artigo: 'A46001035001', foraDoTiny: true, preco: null });
+    expect(importacoes).toHaveLength(0);
     const ins = consultas.find(c => /INSERT INTO dbo\.Produto/.test(c.sql));
     expect(ins.sql).toMatch(/SELECT @sku, @nome, @cat, @desc, 0, 0/);
     expect(ins.params).toMatchObject({ sku: 'A46001035001', cat: 42 });
+  });
+
+  // Banco falso em que a importação "acontece": depois dela o produto aparece ligado ao Tiny.
+  function bancoComImportacao(linhaImportada) {
+    let importou = false;
+    aoImportar = () => { importou = true; return { status: 'ok', msg: 'Importado.' }; };
+    responder = (s) => {
+      if (/IF NOT EXISTS \(SELECT 1 FROM dbo\.Categoria/.test(s)) return [{ CategoriaId: 42 }];
+      if (/FROM dbo\.Produto p JOIN dbo\.Categoria/.test(s)) return importou ? [linhaImportada] : [];
+      return [];
+    };
+  }
+
+  it('peça só no Tiny: é importada (prioritária, categoria do catálogo) e volta com estoque real', async () => {
+    tinyLista = [T('77', '0025080256', 4.9)];
+    await indice.atualizar({ forcar: true });
+    bancoComImportacao({ Sku: '0025080256', Nome: 'PARAFUSO', Preco: 4.9, Estoque: 30, TinyId: '77', ImagemUrl: null, Categoria: 'catalogo-ktm' });
+    const r = await request(app(ADMIN)).post('/api/catalogo-ktm/pecas')
+      .send({ marca: 'gasgas', itens: [{ sku: '0025080256', nome: 'Screw', artigo: '0025080256' }] });
+    expect(r.status).toBe(200);
+    expect(importacoes).toEqual([{ tinyId: '77', categoriaId: 42, opts: { prioritario: true } }]);
+    expect(r.body).toMatchObject({ importados: 1, criados: 0, erros: [] });
+    expect(r.body.pecas[0]).toMatchObject({ sku: '0025080256', artigo: '0025080256', noPortal: true, estoque: 30, foraDoTiny: false });
+    expect(consultas.some(c => /INSERT INTO dbo\.Produto/.test(c.sql))).toBe(false);
+  });
+
+  it('kit de pistão: sem a classe escolhida não importa; com a classe, importa a certa', async () => {
+    tinyLista = [T('8', '55430007000 I'), T('9', '55430007000 II')];
+    await indice.atualizar({ forcar: true });
+    let r = await request(app(ADMIN)).post('/api/catalogo-ktm/pecas')
+      .send({ marca: 'gasgas', itens: [{ sku: '55430007000', nome: 'Kit pistão' }] });
+    expect(r.status).toBe(409);
+    expect(r.body.erro).toMatch(/escolha a classe \(I ou II\)/);
+    expect(importacoes).toHaveLength(0);
+
+    bancoComImportacao({ Sku: '55430007000 II', Nome: 'KIT PISTAO B', Preco: 900, Estoque: 2, TinyId: '9', ImagemUrl: null, Categoria: 'catalogo-ktm' });
+    r = await request(app(ADMIN)).post('/api/catalogo-ktm/pecas')
+      .send({ marca: 'gasgas', itens: [{ sku: '55430007000', nome: 'Kit pistão', artigo: '55430007000 II' }] });
+    expect(r.status).toBe(200);
+    expect(importacoes.map(i => i.tinyId)).toEqual(['9']);
+    expect(r.body.pecas[0]).toMatchObject({ artigo: '55430007000 II', estoque: 2, noPortal: true });
+  });
+
+  it('KTM já diz a classe ("… II"): só a classe certa do Tiny, sem pedir escolha', async () => {
+    tinyLista = [T('8', '55430007000 I'), T('9', '55430007000 II')];
+    await indice.atualizar({ forcar: true });
+    expect(indice.buscar('55430007000 II').map(t => t.tinyId)).toEqual(['9']);
+    bancoComImportacao({ Sku: '55430007000 II', Nome: 'KIT PISTAO B', Preco: 900, Estoque: 2, TinyId: '9', ImagemUrl: null, Categoria: 'catalogo-ktm' });
+    const r = await request(app(ADMIN)).post('/api/catalogo-ktm/pecas')
+      .send({ marca: 'gasgas', itens: [{ sku: '55430007000 II', nome: 'Piston cpl. II' }] });
+    expect(r.status).toBe(200);
+    expect(importacoes.map(i => i.tinyId)).toEqual(['9']);
+  });
+
+  it('índice ainda montando: pesquisa a peça direto no Tiny antes de decidir', async () => {
+    tinyLista = [T('77', '0025080256')];
+    indice._limpar();
+    let soltar; listarTrava = new Promise(s => { soltar = s; });
+    indice.atualizar();                       // montagem presa
+    listarTrava = null;                       // a pesquisa direta não fica presa
+    bancoComImportacao({ Sku: '0025080256', Nome: 'P', Preco: 5, Estoque: 1, TinyId: '77', ImagemUrl: null, Categoria: 'catalogo-ktm' });
+    const r = await request(app(ADMIN)).post('/api/catalogo-ktm/pecas')
+      .send({ marca: 'gasgas', itens: [{ sku: '0025080256', nome: 'Screw' }] });
+    expect(r.status).toBe(200);
+    expect(tinyPesquisas).toContain('0025080256');
+    expect(importacoes.map(i => i.tinyId)).toEqual(['77']);
+    soltar();
+  });
+
+  it('Tiny recusou a importação: avisa e não cadastra fora do Tiny', async () => {
+    tinyLista = [T('77', '0025080256')];
+    await indice.atualizar({ forcar: true });
+    aoImportar = () => ({ status: 'erro', msg: 'Tiny respondeu HTTP 500.' });
+    responder = (s) => (/IF NOT EXISTS \(SELECT 1 FROM dbo\.Categoria/.test(s) ? [{ CategoriaId: 42 }] : []);
+    const r = await request(app(ADMIN)).post('/api/catalogo-ktm/pecas')
+      .send({ marca: 'gasgas', itens: [{ sku: '0025080256', nome: 'Screw' }] });
+    expect(r.status).toBe(409);
+    expect(r.body.erro).toMatch(/o Tiny não importou — Tiny respondeu HTTP 500/);
+    expect(consultas.some(c => /INSERT INTO dbo\.Produto/.test(c.sql))).toBe(false);
+  });
+
+  it('peça já no portal e ligada ao Tiny: nada a importar nem criar', async () => {
+    responder = (s) => /FROM dbo\.Produto p JOIN dbo\.Categoria/.test(s)
+      ? [{ Sku: '0025080256', Nome: 'P', Preco: 5, Estoque: 9, TinyId: '77', ImagemUrl: null, Categoria: 'pecas' }] : [];
+    const r = await request(app(ADMIN)).post('/api/catalogo-ktm/pecas')
+      .send({ marca: 'gasgas', itens: [{ sku: '0025080256', nome: 'Screw' }] });
+    expect(r.body).toMatchObject({ importados: 0, criados: 0 });
+    expect(r.body.pecas[0]).toMatchObject({ estoque: 9, noPortal: true });
+    expect(importacoes).toHaveLength(0);
   });
 
   it('SPNO e código inválido são recusados', async () => {

@@ -10,13 +10,9 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
-import {
-  listarProdutos, obterProdutoCompleto, aplicarAtualizacao,
-  sincronizarLote, registrarLog
-} from '../tiny.js';
+import { listarProdutos, importarProduto, sincronizarLote } from '../tiny.js';
 import { exportarPedido } from '../tiny-pedidos.js';
 import { prepararMiniaturas } from '../miniaturas.js';
-import { erroSku } from '../validacao.js';
 
 const router = Router();
 
@@ -84,61 +80,7 @@ router.post('/tiny/importar', requireAuth, requireAdmin, async (req, res, next) 
     const categoriaId = cat[0].CategoriaId;
 
     const resultados = [];
-    for (const tinyId of tinyIds) {
-      try {
-        const jaVinculado = await query('SELECT Sku FROM dbo.Produto WHERE TinyId = @tid', { tid: tinyId });
-        if (jaVinculado.length) {
-          resultados.push({ tinyId, sku: jaVinculado[0].Sku, status: 'ignorado', msg: 'Já importado.' });
-          continue;
-        }
-
-        const dados = await obterProdutoCompleto(tinyId);
-        if (!dados.sku) {
-          await registrarLog(tinyId, null, 'importacao', 'erro', 'Produto sem código (SKU) no Tiny.');
-          resultados.push({ tinyId, status: 'erro', msg: 'Produto sem código (SKU) no Tiny.' });
-          continue;
-        }
-
-        // SKU do Tiny passa pela mesma validação do cadastro manual.
-        const errSku = erroSku(dados.sku);
-        if (errSku) {
-          await registrarLog(tinyId, dados.sku, 'importacao', 'erro', errSku);
-          resultados.push({ tinyId, sku: dados.sku, status: 'erro', msg: errSku });
-          continue;
-        }
-
-        const existente = await query('SELECT ProdutoId FROM dbo.Produto WHERE Sku = @sku', { sku: dados.sku });
-        if (existente.length) {
-          await query(
-            'UPDATE dbo.Produto SET TinyId = @tid, TinyAtivo = 1 WHERE ProdutoId = @pid',
-            { tid: tinyId, pid: existente[0].ProdutoId }
-          );
-        } else {
-          await query(
-            `INSERT INTO dbo.Produto
-               (Sku, Nome, CategoriaId, Descricao, Preco, Estoque, ImagemUrl,
-                TinyId, TinyAtivo, TinySincronizadoEm)
-             VALUES (@sku, @nome, @catId, @desc, @preco, @est, @foto,
-                     @tid, 1, SYSUTCDATETIME())`,
-            {
-              sku: dados.sku, nome: dados.nome || dados.sku, catId: categoriaId,
-              desc: dados.descricao, preco: dados.preco, est: dados.estoque,
-              foto: dados.foto, tid: tinyId
-            }
-          );
-        }
-        // Vincular também espelha os campos na hora (e carimba a sincronização).
-        const r = await aplicarAtualizacao(tinyId, dados, 'importacao');
-        resultados.push({
-          tinyId, sku: dados.sku,
-          status: r.status === 'ok' ? 'ok' : r.status,
-          msg: existente.length ? 'SKU já existia — vinculado ao Tiny.' : 'Importado.'
-        });
-      } catch (e) {
-        await registrarLog(tinyId, null, 'importacao', 'erro', e.message);
-        resultados.push({ tinyId, status: 'erro', msg: e.message });
-      }
-    }
+    for (const tinyId of tinyIds) resultados.push(await importarProduto(tinyId, categoriaId));
     prepararMiniaturas();   // fotos dos importados (segundo plano)
     res.status(201).json({ ...resumo(resultados), resultados });
   } catch (e) { tratarErro(e, res, next); }

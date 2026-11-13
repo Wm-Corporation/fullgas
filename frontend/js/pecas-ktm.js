@@ -286,23 +286,40 @@
   /* =========================================================
      TELA: grupo (peças + prancha com pontos clicáveis e zoom)
      ========================================================= */
+  // loja = { origem: 'portal'|'tiny'|'fora'|'verificar', opcoes: [{ artigo, classe, noPortal, estoque, preco, foto }] }.
+  // p.escolha = índice da opção (kit de pistão: classe I, II...).
+  function opcaoDe(p) { var l = p.loja || {}; return (l.opcoes || [])[p.escolha || 0] || {}; }
   function situacao(p) {
     if (!p.pedivel) return '<span class="kt-selo conjunto">Vem só no conjunto</span>';
-    var l = p.loja || {};
-    if (l.foraDoTiny) return '<span class="kt-selo fora" title="Ainda não cadastrada no Tiny: o pedido vira black order e o preço é definido na chegada">Fora do Tiny · black order</span>';
-    return '<span class="pt-status">' + FG.seloEstoque({ estoque: l.estoque }) + '</span>';
+    var o = opcaoDe(p);
+    if (o.noPortal) return '<span class="pt-status">' + FG.seloEstoque({ estoque: o.estoque }) + '</span>';
+    switch ((p.loja || {}).origem) {
+      case 'tiny': return '<span class="kt-selo tiny" title="Cadastrada no Tiny, ainda não importada no portal. Ao adicionar, vem com preço e estoque reais.">No Tiny · importa ao adicionar</span>';
+      case 'verificar': return '<span class="kt-selo verificar" title="A lista de códigos do Tiny ainda está sendo lida. A peça é conferida no Tiny quando for para a cesta.">Conferida no Tiny ao adicionar</span>';
+      default: return '<span class="kt-selo fora" title="Não existe no Tiny: o pedido vira black order e o preço é definido na chegada">Fora do Tiny · black order</span>';
+    }
   }
   function precoDe(p) {
-    var l = p.loja || {};
     if (!p.pedivel) return '';
-    return l.preco ? FG.fmtMoney(l.preco) : '<span class="muted" title="Preço definido quando a peça chegar">a definir</span>';
+    var o = opcaoDe(p);
+    return o.preco ? FG.fmtMoney(o.preco) : '<span class="muted" title="Preço definido quando a peça chegar">a definir</span>';
   }
   function fotoPeca(p) {
-    var l = p.loja || {};
-    var src = l.miniatura || l.foto;
+    var o = opcaoDe(p);
+    var src = o.miniatura || o.foto;
     return src
-      ? '<span class="kt-foto-peca" data-foto="' + esc(l.foto || src) + '"><img loading="lazy" src="' + esc(src) + '" alt=""></span>'
+      ? '<span class="kt-foto-peca" data-foto="' + esc(o.foto || src) + '"><img loading="lazy" src="' + esc(src) + '" alt=""></span>'
       : '<span class="kt-foto-peca sem" aria-hidden="true">⚙</span>';
+  }
+  // Kit de pistão: o Tiny tem um código por classe ("… I" = pistão A, "… II" = pistão B).
+  function seletorClasse(p, i) {
+    var ops = (p.loja || {}).opcoes || [];
+    if (ops.length < 2) return '';
+    return '<label class="kt-classe">Classe <select data-row="' + i + '">' + ops.map(function (o, k) {
+      return '<option value="' + k + '"' + (k === (p.escolha || 0) ? ' selected' : '') + '>' +
+        esc(o.classe ? o.classe + (o.classe === 'I' ? ' (pistão A)' : o.classe === 'II' ? ' (pistão B)' : '') : o.artigo) +
+        '</option>';
+    }).join('') + '</select></label>';
   }
 
   function renderGrupo(modeloId, lado, grupoId) {
@@ -322,7 +339,7 @@
           ' data-num="' + esc(p.sku) + '">' +
           '<div class="pr-top">' +
             '<span class="pr-num">' + esc(p.seq == null ? '—' : String(p.seq)) + '</span>' +
-            fotoPeca(p) +
+            '<span class="kt-foto-slot">' + fotoPeca(p) + '</span>' +
             '<span class="pr-id">' +
               '<span class="pr-nome">' + esc(p.nome) + (p.novo ? ' <span class="kt-selo novo">Nova</span>' : '') + '</span>' +
               '<span class="pr-sku">' + esc(p.pedivel ? p.sku : (p.adicional || p.sku)) + '</span>' +
@@ -331,7 +348,8 @@
             '<span class="pr-preco">' + precoDe(p) + '</span>' +
           '</div>' +
           '<div class="pr-bot">' +
-            '<span class="pr-info"><span class="pr-ref">Qtd. no conjunto: <b>' + p.quantidade + '</b></span>' + situacao(p) + '</span>' +
+            '<span class="pr-info"><span class="pr-ref">Qtd. no conjunto: <b>' + p.quantidade + '</b></span>' +
+              '<span class="kt-sit">' + situacao(p) + '</span>' + seletorClasse(p, i) + '</span>' +
             (p.pedivel
               ? '<span class="pr-acao"><label class="pr-sel"><input type="checkbox" class="pr-chk" data-row="' + i + '"> Selecionar</label>' +
                 '<input class="qn" type="number" min="0" step="1" value="0" aria-label="Quantidade" data-row="' + i + '"></span>'
@@ -339,7 +357,16 @@
           '</div></div>';
       }).join('');
 
-      var foraDoTiny = g.pecas.filter(function (p) { return p.pedivel && p.loja && p.loja.foraDoTiny; }).length;
+      var conta = { tiny: 0, fora: 0, verificar: 0 };
+      g.pecas.forEach(function (p) {
+        var o = p.pedivel && p.loja && p.loja.origem;
+        if (o && conta[o] !== undefined && !opcaoDe(p).noPortal) conta[o]++;
+      });
+      var avisos = [];
+      if (conta.tiny) avisos.push(conta.tiny + ' peça(s) estão no Tiny mas ainda não no portal: ao adicionar, são importadas com preço e estoque reais.');
+      if (conta.fora) avisos.push(conta.fora + ' peça(s) não existem no Tiny: ao adicionar, são cadastradas no portal (só admin vê) e o checkout as manda para a black order.');
+      if (conta.verificar) avisos.push('A lista de códigos do Tiny ainda está sendo lida (leva uns 2 minutos na primeira vez). ' +
+        conta.verificar + ' peça(s) serão conferidas no Tiny quando forem para a cesta.');
 
       fdView.innerHTML =
         '<div class="finder-crumb"><a href="' + base + '">' + esc(g.modelo.nome) + '</a>' +
@@ -349,8 +376,7 @@
           '<button class="btn" id="fa-next" type="button"' + (g.vizinhos.proxima ? '' : ' disabled') + '>PRÓXIMO GRUPO</button>' +
           '<a class="btn" href="#/' + marca + '/' + g.modelo.id + '/' + outro + '">VER ' + (outro === 'engine' ? 'MOTOR' : 'CHASSI') + '</a>' +
         '</div>' +
-        (foraDoTiny ? '<div class="kt-aviso">' + foraDoTiny + ' peça(s) deste grupo ainda não estão no Tiny. ' +
-          'Ao adicionar, elas são cadastradas no portal (só admin vê) e o checkout as manda para a black order.</div>' : '') +
+        avisos.map(function (a) { return '<div class="kt-aviso">' + esc(a) + '</div>'; }).join('') +
         '<div class="part-layout">' +
           '<div class="part-col">' +
             '<div class="part-toolbar"><span class="muted">' + esc(g.grupo.numero + ' — ' + g.grupo.nome) + '</span>' +
@@ -423,10 +449,21 @@
         sincronizarPontos();
       });
     });
-    Array.prototype.forEach.call(fdView.querySelectorAll('.kt-foto-peca[data-foto]'), function (f) {
-      f.addEventListener('click', function () {
-        var row = f.closest('.part-row');
-        ampliar(row.querySelector('.pr-nome').textContent, f.getAttribute('data-foto'));
+    // Foto ampliada (delegado: a foto muda quando troca a classe).
+    fdView.querySelector('.part-list') && fdView.querySelector('.part-list').addEventListener('click', function (e) {
+      var f = e.target.closest('.kt-foto-peca[data-foto]');
+      if (f) ampliar(f.closest('.part-row').querySelector('.pr-nome').textContent, f.getAttribute('data-foto'));
+    });
+    // Troca de classe (kit de pistão): atualiza foto, preço e situação da linha.
+    Array.prototype.forEach.call(fdView.querySelectorAll('.kt-classe select'), function (s) {
+      s.addEventListener('change', function () {
+        var i = Number(s.getAttribute('data-row'));
+        var p = g.pecas[i];
+        p.escolha = Number(s.value) || 0;
+        var row = linhaDe(i);
+        row.querySelector('.kt-foto-slot').innerHTML = fotoPeca(p);
+        row.querySelector('.pr-preco').innerHTML = precoDe(p);
+        row.querySelector('.kt-sit').innerHTML = situacao(p);
       });
     });
 
@@ -450,39 +487,49 @@
       g._limparBusca = function () { if (campo.value) { campo.value = ''; filtrar(); } };
     }
 
-    // Adiciona à cesta. Peça que ainda não existe no portal é cadastrada antes (fora do Tiny → black order).
+    // Adiciona à cesta. O que ainda não está no portal passa antes pela API: importa do Tiny ou,
+    // se não existir lá, cadastra fora do Tiny (vira black order no checkout).
     document.getElementById('fa-cart').addEventListener('click', function () {
       var botao = this;
       var escolhidas = [];
       Array.prototype.forEach.call(fdView.querySelectorAll('.part-row.sel'), function (row) {
         var p = g.pecas[Number(row.getAttribute('data-row'))];
         var qtd = Math.max(0, Math.floor(Number(row.querySelector('.qn').value) || 0));
-        if (p.pedivel && qtd > 0) escolhidas.push({ p: p, qtd: qtd });
+        if (p.pedivel && qtd > 0) escolhidas.push({ p: p, qtd: qtd, o: opcaoDe(p) });
       });
       if (!escolhidas.length) { FG.toast('Marque ao menos uma peça com quantidade.'); return; }
-      var faltam = escolhidas.filter(function (e) { return !(e.p.loja && e.p.loja.existe); });
+      var faltam = escolhidas.filter(function (e) { return !e.o.noPortal; });
       botao.disabled = true;
+      var rotulo = botao.textContent;
+      if (faltam.length) botao.textContent = 'Conferindo no Tiny…';
       var preparo = faltam.length
-        ? FG.ktmGarantirPecas(marca, faltam.map(function (e) { return { sku: e.p.sku, nome: e.p.nome }; }))
+        ? FG.ktmGarantirPecas(marca, faltam.map(function (e) {
+            var ops = (e.p.loja && e.p.loja.opcoes) || [];
+            return { sku: e.p.sku, nome: e.p.nome, artigo: e.p.loja.origem === 'tiny' || ops.length > 1 ? e.o.artigo : undefined };
+          }))
         : Promise.resolve(null);
       preparo.then(function (r) {
-        if (r) r.pecas.forEach(function (x) {
-          escolhidas.forEach(function (e) { if (e.p.sku.toUpperCase() === x.sku) e.p.loja = x; });
-        });
-        var add = 0, bo = 0, recusadas = 0;
+        var prontas = {};
+        (r && r.pecas || []).forEach(function (x) { prontas[x.sku] = x; });
+        var add = 0, bo = 0, falharam = 0;
         escolhidas.forEach(function (e) {
-          var art = (e.p.loja && e.p.loja.artigo) || e.p.sku;
-          if (!FG.cartAdd(art, e.qtd)) { recusadas++; return; }
+          var o = e.o.noPortal ? e.o : prontas[e.p.sku.toUpperCase()];
+          if (!o || !FG.cartAdd(o.artigo, e.qtd)) { falharam++; return; }
           add += e.qtd;
-          if (e.p.loja.foraDoTiny || e.qtd > (e.p.loja.estoque || 0)) bo++;
+          if (o.foraDoTiny || e.qtd > (o.estoque || 0)) bo++;
         });
         botao.disabled = false;
+        botao.textContent = rotulo;
         refreshCart();
+        var erros = (r && r.erros || []).map(function (x) { return x.erro; });
         if (add) FG.toast(add + ' item(ns) enviados à cesta.' +
           (bo ? ' ' + bo + ' peça(s) vão para a black order no checkout.' : '') +
-          (recusadas ? ' ' + recusadas + ' não entraram.' : ''), recusadas ? 'erro' : undefined);
-        else FG.toast('Nenhuma peça entrou na cesta.', 'erro');
-      }, function (e) { botao.disabled = false; falha(e); });
+          (erros.length ? ' Não entraram: ' + erros.join(' ') : (falharam ? ' ' + falharam + ' não entraram.' : '')),
+          falharam ? 'erro' : undefined);
+        else FG.toast(erros.length ? erros.join(' ') : 'Nenhuma peça entrou na cesta.', 'erro');
+        // Peças importadas agora: a lista volta com o estoque e o preço reais.
+        if (r && (r.importados || r.criados)) route();
+      }, function (e) { botao.disabled = false; botao.textContent = rotulo; falha(e); });
     });
   }
 

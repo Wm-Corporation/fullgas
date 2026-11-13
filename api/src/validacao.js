@@ -72,7 +72,8 @@ export function erroCnpj(v) {
 
 // ---- SKU ----
 // Vira atributo HTML no front: só letras, dígitos, . _ / -. Máx. 40 (coluna Produto.Sku).
-const RE_SKU = /^[A-Za-z0-9._/-]{1,40}$/;
+// Única exceção ao espaço: a classe do kit de pistão no fim, como no Tiny ("55430007000 I" = pistão A, "II" = B).
+const RE_SKU = /^(?=.{1,40}$)[A-Za-z0-9._/-]+( (I|II|III|IV))?$/;
 
 export function skuValido(sku) {
   return RE_SKU.test(String(sku || '').trim());
