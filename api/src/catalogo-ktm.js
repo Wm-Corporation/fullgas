@@ -23,8 +23,17 @@ const INTERVALO_MS = 400;
 const TEMPO_LIMITE_MS = 30000;
 const AGENTE = 'Mozilla/5.0 (compatible; FullgasB2B-Catalogo/1.0)';
 
-// Ponto clicável da KTM: círculo de 22px + borda de 3px, ancorado pelo canto inferior esquerdo.
-const PONTO = 28;
+// Ponto clicável da KTM: 22 px no total (padding 10 + borda 1), ancorado pelo canto inferior esquerdo.
+// Medido na página da própria KTM em 13/11/2026; com 28 o círculo ficava 6 px acima do número desenhado.
+const PONTO = 22;
+const PONTO_ANTIGO = 28;
+
+// Grupos guardados antes da correção (cache de 30 dias): o mesmo canto inferior, com o tamanho certo.
+export function corrigirPontos(pontos) {
+  return (pontos || []).map(p => (p.w === PONTO_ANTIGO
+    ? { ...p, y: p.y + PONTO_ANTIGO - PONTO, w: PONTO, h: PONTO }
+    : p));
+}
 
 export class ErroCatalogo extends Error {
   constructor(msg, status = 502) { super(msg); this.status = status; }

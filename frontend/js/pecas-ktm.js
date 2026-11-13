@@ -250,7 +250,7 @@
                 '<span class="kt-mini">' + (g.mapa
                   ? '<img loading="lazy" src="' + esc(FG.ktmMapaUrl(marca, g.mapa)) + '" alt="">'
                   : '') + '</span>' +
-                '<span class="kt-rot"><b>' + esc(g.numero) + '</b>' + esc(g.nome) + '</span></button>';
+                '<span class="kt-rot"' + (g.nomeKtm ? ' title="KTM: ' + esc(g.nomeKtm) + '"' : '') + '><b>' + esc(g.numero) + '</b>' + esc(g.nome) + '</span></button>';
             }).join('') + '</div>'
           : '<p class="muted">A ' + esc(nomeMarca(marca)) + ' não tem grupos de ' +
             (lado === 'engine' ? 'motor' : 'chassi') + ' para este modelo.</p>');
@@ -334,7 +334,7 @@
       var outro = lado === 'chassi' ? 'engine' : 'chassi';
 
       var linhas = g.pecas.map(function (p, i) {
-        var busca = esc(((p.seq || '') + ' ' + p.sku + ' ' + p.nome + ' ' + p.adicional).toLowerCase());
+        var busca = esc(((p.seq || '') + ' ' + p.sku + ' ' + p.nome + ' ' + (p.nomeKtm || '') + ' ' + p.adicional).toLowerCase());
         return '<div class="part-row' + (p.pedivel ? '' : ' nao-pedivel') + '" data-row="' + i + '" data-busca="' + busca + '"' +
           ' data-num="' + esc(p.sku) + '">' +
           '<div class="pr-top">' +
@@ -342,6 +342,7 @@
             '<span class="kt-foto-slot">' + fotoPeca(p) + '</span>' +
             '<span class="pr-id">' +
               '<span class="pr-nome">' + esc(p.nome) + (p.novo ? ' <span class="kt-selo novo">Nova</span>' : '') + '</span>' +
+              (p.nomeKtm && p.nomeKtm !== p.nome ? '<span class="kt-orig" title="Nome no catálogo da KTM">KTM: ' + esc(p.nomeKtm) + '</span>' : '') +
               '<span class="pr-sku">' + esc(p.pedivel ? p.sku : (p.adicional || p.sku)) + '</span>' +
               (p.pedivel && p.adicional ? '<span class="kt-adic">' + esc(p.adicional) + '</span>' : '') +
             '</span>' +

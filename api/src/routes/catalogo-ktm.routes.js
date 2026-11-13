@@ -13,6 +13,7 @@ import { listarProdutos, importarProduto } from '../tiny.js';
 import { CATEGORIA_CATALOGO, categoriaDoCatalogo } from '../catalogo-produto.js';
 import { miniaturaDe } from '../miniaturas.js';
 import { erroSku } from '../validacao.js';
+import { traduzirPeca, traduzirGrupo, nomeDoTiny } from '../traducao-ktm.js';
 
 const router = Router();
 const soAdmin = [requireAuth, requireAdmin];
@@ -79,6 +80,16 @@ export function situacaoDaPeca(req, sku, portal, doTiny) {
   return { origem: doTiny ? 'fora' : 'verificar', opcoes: [opcao(req, { artigo: k }, local)] };
 }
 
+// Nome em português: o do Tiny quando a peça está lá (o que a equipe conhece); senão o dicionário.
+// Produto "fora do Tiny" cadastrado pelo catálogo não conta: o nome dele veio daqui mesmo.
+export function nomeEmPortugues(p, portal, doTiny) {
+  const local = portal.get(maiusc(p.sku));
+  const nomes = (doTiny || []).map(t => portal.get(maiusc(t.sku))?.Nome || t.nome);
+  if (!nomes.length && local?.TinyId) nomes.push(local.Nome);
+  return nomeDoTiny(nomes) || traduzirPeca(p.nome);
+}
+const grupoEmPortugues = (g) => ({ ...g, nome: traduzirGrupo(g.nome), nomeKtm: g.nome });
+
 router.get('/catalogo-ktm/marcas', ...soAdmin, (_req, res) => {
   res.json(Object.entries(catalogo.MARCAS).map(([id, m]) => ({ id, nome: m.nome })));
 });
@@ -115,7 +126,7 @@ router.get('/catalogo-ktm/:marca/modelos/:id/:lado', ...soAdmin, async (req, res
     const m = await catalogo.modelo(marca, req.params.id);
     if (!m) return res.status(404).json({ erro: 'Modelo não encontrado.' });
     const { foto, grupos } = await catalogo.grupos(marca, m.id, lado, { fresco: fresco(req) });
-    res.json({ modelo: m, lado, temFoto: !!foto, grupos });
+    res.json({ modelo: m, lado, temFoto: !!foto, grupos: grupos.map(grupoEmPortugues) });
   } catch (e) { falha(res, next)(e); }
 });
 
@@ -144,12 +155,19 @@ router.get('/catalogo-ktm/:marca/modelos/:id/:lado/grupos/:grupo', ...soAdmin, a
     res.json({
       modelo: m,
       lado,
-      grupo: lista[pos],
+      grupo: grupoEmPortugues(lista[pos]),
       vizinhos: { anterior: lista[pos - 1]?.id ?? null, proxima: lista[pos + 1]?.id ?? null },
       mapa: g.mapa ? { arquivo: g.mapa, largura: g.largura, altura: g.altura } : null,
-      pontos: g.pontos,
+      pontos: catalogo.corrigirPontos(g.pontos),
       indiceTiny: indiceTiny.situacao(),
-      pecas: pecas.map(p => ({ ...p, loja: p.pedivel ? situacaoDaPeca(req, p.sku, portal, doTiny.get(p.sku)) : null }))
+      pecas: pecas.map(p => ({
+        ...p,
+        nome: nomeEmPortugues(p, portal, doTiny.get(p.sku)),
+        nomeKtm: p.nome,
+        adicional: p.adicional ? traduzirPeca(p.adicional) : '',
+        adicionalKtm: p.adicional,
+        loja: p.pedivel ? situacaoDaPeca(req, p.sku, portal, doTiny.get(p.sku)) : null
+      }))
     });
   } catch (e) { falha(res, next)(e); }
 });
