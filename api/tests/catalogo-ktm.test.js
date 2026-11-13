@@ -100,9 +100,14 @@ describe('leitura das páginas da KTM', () => {
     const g = cat.lerPaginaGrupo(GRUPO);
     expect(g).toMatchObject({ mapa: '24A5400110.png', largura: 547, altura: 792 });
     expect(g.pontos).toEqual([
-      { sku: 'SPNO', x: 271, y: 792 - 617 - 28, w: 28, h: 28 },
-      { sku: '0025080256', x: 500, y: 792 - 751 - 28, w: 28, h: 28 }
+      { sku: 'SPNO', x: 271, y: 792 - 617 - 22, w: 22, h: 22 },
+      { sku: '0025080256', x: 500, y: 792 - 751 - 22, w: 22, h: 22 }
     ]);
+  });
+
+  it('pontos do cache antigo (28 px) ganham o tamanho da KTM sem mudar o canto inferior', () => {
+    expect(cat.corrigirPontos([{ sku: 'A', x: 10, y: 100, w: 28, h: 28 }, { sku: 'B', x: 5, y: 50, w: 22, h: 22 }]))
+      .toEqual([{ sku: 'A', x: 10, y: 106, w: 22, h: 22 }, { sku: 'B', x: 5, y: 50, w: 22, h: 22 }]);
   });
 
   it('kit de pistão com classe no código é pedível; espaço solto não', () => {
@@ -224,6 +229,8 @@ describe('rotas do catálogo KTM', () => {
     expect(r.body.pecas[1].loja).toMatchObject({
       origem: 'portal', opcoes: [{ artigo: '0025080256', noPortal: true, estoque: 3, preco: 12.5 }]
     });
+    expect(r.body.pecas[1]).toMatchObject({ nome: 'Parafuso', nomeKtm: 'HH collar screw M8x25' });
+    expect(r.body.pontos[1]).toEqual({ sku: '0025080256', x: 500, y: 792 - 751 - 22, w: 22, h: 22 });
     expect(pedidas.slice(1).every(p => /ASP\.NET_SessionId=abc/.test(p.opts.headers.Cookie || ''))).toBe(true);
   });
 
@@ -235,11 +242,14 @@ describe('rotas do catálogo KTM', () => {
       origem: 'tiny',
       opcoes: [{ artigo: '0025080256', classe: null, tinyId: '77', noPortal: false, estoque: null, preco: 4.9, foto: null, miniatura: null }]
     });
+    expect(r.body.pecas[1].nome).toBe('PECA 0025080256');           // nome do Tiny
   });
 
   it('grupo: em nenhum lugar = "fora"; índice montando = "verificar"', async () => {
     let r = await request(app(ADMIN)).get('/api/catalogo-ktm/gasgas/modelos/1003420981/chassi/grupos/72726');
     expect(r.body.pecas[1].loja.origem).toBe('fora');
+    expect(r.body.pecas[1].nome).toBe('PARAFUSO SEXTAVADO FLANGEADO M8X25');   // fora do Tiny: dicionário
+    expect(r.body.grupo).toMatchObject({ nome: 'SUSPENSÃO DIANTEIRA, MESAS', nomeKtm: 'FRONT FORK, TRIPLE CLAMP' });
     indice._limpar();
     let soltar; listarTrava = new Promise(s => { soltar = s; });
     r = await request(app(ADMIN)).get('/api/catalogo-ktm/gasgas/modelos/1003420981/chassi/grupos/72726');
