@@ -110,6 +110,17 @@ describe('leitura das páginas da KTM', () => {
       .toEqual([{ sku: 'A', x: 10, y: 106, w: 22, h: 22 }, { sku: 'B', x: 5, y: 50, w: 22, h: 22 }]);
   });
 
+  it('só EU de cada modelo e ano; sem EU, a versão sem mercado; só outros mercados sai', () => {
+    const M = (id, nome, mercado) => ({ id, nome, mercado });
+    const l = cat.soEU([
+      M('1', 'EC 250 2025', 'EU'), M('2', 'EC 250 2025', 'US'), M('3', 'EC 250 2025', null),
+      M('4', 'MC 250F 2025', null), M('5', 'MC 250F 2025', 'US'),
+      M('6', '125 XC 2025', 'US'), M('7', '690 SMC R 2025', 'EU, US'), M('8', '1290 SA 2023', 'EU/GB'),
+      M('9', 'FE 350 2025', 'EU'), M('10', 'FE 350 2025', 'BR')
+    ]);
+    expect(l.map(m => m.id)).toEqual(['1', '4', '7', '8', '9']);
+  });
+
   it('kit de pistão com classe no código é pedível; espaço solto não', () => {
     expect(cat.pedivel('55430007000 I')).toBe(true);
     expect(cat.pedivel('A44030007010 II')).toBe(true);
@@ -149,6 +160,8 @@ cat._trocarFetch(async (url, opts) => {
     { status: 200, headers: { 'content-type': tipo, 'set-cookie': 'ASP.NET_SessionId=abc; path=/' } });
   if (url.endsWith('.gasgas.com/')) return ok(HOME);
   if (url.includes('/Result/ExecuteSearch')) return ok(RESULTADO);
+  // VIN: chassi "…US…" é da versão americana (1003420982); os outros, da versão sem mercado.
+  if (url.endsWith('/Result')) return ok(RESULTADO.replace(/1003420981/g, /US/.test(String(opts.body)) ? '1003420982' : '1003420981'));
   if (url.includes('/ComponentGroupTemplate/Index/')) return ok(GRUPO);
   if (url.includes('ComponentGroupTemplateArticles_Read')) return ok(PECAS, 'application/json');
   return new Response('nao', { status: 404 });
@@ -207,11 +220,23 @@ describe('rotas do catálogo KTM', () => {
     expect(pedidas).toHaveLength(0);
   });
 
-  it('modelos: lê uma vez e serve do cache depois', async () => {
+  it('modelos: lê uma vez e serve do cache depois; a versão US sai', async () => {
     const a = app(ADMIN);
-    expect((await request(a).get('/api/catalogo-ktm/gasgas/modelos')).body).toHaveLength(2);
-    expect((await request(a).get('/api/catalogo-ktm/gasgas/modelos')).body).toHaveLength(2);
+    const l = (await request(a).get('/api/catalogo-ktm/gasgas/modelos')).body;
+    expect(l.map(m => m.id)).toEqual(['1003420981']);              // MC 250F sem mercado (motocross)
+    expect((await request(a).get('/api/catalogo-ktm/gasgas/modelos')).body).toHaveLength(1);
     expect(pedidas).toHaveLength(1);
+  });
+
+  it('chassi de moto de outro mercado abre a versão do catálogo com o mesmo nome e ano', async () => {
+    const r = await request(app(ADMIN)).get('/api/catalogo-ktm/gasgas/vin/VBKUS1234567890AB');
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ id: '1003420981' });
+  });
+
+  it('modelo de outro mercado não abre', async () => {
+    const r = await request(app(ADMIN)).get('/api/catalogo-ktm/gasgas/modelos/1003420982/chassi');
+    expect(r.status).toBe(404);
   });
 
   it('grupo: peça no portal mostra estoque e preço; cookie da sessão volta ao site', async () => {

@@ -305,14 +305,45 @@ async function comCache(arquivo, validade, fresco, buscar) {
 // Operações usadas pelas rotas
 // ---------------------------------------------------------------------------
 
-export function modelos(marca, { fresco = false } = {}) {
+// Árvore inteira da KTM (todos os mercados). O catálogo usa só modelosEU(); esta serve para o VIN.
+export function todosModelos(marca, { fresco = false } = {}) {
   return comCache(arquivoCache(marca, 'modelos.json'), VALIDADE.arvore, fresco, async () =>
     lerArvore(await pedir(marca, '/')));
+}
+
+// Pedido de 13/11/2026: só a versão europeia de cada modelo e ano. "EU, US" e "EU/GB" contam como EU.
+// Modelo e ano sem versão EU mas com uma versão sem mercado (motocross: MC, SX, TC… é a mesma no mundo
+// todo) fica com essa; com só outros mercados (US, BR, CN…) sai do catálogo.
+export const ehEU = (mercado) => String(mercado || '').split(/[\s,/]+/).includes('EU');
+export function soEU(lista) {
+  const porNome = new Map();
+  for (const m of lista) {
+    if (!porNome.has(m.nome)) porNome.set(m.nome, []);
+    porNome.get(m.nome).push(m);
+  }
+  const fica = new Set();
+  for (const l of porNome.values()) {
+    const eu = l.filter(m => ehEU(m.mercado));
+    for (const m of (eu.length ? eu : l.filter(x => !x.mercado))) fica.add(m);
+  }
+  return lista.filter(m => fica.has(m));
+}
+
+export async function modelos(marca, opcoes) {
+  return soEU(await todosModelos(marca, opcoes));
 }
 
 export async function modelo(marca, id) {
   const lista = await modelos(marca);
   return lista.find(m => m.id === String(id)) || null;
+}
+
+// Chassi de uma moto de outro mercado (ex.: BR) → a versão do catálogo com o mesmo nome e ano.
+export async function modeloDoVin(marca, id) {
+  const achado = (await todosModelos(marca)).find(m => m.id === String(id));
+  if (!achado) return null;
+  return (await modelos(marca)).find(m => m.id === achado.id) ||
+    (await modelos(marca)).find(m => m.nome === achado.nome) || null;
 }
 
 const isEngine = (lado) => (lado === 'engine' ? 'True' : 'False');

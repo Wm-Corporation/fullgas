@@ -112,8 +112,10 @@ router.get('/catalogo-ktm/:marca/vin/:vin', ...soAdmin, async (req, res, next) =
   if (!/^[A-HJ-NPR-Z0-9]{11,17}$/.test(vin)) return res.status(400).json({ erro: 'Chassi (VIN) inválido.' });
   try {
     const id = await catalogo.buscarVin(marca, vin);
-    const m = id && await catalogo.modelo(marca, id);
-    if (!m) return res.status(404).json({ erro: `Chassi não encontrado no catálogo da ${catalogo.MARCAS[marca].nome}.` });
+    if (!id) return res.status(404).json({ erro: `Chassi não encontrado no catálogo da ${catalogo.MARCAS[marca].nome}.` });
+    // Moto de outro mercado cai na versão europeia do mesmo modelo e ano (o catálogo só tem essas).
+    const m = await catalogo.modeloDoVin(marca, id);
+    if (!m) return res.status(404).json({ erro: 'Este chassi é de um modelo sem versão europeia; o catálogo mostra só os modelos EU.' });
     res.json(m);
   } catch (e) { falha(res, next)(e); }
 });
