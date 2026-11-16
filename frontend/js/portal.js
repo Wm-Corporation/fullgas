@@ -37,6 +37,7 @@
   var GATE_TABS = [
     ['loja', '.tabs a[href="/loja"]'],
     ['finder', '.tabs a[href="/finder"]'],
+    ['finder', '.tabs a[href="/pecas-ktm"]'],
     ['finder', '.topbar .pf-link'],
     ['pedidos', '.tabs a[data-rota="pedidos"]'],
     ['financeiro', '#tab-fin'],

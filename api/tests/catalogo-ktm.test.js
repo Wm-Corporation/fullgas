@@ -1,9 +1,11 @@
-// Catálogo de peças KTM: leitura do HTML do SparePartsFinder, rotas só de admin e peças fora do Tiny
+// Catálogo de peças KTM: leitura do HTML do SparePartsFinder, consulta do cliente sem preço, pacote do
+// modelo, cesta só do admin e peças fora do Tiny
 // escondidas de clientes. db.js e o fetch do site são dublês (nada vai à internet nem ao banco).
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 
 let consultas = [];
 let responder = () => [];
@@ -141,6 +143,20 @@ describe('leitura das páginas da KTM', () => {
 });
 
 // ---- rotas ----
+// Lê o .zip gerado (cabeçalhos locais em sequência; sem descritor de dados).
+function lerZip(buf) {
+  const out = {};
+  let i = 0;
+  while (buf.readUInt32LE(i) === 0x04034b50) {
+    const metodo = buf.readUInt16LE(i + 8), tam = buf.readUInt32LE(i + 18), n = buf.readUInt16LE(i + 26), x = buf.readUInt16LE(i + 28);
+    const nome = buf.slice(i + 30, i + 30 + n).toString('utf8');
+    const dados = buf.slice(i + 30 + n + x, i + 30 + n + x + tam);
+    out[nome] = metodo === 8 ? zlib.inflateRawSync(dados) : dados;
+    i += 30 + n + x + tam;
+  }
+  return out;
+}
+
 function app(user) {
   const a = express();
   a.use(express.json());
@@ -164,6 +180,7 @@ cat._trocarFetch(async (url, opts) => {
   if (url.endsWith('/Result')) return ok(RESULTADO.replace(/1003420981/g, /US/.test(String(opts.body)) ? '1003420982' : '1003420981'));
   if (url.includes('/ComponentGroupTemplate/Index/')) return ok(GRUPO);
   if (url.includes('ComponentGroupTemplateArticles_Read')) return ok(PECAS, 'application/json');
+  if (url.includes('/Images/maps/')) return new Response(Buffer.from('PNG-FALSO'), { status: 200, headers: { 'content-type': 'image/png' } });
   return new Response('nao', { status: 404 });
 });
 
@@ -208,10 +225,77 @@ describe('rotas do catálogo KTM', () => {
     await indice.atualizar({ forcar: true });
   });
 
-  it('cliente não entra (403)', async () => {
-    const r = await request(app(CLIENTE)).get('/api/catalogo-ktm/gasgas/modelos');
+  it('cliente consulta: nomes, prancha e quantidade, sem preço, estoque nem origem', async () => {
+    tinyLista = [T('99', '0025080256')];
+    await indice.atualizar({ forcar: true });
+    responder = (q) => /FROM dbo\.Produto p JOIN dbo\.Categoria/.test(q)
+      ? [{ Sku: '0025080256', Nome: '(OBSOLETA) Parafuso', Preco: 12.5, Estoque: 3, TinyId: '99', ImagemUrl: null, Categoria: 'pecas' }]
+      : [];
+    const adm = await request(app(ADMIN)).get('/api/catalogo-ktm/gasgas/modelos/1003420981/chassi/grupos/72726');
+    expect(adm.body.pecas[1].nome).toBe('(OBSOLETA) Parafuso');     // o admin vê a marcação do Tiny
+    const r = await request(app(CLIENTE)).get('/api/catalogo-ktm/gasgas/modelos/1003420981/chassi/grupos/72726');
+    expect(r.status).toBe(200);
+    expect(r.body.indiceTiny).toBeUndefined();
+    expect(r.body.pecas.every(p => p.loja === null)).toBe(true);
+    expect(r.body.pecas[1]).toMatchObject({ nome: 'Parafuso', nomeKtm: 'HH collar screw M8x25', quantidade: 4 });
+    expect(JSON.stringify(r.body)).not.toMatch(/12\.5|"estoque"|"preco"/);
+    expect((await request(app(CLIENTE)).get('/api/catalogo-ktm/gasgas/mapas/24A5400110.png')).status).toBe(200);
+  });
+
+  it('cliente não cadastra peça nem força a releitura no site da KTM', async () => {
+    const p = await request(app(CLIENTE)).post('/api/catalogo-ktm/pecas').send({ marca: 'gasgas', itens: [{ sku: '0025080256' }] });
+    expect(p.status).toBe(403);
+    await request(app(CLIENTE)).get('/api/catalogo-ktm/gasgas/modelos');
+    await request(app(CLIENTE)).get('/api/catalogo-ktm/gasgas/modelos?atualizar=1');
+    expect(pedidas).toHaveLength(1);
+  });
+
+  it('conta interna sem a área "finder" não entra (403)', async () => {
+    const r = await request(app({ ...CLIENTE, perm: ['loja'] })).get('/api/catalogo-ktm/gasgas/modelos');
     expect(r.status).toBe(403);
     expect(pedidas).toHaveLength(0);
+  });
+
+  it('pacote do modelo: monta, baixa o .zip com página, dados e prancha', async () => {
+    const a = app(CLIENTE);
+    const base = '/api/catalogo-ktm/gasgas/modelos/1003420981/pacote';
+    expect((await request(a).get(base)).body).toEqual({ estado: 'nenhum' });
+    expect((await request(a).get(base + '.zip')).status).toBe(404);
+    expect((await request(a).post(base)).status).toBe(202);
+    let s;
+    for (let i = 0; i < 50; i++) {
+      s = (await request(a).get(base)).body;
+      if (s.estado !== 'montando') break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    expect(s).toMatchObject({ estado: 'pronto' });
+    const z = await request(a).get(base + '.zip').buffer(true).parse((res, cb) => {
+      const partes = []; res.on('data', c => partes.push(c)); res.on('end', () => cb(null, Buffer.concat(partes)));
+    });
+    expect(z.status).toBe(200);
+    expect(z.headers['content-disposition']).toMatch(/gasgas-mc-250f.*\.zip/);
+    const arq = lerZip(z.body);
+    const nomes = Object.keys(arq);
+    const pasta = nomes[0].split('/')[0] + '/';
+    expect(nomes).toEqual(expect.arrayContaining([pasta + 'index.html', pasta + 'dados.json', pasta + 'dados.js',
+      pasta + 'LEIA-ME.txt', pasta + 'pranchas/24A5400110.png']));
+    expect(arq[pasta + 'pranchas/24A5400110.png'].toString()).toBe('PNG-FALSO');
+    const d = JSON.parse(arq[pasta + 'dados.json'].toString('utf8'));
+    expect(d.marca).toBe('GASGAS');
+    const g = d.lados.chassi[0];
+    expect(g).toMatchObject({ numero: '01', nome: 'SUSPENSÃO DIANTEIRA, MESAS', prancha: 'pranchas/24A5400110.png', largura: 547 });
+    expect(g.pecas[1]).toMatchObject({ codigo: '0025080256', nome: 'PARAFUSO SEXTAVADO FLANGEADO M8X25', quantidade: 4, opcional: false, avulsa: true });
+    expect(g.pecas[0]).toMatchObject({ avulsa: false });
+    expect(g.pontos[1]).toEqual({ codigo: '0025080256', x: 500, y: 792 - 751 - 22, w: 22, h: 22 });
+    expect(JSON.stringify(d)).not.toMatch(/preco|estoque|tiny/i);
+    // Pronto: pedir de novo não monta outra vez.
+    const antes = pedidas.length;
+    expect((await request(a).post(base)).body).toMatchObject({ estado: 'pronto' });
+    expect(pedidas.length).toBe(antes);
+  });
+
+  it('pacote de modelo fora do catálogo = 404', async () => {
+    expect((await request(app(CLIENTE)).post('/api/catalogo-ktm/gasgas/modelos/1003420982/pacote')).status).toBe(404);
   });
 
   it('marca desconhecida = 404, sem ir ao site', async () => {

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catálogo de peças</title>
+<style>
+  :root { --tinta:#1d1d1b; --cinza:#6b6b66; --linha:#e3e1dc; --fundo:#fff; --suave:#f6f5f2; --destaque:#ff6a13; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--tinta); background:var(--fundo); }
+  header { display:flex; gap:16px; align-items:center; padding:16px; border-bottom:1px solid var(--linha); flex-wrap:wrap; }
+  header img { width:160px; max-height:110px; object-fit:contain; }
+  header h1 { margin:0; font-size:20px; }
+  header p { margin:2px 0 0; color:var(--cinza); font-size:13px; }
+  main { padding:16px; max-width:1400px; margin:0 auto; }
+  .abas { display:flex; gap:6px; margin-bottom:14px; }
+  .abas button, .voltar { border:1px solid var(--linha); background:var(--suave); padding:7px 14px; border-radius:6px; cursor:pointer; font:inherit; }
+  .abas button.on { background:var(--tinta); color:#fff; border-color:var(--tinta); }
+  .grupos { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:10px; }
+  .grupo { border:1px solid var(--linha); border-radius:8px; background:#fff; padding:8px; cursor:pointer; text-align:left; font:inherit; }
+  .grupo:hover { border-color:var(--destaque); }
+  .grupo img { width:100%; height:120px; object-fit:contain; display:block; margin-bottom:6px; }
+  .grupo b { margin-right:6px; }
+  .tela { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1.1fr); gap:16px; align-items:start; margin-top:12px; }
+  @media (max-width: 900px) { .tela { grid-template-columns:1fr; } }
+  .prancha { position:relative; border:1px solid var(--linha); border-radius:8px; overflow:hidden; background:#fff; }
+  .prancha img { width:100%; display:block; }
+  .ponto { position:absolute; border:2px solid transparent; border-radius:50%; background:transparent; cursor:pointer; padding:0; }
+  .ponto:hover, .ponto.on { border-color:var(--destaque); background:rgba(255,106,19,.18); }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--linha); vertical-align:top; }
+  th { font-size:12px; color:var(--cinza); font-weight:600; }
+  tr.on td { background:#fff1e8; }
+  .orig, .adic { display:block; color:var(--cinza); font-size:12px; }
+  .selo { display:inline-block; font-size:11px; padding:1px 6px; border-radius:4px; background:#eceae4; color:#555; }
+  .cod { font-family:ui-monospace, Consolas, monospace; white-space:nowrap; }
+  footer { color:var(--cinza); font-size:12px; padding:16px; text-align:center; }
+</style>
+</head>
+<body>
+<header id="topo"></header>
+<main id="tela"></main>
+<footer id="rodape"></footer>
+<script src="dados.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = window.CATALOGO_FULLGAS;
+  var tela = document.getElementById('tela');
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  var NOMES_LADO = { chassi: 'Chassi', engine: 'Motor' };
+  var m = C.modelo;
+  document.title = C.marca + ' ' + m.nome + ' — Catálogo de peças';
+  document.getElementById('topo').innerHTML =
+    (C.foto ? '<img src="' + esc(C.foto) + '" alt="' + esc(m.nome) + '">' : '') +
+    '<div><h1>' + esc(C.marca + ' ' + m.nome) + '</h1><p>' + esc(m.caminho.join(' › ')) +
+    (m.codigo ? ' · código ' + esc(m.codigo) : '') + '</p></div>';
+  document.getElementById('rodape').textContent = C.fonte + ' · gerado em ' + new Date(C.geradoEm).toLocaleDateString('pt-BR');
+
+  var lados = Object.keys(C.lados).filter(function (l) { return C.lados[l].length; });
+
+  function lista(lado) {
+    tela.innerHTML =
+      '<div class="abas">' + lados.map(function (l) {
+        return '<button type="button" data-lado="' + l + '"' + (l === lado ? ' class="on"' : '') + '>' + NOMES_LADO[l] + '</button>';
+      }).join('') + '</div>' +
+      '<div class="grupos">' + C.lados[lado].map(function (g, i) {
+        return '<button type="button" class="grupo" data-i="' + i + '">' +
+          (g.prancha ? '<img loading="lazy" src="' + esc(g.prancha) + '" alt="">' : '') +
+          '<b>' + esc(g.numero) + '</b>' + esc(g.nome) + '</button>';
+      }).join('') + '</div>';
+  }
+
+  function grupo(lado, i) {
+    var g = C.lados[lado][i];
+    var W = g.largura || 1, H = g.altura || 1;
+    tela.innerHTML =
+      '<button type="button" class="voltar" data-voltar="' + lado + '">‹ ' + NOMES_LADO[lado] + '</button> ' +
+      '<strong>' + esc(g.numero + ' — ' + g.nome) + '</strong>' +
+      '<div class="tela"><div class="prancha">' +
+        (g.prancha ? '<img src="' + esc(g.prancha) + '" alt="' + esc(g.nome) + '">' + g.pontos.map(function (p) {
+          return '<button type="button" class="ponto" data-cod="' + esc(p.codigo) + '" title="' + esc(p.codigo) + '" style="left:' +
+            (p.x / W * 100) + '%;top:' + (p.y / H * 100) + '%;width:' + (p.w / W * 100) + '%;height:' + (p.h / H * 100) + '%"></button>';
+        }).join('') : '<p style="padding:16px">Sem desenho para este grupo.</p>') +
+      '</div><div><table><thead><tr><th>Nº</th><th>Código</th><th>Peça</th><th>Qtd.</th></tr></thead><tbody>' +
+        g.pecas.map(function (p) {
+          return '<tr data-cod="' + esc(p.codigo) + '"><td>' + esc(p.seq == null ? '—' : p.seq) + '</td>' +
+            '<td class="cod">' + esc(p.avulsa ? p.codigo : '—') + '</td>' +
+            '<td>' + esc(p.nome) + (p.nomeOriginal && p.nomeOriginal !== p.nome ? '<span class="orig">' + esc(p.nomeOriginal) + '</span>' : '') +
+              (p.adicional ? '<span class="adic">' + esc(p.adicional) + '</span>' : '') +
+              (p.avulsa ? '' : ' <span class="selo">Vem só no conjunto</span>') + '</td>' +
+            '<td>' + (p.opcional ? '<span class="selo" title="Fora da montagem original">Opcional</span>' : esc(p.quantidade)) + '</td></tr>';
+        }).join('') +
+      '</tbody></table></div></div>';
+  }
+
+  function realcar(cod) {
+    Array.prototype.forEach.call(tela.querySelectorAll('[data-cod]'), function (el) {
+      el.classList.toggle('on', el.getAttribute('data-cod') === cod);
+    });
+    var linha = tela.querySelector('tr[data-cod="' + (window.CSS && CSS.escape ? CSS.escape(cod) : cod) + '"]');
+    if (linha) linha.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  tela.addEventListener('click', function (e) {
+    var b = e.target.closest('button, tr[data-cod]');
+    if (!b) return;
+    if (b.hasAttribute('data-lado')) { location.hash = b.getAttribute('data-lado'); return; }
+    if (b.hasAttribute('data-voltar')) { location.hash = b.getAttribute('data-voltar'); return; }
+    if (b.classList.contains('grupo')) { location.hash = (location.hash.slice(1).split('/')[0] || lados[0]) + '/' + b.getAttribute('data-i'); return; }
+    if (b.hasAttribute('data-cod')) realcar(b.getAttribute('data-cod'));
+  });
+
+  function rota() {
+    var p = location.hash.slice(1).split('/');
+    var lado = C.lados[p[0]] && C.lados[p[0]].length ? p[0] : lados[0];
+    if (!lado) { tela.innerHTML = '<p>Este modelo não tem grupos de peças.</p>'; return; }
+    if (/^\d+$/.test(p[1] || '') && C.lados[lado][Number(p[1])]) grupo(lado, Number(p[1]));
+    else lista(lado);
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener('hashchange', rota);
+  rota();
+})();
+</script>
+</body>
+</html>
