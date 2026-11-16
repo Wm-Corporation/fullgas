@@ -1,13 +1,20 @@
 /* =========================================================
    FULLGAS B2B — Catálogo de Peças KTM (pecas-ktm.html), alimentado por /api/catalogo-ktm/*
-   Em teste: só administradores. Mesmo visual e mesma cesta do Localizador de Peças.
+   Cliente (área "finder"): consulta desenho, códigos e nomes e baixa o pacote do modelo para o site dele.
+   Admin: também vê preço, estoque e origem e põe na cesta (mesma cesta do Localizador de Peças).
    Rotas: #/<marca>  ·  #/<marca>/<modelo>/<lado>  ·  #/<marca>/<modelo>/<lado>/<grupo>
    ========================================================= */
 (function () {
   'use strict';
 
-  var sess = FG.guard('admin');
+  var sess = FG.guard();
   if (!sess) return;
+  if (!FG.temArea(sess, 'finder')) {
+    alert('Sua conta não tem acesso ao Catálogo de Peças. Fale com o gestor da concessionária.');
+    location.href = '/portal'; return;
+  }
+  var ADMIN = sess.papel === 'admin';
+  var INICIO = ADMIN ? '/admin' : '/portal';
 
   FG.pronto.then(function () {
 
@@ -18,6 +25,15 @@
 
   document.getElementById('fd-who').innerHTML = esc(sess.email) + ' - ' + FG.empresaDaSessao(sess);
 
+  // Cliente só consulta: sem cesta nem preço; o logo volta ao portal.
+  if (!ADMIN) {
+    document.body.classList.add('kt-consulta');
+    document.querySelector('.fd-eyebrow').textContent = 'Catálogo oficial';
+    document.querySelector('.fd-sub').textContent = 'Peças originais KTM, Husqvarna e GASGAS: desenhos, códigos e quantidades. ' +
+      'Para comprar, use a Loja. Cada modelo pode ser baixado em pacote para o seu site.';
+    var logo = document.querySelector('.fd-logo');
+    logo.href = INICIO; logo.title = 'Voltar ao portal';
+  }
   function refreshCart() { document.getElementById('fd-cart-n').textContent = FG.cartCount(); }
   refreshCart();
 
@@ -243,6 +259,9 @@
             '<div class="finder-links"><a href="#/' + marca + '/' + esc(m.id) + '/' + outro + '">Ver ' +
               (outro === 'engine' ? 'motor' : 'chassi') + '</a></div>' +
           '</div>' +
+          '<div class="kt-pacote" id="kt-pacote"><b>Pacote para o seu site</b>' +
+            '<p>Desenhos, foto, lista de peças em português e uma página pronta (index.html), num arquivo .zip.</p>' +
+            '<div class="kt-pac-acao" id="kt-pac-acao"></div></div>' +
         '</div>' +
         (r.grupos.length
           ? '<div class="kt-grupos">' + r.grupos.map(function (g) {
@@ -266,10 +285,44 @@
           location.hash = '#/' + marca + '/' + m.id + '/' + lado + '/' + b.getAttribute('data-grupo');
         });
       });
+      ligarPacote(marca, m, vigente);
     }, function (e) {
       if (!vigente()) return;
       fdView.innerHTML = '<p class="muted">' + esc((e && e.message) || 'Modelo não encontrado.') + '</p>';
     });
+  }
+
+  // Pacote do modelo: montado no servidor (pode levar alguns minutos na primeira vez) e baixado em .zip.
+  function ligarPacote(marca, m, vigente) {
+    var caixa = document.getElementById('kt-pac-acao');
+    function tamanho(b) { return b > 1048576 ? (b / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB'; }
+    function mostrar(s) {
+      if (!vigente()) return;
+      if (s.estado === 'pronto') {
+        caixa.innerHTML = '<a class="btn" href="' + esc(FG.ktmPacoteUrl(marca, m.id)) + '" download>⬇ BAIXAR PACOTE (' + tamanho(s.tamanho) + ')</a>' +
+          '<span class="muted">Gerado em ' + esc(new Date(s.geradoEm).toLocaleDateString('pt-BR')) + '</span>';
+      } else if (s.estado === 'montando') {
+        var pct = s.total ? Math.round(100 * s.feitos / s.total) : 0;
+        caixa.innerHTML = '<div class="kt-pac-barra"><span style="width:' + pct + '%"></span></div>' +
+          '<span class="muted">Montando… ' + (s.total ? s.feitos + ' de ' + s.total + ' grupos' : 'lendo os grupos') +
+          '. Pode sair desta tela: o pacote continua sendo montado.</span>';
+        setTimeout(function () { if (vigente()) FG.ktmPacote(marca, m.id).then(mostrar, erro); }, 2500);
+      } else {
+        caixa.innerHTML = (s.estado === 'erro' ? '<span class="kt-pac-erro">' + esc(s.erro) + '</span>' : '') +
+          '<button class="btn" type="button" id="kt-pac-montar">' + (s.estado === 'erro' ? 'TENTAR DE NOVO' : 'PREPARAR PACOTE') + '</button>';
+        document.getElementById('kt-pac-montar').addEventListener('click', function () {
+          this.disabled = true;
+          FG.ktmMontarPacote(marca, m.id).then(mostrar, erro);
+        });
+      }
+    }
+    function erro(e) {
+      if (!vigente()) return;
+      caixa.innerHTML = '<span class="kt-pac-erro">' + esc((e && e.message) || 'Falha ao consultar o pacote.') + '</span>' +
+        '<button class="btn" type="button" id="kt-pac-montar">TENTAR DE NOVO</button>';
+      document.getElementById('kt-pac-montar').addEventListener('click', function () { FG.ktmMontarPacote(marca, m.id).then(mostrar, erro); });
+    }
+    FG.ktmPacote(marca, m.id).then(mostrar, erro);
   }
 
   // Foto ampliada (pop-up fecha só no X, como no resto do portal).
@@ -347,19 +400,20 @@
           ' data-num="' + esc(p.sku) + '">' +
           '<div class="pr-top">' +
             '<span class="pr-num">' + esc(p.seq == null ? '—' : String(p.seq)) + '</span>' +
-            '<span class="kt-foto-slot">' + fotoPeca(p) + '</span>' +
+            (ADMIN ? '<span class="kt-foto-slot">' + fotoPeca(p) + '</span>' : '') +
             '<span class="pr-id">' +
               '<span class="pr-nome">' + esc(p.nome) + (p.novo ? ' <span class="kt-selo novo">Nova</span>' : '') + '</span>' +
               (p.nomeKtm && p.nomeKtm !== p.nome ? '<span class="kt-orig" title="Nome no catálogo da KTM">KTM: ' + esc(p.nomeKtm) + '</span>' : '') +
               '<span class="pr-sku">' + esc(p.pedivel ? p.sku : (p.adicional || p.sku)) + '</span>' +
               (p.pedivel && p.adicional ? '<span class="kt-adic">' + esc(p.adicional) + '</span>' : '') +
             '</span>' +
-            '<span class="pr-preco">' + precoDe(p) + '</span>' +
+            (ADMIN ? '<span class="pr-preco">' + precoDe(p) + '</span>' : '') +
           '</div>' +
           '<div class="pr-bot">' +
             '<span class="pr-info">' + qtdConjunto(p) +
-              '<span class="kt-sit">' + situacao(p) + '</span>' + seletorClasse(p, i) + '</span>' +
-            (p.pedivel
+              (ADMIN ? '<span class="kt-sit">' + situacao(p) + '</span>' + seletorClasse(p, i)
+                : (p.pedivel ? '' : '<span class="kt-selo conjunto">Vem só no conjunto</span>')) + '</span>' +
+            (ADMIN && p.pedivel
               ? '<span class="pr-acao"><label class="pr-sel"><input type="checkbox" class="pr-chk" data-row="' + i + '"> Selecionar</label>' +
                 '<input class="qn" type="number" min="0" step="1" value="0" aria-label="Quantidade" data-row="' + i + '"></span>'
               : '') +
@@ -372,6 +426,7 @@
         if (o && conta[o] !== undefined && !opcaoDe(p).noPortal) conta[o]++;
       });
       var avisos = [];
+      if (!ADMIN) conta = {};
       if (conta.tiny) avisos.push(conta.tiny + ' peça(s) estão no Tiny mas ainda não no portal: ao adicionar, são importadas com preço e estoque reais.');
       if (conta.fora) avisos.push(conta.fora + ' peça(s) não existem no Tiny: ao adicionar, são cadastradas no portal (só admin vê) e o checkout as manda para a black order.');
       if (conta.verificar) avisos.push('A lista de códigos do Tiny ainda está sendo lida (leva uns 2 minutos na primeira vez). ' +
@@ -389,7 +444,7 @@
         '<div class="part-layout">' +
           '<div class="part-col">' +
             '<div class="part-toolbar"><span class="muted">' + esc(g.grupo.numero + ' — ' + g.grupo.nome) + '</span>' +
-            '<button class="btn" id="fa-cart" type="button">🛒 ADICIONAR À CESTA</button></div>' +
+            (ADMIN ? '<button class="btn" id="fa-cart" type="button">🛒 ADICIONAR À CESTA</button>' : '') + '</div>' +
             (linhas
               ? '<div class="pt-busca"><span class="lupa">🔍</span>' +
                 '<input type="search" id="pt-busca" autocomplete="off" placeholder="Buscar peça por nº, código ou nome" aria-label="Buscar peça neste grupo">' +
@@ -431,6 +486,7 @@
   function linhaDe(i) { return fdView.querySelector('.part-row[data-row="' + i + '"]'); }
   function marcar(row, on) {
     var chk = row.querySelector('.pr-chk');
+    if (!ADMIN) { row.classList.toggle('sel', on); return; }   // consulta: só realça a linha
     if (!chk) return;
     chk.checked = on;
     row.classList.toggle('sel', on);
@@ -498,6 +554,7 @@
 
     // Adiciona à cesta. O que ainda não está no portal passa antes pela API: importa do Tiny ou,
     // se não existir lá, cadastra fora do Tiny (vira black order no checkout).
+    if (!ADMIN) return;
     document.getElementById('fa-cart').addEventListener('click', function () {
       var botao = this;
       var escolhidas = [];
@@ -589,6 +646,7 @@
         el.style.height = (pt.h / H * 100) + '%';
         el.addEventListener('click', function () {
           var alvo = null;
+          if (!ADMIN) Array.prototype.forEach.call(fdView.querySelectorAll('.part-row.sel'), function (r) { r.classList.remove('sel'); });
           Array.prototype.forEach.call(fdView.querySelectorAll('.part-row'), function (row) {
             if (row.getAttribute('data-num') === pt.sku) { marcar(row, true); if (!alvo) alvo = row; }
           });
@@ -676,7 +734,7 @@
 
   document.getElementById('fd-voltar').addEventListener('click', function () {
     if ((location.hash || '').split('/').length > 2 && history.length > 1) history.back();
-    else location.href = '/admin';
+    else location.href = INICIO;
   });
 
   pintarMarcas();

@@ -927,7 +927,13 @@
   FG.ktmGrupo = function (marca, modelo, lado, grupo) {
     return api(ktm(marca) + '/modelos/' + encodeURIComponent(modelo) + '/' + lado + '/grupos/' + encodeURIComponent(grupo));
   };
-  // Imagens (prancha e foto da moto) passam pela API: só abrem com sessão de admin.
+  // Pacote do modelo para o site do cliente: situação, montar e baixar (.zip).
+  FG.ktmPacote = function (marca, modelo) { return api(ktm(marca) + '/modelos/' + encodeURIComponent(modelo) + '/pacote'); };
+  FG.ktmMontarPacote = function (marca, modelo) {
+    return api(ktm(marca) + '/modelos/' + encodeURIComponent(modelo) + '/pacote', { method: 'POST' });
+  };
+  FG.ktmPacoteUrl = function (marca, modelo) { return API_BASE + ktm(marca) + '/modelos/' + encodeURIComponent(modelo) + '/pacote.zip'; };
+  // Imagens (prancha e foto da moto) passam pela API: só abrem com sessão.
   FG.ktmMapaUrl = function (marca, arquivo) { return API_BASE + ktm(marca) + '/mapas/' + encodeURIComponent(arquivo); };
   FG.ktmFotoUrl = function (marca, modelo) { return API_BASE + ktm(marca) + '/fotos/' + encodeURIComponent(modelo); };
   // Cadastra no portal as peças que ainda não existem e recarrega o catálogo da cesta.

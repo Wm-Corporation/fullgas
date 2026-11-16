@@ -1,4 +1,5 @@
-// Catálogo de peças KTM / Husqvarna / GASGAS (em teste: só administradores).
+// Catálogo de peças KTM / Husqvarna / GASGAS. Todo usuário com a área "finder" consulta (desenho, códigos,
+// nomes) e baixa o pacote do modelo para o site dele; preço, estoque e cesta são só do admin.
 // Lê o SparePartsFinder oficial (catalogo-ktm.js) e cruza cada peça pelo código, nesta ordem:
 //   1. produto do portal ligado ao Tiny → preço e estoque reais;
 //   2. só no Tiny (índice tiny-indice.js) → é importado ao ir para a cesta;
@@ -6,7 +7,7 @@
 // Kit de pistão vem no Tiny por classe ("55430007000 I" / "II"): o admin escolhe a classe.
 import { Router } from 'express';
 import { query } from '../db.js';
-import { requireAuth, requireAdmin } from '../auth.js';
+import { requireAuth, requireAdmin, requireArea } from '../auth.js';
 import * as catalogo from '../catalogo-ktm.js';
 import * as indiceTiny from '../tiny-indice.js';
 import { listarProdutos, importarProduto } from '../tiny.js';
@@ -14,9 +15,12 @@ import { CATEGORIA_CATALOGO, categoriaDoCatalogo } from '../catalogo-produto.js'
 import { miniaturaDe } from '../miniaturas.js';
 import { erroSku } from '../validacao.js';
 import { traduzirPeca, traduzirGrupo, nomeDoTiny } from '../traducao-ktm.js';
+import * as pacote from '../catalogo-ktm-pacote.js';
 
 const router = Router();
 const soAdmin = [requireAuth, requireAdmin];
+const consulta = [requireAuth, requireArea('finder')];
+const ehAdmin = (req) => req.user?.papel === 'admin';
 
 function marcaOu404(req, res) {
   const marca = String(req.params.marca || '').toLowerCase();
@@ -25,7 +29,8 @@ function marcaOu404(req, res) {
 }
 const ladoDe = (v) => (v === 'engine' ? 'engine' : 'chassi');
 const idValido = (v) => /^\d{1,12}$/.test(String(v || ''));
-const fresco = (req) => req.query.atualizar === '1';
+// Forçar a releitura no site da KTM é só do admin (cliente não dispara leitura extra lá).
+const fresco = (req) => ehAdmin(req) && req.query.atualizar === '1';
 const maiusc = (s) => String(s || '').trim().toUpperCase();
 
 // Erro do site da KTM vira mensagem clara; o resto segue o tratador central.
@@ -90,7 +95,27 @@ export function nomeEmPortugues(p, portal, doTiny) {
 }
 const grupoEmPortugues = (g) => ({ ...g, nome: traduzirGrupo(g.nome), nomeKtm: g.nome });
 
-router.get('/catalogo-ktm/marcas', ...soAdmin, (_req, res) => {
+// "(OBSOLETA) …" é marcação interna do Tiny: não aparece para o cliente nem no site dele.
+export const semMarcaInterna = (nome) => String(nome || '').replace(/^\s*\(OBSOLE[A-Z]*\)\s*/i, '');
+
+// Peças com o nome em português; devolve também o que foi achado no portal e no Tiny (para o admin).
+async function pecasEmPortugues(pecas, { publico = false } = {}) {
+  const ix = indiceTiny.atual();
+  const doTiny = new Map(pecas.filter(p => p.pedivel).map(p => [p.sku, indiceTiny.buscar(p.sku, ix)]));
+  const portal = await produtosPorSku([
+    ...doTiny.keys(),
+    ...[...doTiny.values()].flatMap(l => (l || []).map(t => t.sku))
+  ]);
+  return {
+    portal, doTiny,
+    pecas: pecas.map(p => {
+      const nome = nomeEmPortugues(p, portal, doTiny.get(p.sku));
+      return { ...p, nome: publico ? semMarcaInterna(nome) : nome, nomeKtm: p.nome };
+    })
+  };
+}
+
+router.get('/catalogo-ktm/marcas', ...consulta, (_req, res) => {
   res.json(Object.entries(catalogo.MARCAS).map(([id, m]) => ({ id, nome: m.nome })));
 });
 
@@ -101,12 +126,12 @@ router.post('/catalogo-ktm/tiny-indice', ...soAdmin, (_req, res) => {
   res.status(202).json(indiceTiny.situacao());
 });
 
-router.get('/catalogo-ktm/:marca/modelos', ...soAdmin, (req, res, next) => {
+router.get('/catalogo-ktm/:marca/modelos', ...consulta, (req, res, next) => {
   const marca = marcaOu404(req, res); if (!marca) return;
   catalogo.modelos(marca, { fresco: fresco(req) }).then(l => res.json(l), falha(res, next));
 });
 
-router.get('/catalogo-ktm/:marca/vin/:vin', ...soAdmin, async (req, res, next) => {
+router.get('/catalogo-ktm/:marca/vin/:vin', ...consulta, async (req, res, next) => {
   const marca = marcaOu404(req, res); if (!marca) return;
   const vin = String(req.params.vin || '').trim().toUpperCase();
   if (!/^[A-HJ-NPR-Z0-9]{11,17}$/.test(vin)) return res.status(400).json({ erro: 'Chassi (VIN) inválido.' });
@@ -120,7 +145,7 @@ router.get('/catalogo-ktm/:marca/vin/:vin', ...soAdmin, async (req, res, next) =
   } catch (e) { falha(res, next)(e); }
 });
 
-router.get('/catalogo-ktm/:marca/modelos/:id/:lado', ...soAdmin, async (req, res, next) => {
+router.get('/catalogo-ktm/:marca/modelos/:id/:lado(chassi|engine)', ...consulta, async (req, res, next) => {
   const marca = marcaOu404(req, res); if (!marca) return;
   if (!idValido(req.params.id)) return res.status(400).json({ erro: 'Modelo inválido.' });
   const lado = ladoDe(req.params.lado);
@@ -132,7 +157,7 @@ router.get('/catalogo-ktm/:marca/modelos/:id/:lado', ...soAdmin, async (req, res
   } catch (e) { falha(res, next)(e); }
 });
 
-router.get('/catalogo-ktm/:marca/modelos/:id/:lado/grupos/:grupo', ...soAdmin, async (req, res, next) => {
+router.get('/catalogo-ktm/:marca/modelos/:id/:lado(chassi|engine)/grupos/:grupo', ...consulta, async (req, res, next) => {
   const marca = marcaOu404(req, res); if (!marca) return;
   if (!idValido(req.params.id) || !idValido(req.params.grupo)) return res.status(400).json({ erro: 'Grupo inválido.' });
   const lado = ladoDe(req.params.lado);
@@ -146,14 +171,8 @@ router.get('/catalogo-ktm/:marca/modelos/:id/:lado/grupos/:grupo', ...soAdmin, a
 
     const g = await catalogo.grupo(marca, grupoId, m.id, lado, { fresco: fresco(req) });
     // Recalculado na leitura: o cache de grupos lidos antes da regra do kit de pistão ainda vale.
-    const pecas = g.pecas.map(p => ({ ...p, pedivel: catalogo.pedivel(p.sku) }));
-    const ix = indiceTiny.atual();
-    const pediveis = pecas.filter(p => p.pedivel);
-    const doTiny = new Map(pediveis.map(p => [p.sku, indiceTiny.buscar(p.sku, ix)]));
-    const portal = await produtosPorSku([
-      ...pediveis.map(p => p.sku),
-      ...[...doTiny.values()].flatMap(l => (l || []).map(t => t.sku))
-    ]);
+    const admin = ehAdmin(req);
+    const { pecas, portal, doTiny } = await pecasEmPortugues(g.pecas.map(p => ({ ...p, pedivel: catalogo.pedivel(p.sku) })), { publico: !admin });
     res.json({
       modelo: m,
       lado,
@@ -161,21 +180,20 @@ router.get('/catalogo-ktm/:marca/modelos/:id/:lado/grupos/:grupo', ...soAdmin, a
       vizinhos: { anterior: lista[pos - 1]?.id ?? null, proxima: lista[pos + 1]?.id ?? null },
       mapa: g.mapa ? { arquivo: g.mapa, largura: g.largura, altura: g.altura } : null,
       pontos: catalogo.corrigirPontos(g.pontos),
-      indiceTiny: indiceTiny.situacao(),
+      indiceTiny: admin ? indiceTiny.situacao() : undefined,
       pecas: pecas.map(p => ({
         ...p,
-        nome: nomeEmPortugues(p, portal, doTiny.get(p.sku)),
-        nomeKtm: p.nome,
         adicional: p.adicional ? traduzirPeca(p.adicional) : '',
         adicionalKtm: p.adicional,
-        loja: p.pedivel ? situacaoDaPeca(req, p.sku, portal, doTiny.get(p.sku)) : null
+        // Preço, estoque e origem (Tiny / fora do Tiny) só para o admin; o cliente só consulta.
+        loja: admin && p.pedivel ? situacaoDaPeca(req, p.sku, portal, doTiny.get(p.sku)) : null
       }))
     });
   } catch (e) { falha(res, next)(e); }
 });
 
-// Prancha: baixada uma vez e servida daqui (só para quem está logado como admin).
-router.get('/catalogo-ktm/:marca/mapas/:arquivo', ...soAdmin, async (req, res, next) => {
+// Prancha: baixada uma vez e servida daqui (só para quem está logado).
+router.get('/catalogo-ktm/:marca/mapas/:arquivo', ...consulta, async (req, res, next) => {
   const marca = marcaOu404(req, res); if (!marca) return;
   try {
     const abs = await catalogo.mapa(marca, req.params.arquivo);
@@ -185,7 +203,7 @@ router.get('/catalogo-ktm/:marca/mapas/:arquivo', ...soAdmin, async (req, res, n
 });
 
 // Foto da moto (a mesma do "Show Image" da KTM), baixada uma vez.
-router.get('/catalogo-ktm/:marca/fotos/:id', ...soAdmin, async (req, res, next) => {
+router.get('/catalogo-ktm/:marca/fotos/:id', ...consulta, async (req, res, next) => {
   const marca = marcaOu404(req, res); if (!marca) return;
   if (!idValido(req.params.id)) return res.status(400).json({ erro: 'Modelo inválido.' });
   try {
@@ -193,6 +211,37 @@ router.get('/catalogo-ktm/:marca/fotos/:id', ...soAdmin, async (req, res, next) 
     const abs = await catalogo.fotoModelo(marca, req.params.id);
     res.set('Cache-Control', 'private, max-age=604800');
     res.sendFile(abs);
+  } catch (e) { falha(res, next)(e); }
+});
+
+// Pacote do modelo para o site do cliente: GET = situação; POST = começa a montar; .zip = baixa.
+async function modeloOu404(req, res) {
+  const marca = marcaOu404(req, res); if (!marca) return null;
+  if (!idValido(req.params.id)) { res.status(400).json({ erro: 'Modelo inválido.' }); return null; }
+  const m = await catalogo.modelo(marca, req.params.id);
+  if (!m) { res.status(404).json({ erro: 'Modelo não encontrado.' }); return null; }
+  return { marca, m };
+}
+const nomearPecas = async (pecas) => (await pecasEmPortugues(pecas, { publico: true })).pecas;
+
+router.get('/catalogo-ktm/:marca/modelos/:id/pacote', ...consulta, async (req, res, next) => {
+  try {
+    const x = await modeloOu404(req, res); if (!x) return;
+    res.json(pacote.situacaoPacote(x.marca, x.m.id));
+  } catch (e) { falha(res, next)(e); }
+});
+router.post('/catalogo-ktm/:marca/modelos/:id/pacote', ...consulta, async (req, res, next) => {
+  try {
+    const x = await modeloOu404(req, res); if (!x) return;
+    res.status(202).json(pacote.iniciarPacote(x.marca, x.m, nomearPecas));
+  } catch (e) { falha(res, next)(e); }
+});
+router.get('/catalogo-ktm/:marca/modelos/:id/pacote.zip', ...consulta, async (req, res, next) => {
+  try {
+    const x = await modeloOu404(req, res); if (!x) return;
+    if (pacote.situacaoPacote(x.marca, x.m.id).estado !== 'pronto') return res.status(404).json({ erro: 'O pacote deste modelo ainda não foi montado.' });
+    res.set('Cache-Control', 'private, no-store');
+    res.download(pacote.arquivoPacote(x.marca, x.m.id), pacote.nomeDoArquivo(x.marca, x.m) + '.zip');
   } catch (e) { falha(res, next)(e); }
 });
 
