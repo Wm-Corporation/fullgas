@@ -1145,8 +1145,12 @@
     });
   }
   FG.sincronizarSessao = sincronizarSessao;
+  FG.temSessao = temSessao;
+  FG.limparSessaoLocal = limparLocal;
 
   // Sessão e cache ao abrir a página; as telas esperam FG.pronto.
-  FG.pronto = Promise.all([sincronizarSessao(), carregarCache()])
+  // sessaoConferida: a resposta de /auth/sessao (null = sem cookie de sessão ou sem rede).
+  FG.sessaoConferida = sincronizarSessao();
+  FG.pronto = Promise.all([FG.sessaoConferida, carregarCache()])
     .then(function () { return CACHE; });
 })();

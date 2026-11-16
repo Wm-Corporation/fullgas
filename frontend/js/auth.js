@@ -11,11 +11,11 @@
   var formEsq = document.getElementById('form-esq');
   var msg = document.getElementById('auth-msg');
 
-  // se já existe sessão, vai direto para o portal
-  if (FG.session()) { location.href = '/portal'; return; }
-
-  // Cookie válido sem perfil local: o adaptador refaz o perfil; segue para o portal.
-  FG.pronto.then(function () { if (FG.session()) location.href = '/portal'; });
+  // Vai ao portal só com a sessão confirmada pelo servidor. O perfil guardado no navegador não basta:
+  // sem o cookie de sessão o nginx devolve o /portal para cá, e as duas páginas ficavam se chamando
+  // sem parar (16/11/2026). Perfil sem cookie é resto de sessão vencida: sai do navegador.
+  if (FG.session() && !FG.temSessao()) FG.limparSessaoLocal();
+  FG.sessaoConferida.then(function (d) { if (d && d.usuario) location.href = '/portal'; });
 
   function showMsg(texto, tipo) {
     msg.textContent = texto || '';
