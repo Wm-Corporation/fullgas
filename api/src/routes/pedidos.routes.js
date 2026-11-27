@@ -371,8 +371,9 @@ export async function novoNumeroPedido(tx) {
   return num.recordset[0];
 }
 
-// Grava pedido 'Pendente' + itens (todos em estoque). Roda na transação de quem chama.
-// Sem fatura aqui: ela sai em cada remessa exportada ao Tiny (FaturaNaRemessa), só com o que foi encontrado.
+// Grava o pedido + itens (todos em estoque) já 'Aprovado' (na tela, "Em aberto"), exporta tudo ao Tiny
+// e gera a fatura na hora (regra de 27/11/2026). Quem chama roda processarExportacoes() depois do commit.
+// Roda na transação de quem chama.
 // itens: [{ produtoId, sku, nome, preco, qtd }] com o preço já da lista.
 export async function gravarPedido(tx, { numero, agora, user, lista, itens }) {
   const total = Math.round(itens.reduce((s, i) => s + i.preco * i.qtd, 0) * 100) / 100;
@@ -387,7 +388,7 @@ export async function gravarPedido(tx, { numero, agora, user, lista, itens }) {
     .query(`INSERT INTO dbo.Pedido (NumeroPedido, UsuarioId, EmpresaId, DataPedido, Status, Total,
                                     ListaPrecoId, ListaPrecoPercentual, FaturaNaRemessa)
             OUTPUT inserted.PedidoId
-            VALUES (@num, @uid, @eid, @data, 'Pendente', @total, @lid, @lpct, 1)`);
+            VALUES (@num, @uid, @eid, @data, 'Aprovado', @total, @lid, @lpct, 1)`);
   const pedidoId = insPed.recordset[0].PedidoId;
 
   for (const it of itens) {
@@ -402,11 +403,18 @@ export async function gravarPedido(tx, { numero, agora, user, lista, itens }) {
               VALUES (@pid, @prod, @sku, @nome, @preco, @qtd, 0)`);
   }
 
-  return { pedidoId, total };
+  // Vai inteiro ao Tiny agora (um pedido lá) e a fatura sai junto. Marca a exportação mesmo com ela
+  // desligada, para não reenviar ao ligar. QuantidadeEnviada fica 0: "Enviado" é o admin quem marca.
+  await new sql.Request(tx).input('pid', sql.Int, pedidoId)
+    .query('UPDATE dbo.PedidoItem SET QuantidadeExportada = Quantidade WHERE PedidoId = @pid');
+  const paraTiny = itens.map(i => ({ sku: i.sku, nome: i.nome, preco: i.preco, qtd: i.qtd }));
+  if (exportacaoLigada()) await inserirExportacao(tx, pedidoId, 'remessa', paraTiny);
+  const fatura = await gerarFaturaRemessa(tx, pedidoId, user.empresaId, paraTiny);
+  return { pedidoId, total, fatura };
 }
 
 // POST /api/pedidos — cria a partir da cesta: { itens: [{ sku, quantidade }] }.
-// Cada peça leva o que houver em estoque (pedido + fatura); o que faltar vira black order
+// Cada peça leva o que houver em estoque (pedido + fatura, já exportado ao Tiny); o que faltar vira black order
 // (sem fatura, sem Tiny), ligada ao mesmo número. Nada tem estoque = só black order, sem pedido.
 router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async (req, res, next) => {
   const itensReq = Array.isArray(req.body?.itens) ? req.body.itens : [];
@@ -481,8 +489,9 @@ router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async 
       })
       : [];
 
-    // Não exporta ao Tiny aqui: só na remessa. Até lá valem as reservas (pedidos e black orders liberadas).
+    // O pedido já foi ao Tiny e ganhou fatura dentro de gravarPedido; aqui só dispara o envio.
     await tx.commit();
+    if (pedidoId) processarExportacoes();   // fire-and-forget
 
     const emp = await query('SELECT RazaoSocial FROM dbo.Empresa WHERE EmpresaId = @id', { id: req.user.empresaId });
     if (pedidoId) {
@@ -502,7 +511,7 @@ router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async 
       itens: itensSnap.map(i => ({ artigo: i.sku, nome: i.nome, preco: i.preco, qtd: i.qtd })),
       blackOrders: blackOrders.map(b => ({ id: b.id, sku: b.sku, nome: b.nome, quantidade: b.quantidade })),
       total,
-      status: pedidoId ? 'Pendente' : null
+      status: pedidoId ? 'Aprovado' : null
     });
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }

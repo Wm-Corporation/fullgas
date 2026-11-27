@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin, requireAreaAny } from '../auth.js';
-import { atualizarEstoqueCesta } from '../tiny-pedidos.js';
+import { atualizarEstoqueCesta, processarExportacoes } from '../tiny-pedidos.js';
 import { registrarEventoPedido, resumoPecas } from '../historico-pedido.js';
 import { listaDaEmpresa, aplicarPercentual } from '../lista-preco.js';
 import { miniaturaDe } from '../miniaturas.js';
@@ -14,12 +14,6 @@ import { statusDe, pendente, liberarBlackOrders } from '../black-order.js';
 import { novoNumeroPedido, gravarPedido, podeVerFinanceiro } from './pedidos.routes.js';
 
 const router = Router();
-
-// Situações do envio que o admin escolhe (texto que o cliente vê).
-export const SITUACOES = [
-  'Aguardando pedido à fábrica', 'Pedida à Europa', 'Em produção na fábrica',
-  'Em trânsito', 'Em desembaraço aduaneiro', 'Chegou — em conferência'
-];
 
 const toIso = (d) => (d instanceof Date ? d.toISOString() : (d || null));
 
@@ -114,56 +108,6 @@ router.get('/blackorders', requireAuth, requireAreaAny(['loja', 'pedidos']), asy
       atualizadoEm: toIso(r.AtualizadoEm),
       atendimentos: porBo.get(r.BlackOrderId) || []
     })));
-  } catch (e) { next(e); }
-});
-
-// PATCH /api/blackorders (admin) — { ids, situacao?, observacao?, avisar? }.
-// Campo ausente não muda; '' apaga. avisar: notifica os clientes da mudança de situação.
-router.patch('/blackorders', requireAuth, requireAdmin, async (req, res, next) => {
-  try {
-    const b = req.body || {};
-    const ids = Array.isArray(b.ids) ? [...new Set(b.ids.map(Number))].filter(n => Number.isInteger(n) && n > 0) : [];
-    if (!ids.length || ids.length > 500) return res.status(400).json({ erro: 'Escolha de 1 a 500 black orders.' });
-
-    const campos = {};
-    if (b.situacao !== undefined) {
-      const s = String(b.situacao || '').trim();
-      if (s && !SITUACOES.includes(s)) return res.status(400).json({ erro: 'Situação do envio inválida.' });
-      campos.SituacaoEnvio = s || null;
-    }
-    if (b.observacao !== undefined) {
-      const s = String(b.observacao || '').trim();
-      if (s.length > 500) return res.status(400).json({ erro: 'Observação muito longa (máximo de 500 caracteres).' });
-      campos.Observacao = s || null;
-    }
-    if (!Object.keys(campos).length) return res.status(400).json({ erro: 'Nada para atualizar.' });
-
-    const params = {};
-    const marks = ids.map((id, i) => { params['i' + i] = id; return '@i' + i; });
-    const sets = Object.keys(campos).map(c => { params[c] = campos[c]; return `${c} = @${c}`; });
-    const alteradas = await query(
-      `UPDATE dbo.BlackOrder SET ${sets.join(', ')}, AtualizadoEm = SYSUTCDATETIME()
-       OUTPUT inserted.BlackOrderId, inserted.EmpresaId, inserted.Sku, inserted.NomeProduto,
-              inserted.NumeroPedido, inserted.SituacaoEnvio
-        WHERE BlackOrderId IN (${marks.join(',')}) AND Status IN ('Fila', 'Disponivel')`,
-      params
-    );
-
-    if (b.avisar && 'SituacaoEnvio' in campos) {
-      const porEmpresa = new Map();
-      for (const a of alteradas) {
-        if (!porEmpresa.has(a.EmpresaId)) porEmpresa.set(a.EmpresaId, []);
-        porEmpresa.get(a.EmpresaId).push(a);
-      }
-      for (const [empresaId, lista] of porEmpresa) {
-        await criarNotificacao({
-          empresaId, publico: 'cliente', origem: 'blackorder', link: '#blackorder', criadoPor: req.user.id,
-          titulo: 'Atualização da sua black order',
-          texto: lista.map(a => `• ${a.NomeProduto} (${a.Sku}) — compra ${a.NumeroPedido}: ${a.SituacaoEnvio || '—'}`).join('\n')
-        });
-      }
-    }
-    res.json({ ok: true, alteradas: alteradas.length });
   } catch (e) { next(e); }
 });
 
@@ -352,6 +296,7 @@ router.post('/blackorders/comprar', requireAuth, requireAreaAny(['loja', 'pedido
         }
       }
       await tx.commit();
+      if (pedidoId) processarExportacoes();   // o pedido já foi ao Tiny dentro de gravarPedido
 
       if (pedidoId) {
         await registrarEventoPedido({
