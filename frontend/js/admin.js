@@ -1581,7 +1581,7 @@
     // Grava a quantidade enviada; em pré-venda consome estoque.
     // Peça normal: só "Retirar peças" (remessa única), e só com o pedido Pendente (aprovado = conferido).
     // Garantia sem estoque (pré-venda) mantém o envio por peça.
-    var retirar = editavel && ped.status === 'Pendente' && ped.faturaNaRemessa && !it.backorder && it.qtdEnviada < it.qtd
+    var retirar = editavel && ped.status === 'Pendente' && ped.faturaNaRemessa && !it.backorder && it.qtdEnviada < it.qtd && !(it.qtdExportada >= it.qtd)
       ? '<button class="btn-line btn-mini it-nf" data-ped="' + esc(ped.id) + '" data-item="' + it.itemId +
         '" data-max="' + (it.qtd - it.qtdEnviada) + '">Retirar peças</button>' : '';
     var ctrl = !it.backorder
@@ -1697,8 +1697,8 @@
     var preVenda = o.itens.filter(function (it) { return it.backorder; });
     // Pedido entregue ou cancelado está fechado: as peças não mudam mais.
     var editavel = STATUS_TERMINAIS.indexOf(o.status) < 0;
-    // Peças que ainda não saíram (sem pré-venda): o Confirmar envio manda todas numa remessa só.
-    var aEnviar = emEstoque.reduce(function (s, it) { return s + Math.max(0, it.qtd - (it.qtdEnviada || 0)); }, 0);
+    // Só pedidos antigos (anteriores a 27/11/2026) têm peças fora do Tiny: os novos vão inteiros na compra.
+    var aEnviar = emEstoque.reduce(function (s, it) { return s + Math.max(0, it.qtd - Math.max(it.qtdEnviada || 0, it.qtdExportada || 0)); }, 0);
     return '<div class="venda-det">' +
       (editavel && aEnviar
         ? '<div class="adm-banner">' + (o.status === 'Pendente'
@@ -1760,7 +1760,7 @@
           '<td>' + esc(o.empresa) + '<br><span class="muted">' + esc(o.usuario) + '</span></td>' +
           '<td>' + FG.fmtDateTime(o.data) + '</td>' +
           '<td class="r">' + FG.fmtMoney(o.total) + '</td>' +
-          '<td>' + pill(o.status) +
+          '<td>' + pill(o.status).replace('>' + esc(o.status) + '<', '>' + esc(FG.rotuloStatusPedido(o.status)) + '<') +
           (STATUS_TERMINAIS.indexOf(o.status) >= 0
             ? '<br><span class="muted" style="font-size:11px;">Pedido ' + esc(o.status.toLowerCase()) + ' — status final.</span>'
             : '<br><select class="inline-status" data-id="' + o.id + '" data-atual="' + esc(o.status) + '" style="margin-top:6px;">' +
@@ -2100,13 +2100,8 @@
   /* =========================================================
      BLACK ORDER — o que faltou no estoque (sem fatura, sem Tiny). Sem fila: o admin libera cada uma.
      ========================================================= */
-  // Mesmas opções que a API aceita (blackorders.routes.js → SITUACOES).
-  var BO_SITUACOES = [
-    'Aguardando pedido à fábrica', 'Pedida à Europa', 'Em produção na fábrica',
-    'Em trânsito', 'Em desembaraço aduaneiro', 'Chegou — em conferência'
-  ];
   var BO_ROTULO_ADM = { Fila: 'Aguardando chegada', Disponivel: 'Liberada — aguardando o cliente', Atendida: 'Concluída', Cancelada: 'Cancelada' };
-  var boSel = {};   // BlackOrderId → true (seleção para atualizar ou liberar em lote)
+  var boSel = {};   // BlackOrderId → true (seleção para liberar em lote)
 
   function renderBlackOrderAdm() {
     h1.textContent = 'Black order'; setOn('blackorder');
@@ -2117,7 +2112,7 @@
     var lista = todos.filter(function (b) {
       if (!f.status && !aberta(b)) return false;
       if (f.status && f.status !== 'todas' && b.status !== f.status) return false;
-      return casaBusca('blackorder', [b.artigo, b.nome, b.empresa, b.compra, b.situacao]);
+      return casaBusca('blackorder', [b.artigo, b.nome, b.empresa, b.compra]);
     });
     Object.keys(boSel).forEach(function (id) {
       if (!todos.some(function (b) { return String(b.id) === id && aberta(b); })) delete boSel[id];
@@ -2134,11 +2129,6 @@
     var nSel = Object.keys(boSel).length;
     var painel =
       '<div class="bo-painel">' +
-      '<div class="field"><label for="bo-sit">Situação do envio</label><select id="bo-sit"><option value="">(manter)</option>' +
-      BO_SITUACOES.map(function (s) { return '<option>' + esc(s) + '</option>'; }).join('') + '</select></div>' +
-      '<div class="field bo-obs-campo"><label for="bo-obs">Observação para o cliente</label><input id="bo-obs" type="text" maxlength="500" placeholder="vazio = manter"></div>' +
-      '<label class="bo-avisar"><input type="checkbox" id="bo-avisar" checked> Avisar os clientes</label>' +
-      '<button class="btn-orange" id="bo-aplicar"' + (nSel ? '' : ' disabled') + '>Aplicar em ' + nSel + ' selecionada(s)</button>' +
       '<button class="btn-line" id="bo-liberar-sel"' + (nSel ? '' : ' disabled') + ' title="Libera tudo o que falta de cada uma, se houver estoque">' +
       'Liberar ' + nSel + ' selecionada(s)</button>' +
       '</div>';
@@ -2161,8 +2151,6 @@
         '<td class="r' + (podeSel && falta(b) > 0 && est >= falta(b) ? ' bo-est-ok' : '') + '">' + (podeSel ? est : '—') + '</td>' +
         '<td><span class="pill-status bo-' + esc(b.status) + '">' + esc(BO_ROTULO_ADM[b.status] || b.status) + '</span>' +
         (b.status === 'Disponivel' && b.avisadoEm ? '<div class="muted" style="font-size:11px;">avisado ' + FG.fmtDateTime(b.avisadoEm) + '</div>' : '') + '</td>' +
-        '<td>' + esc(b.situacao || '—') +
-        (b.observacao ? '<div class="muted" style="font-size:11px;">' + esc(b.observacao) + '</div>' : '') + '</td>' +
         '<td class="bo-acao" data-id="' + b.id + '">' + acoes + '</td></tr>';
     }
 
@@ -2172,14 +2160,14 @@
       var todasSel = abertas.length && abertas.every(function (id) { return boSel[id]; });
       return '<tr class="bo-grupo"><td>' + (abertas.length ? '<input type="checkbox" class="bo-sel-compra" data-ids="' + abertas.join(',') + '"' +
           (todasSel ? ' checked' : '') + ' title="Selecionar as peças desta compra">' : '') + '</td>' +
-        '<td colspan="9"><b>Compra ' + esc(g.compra) + '</b> · ' + esc(b0.empresa) +
+        '<td colspan="8"><b>Compra ' + esc(g.compra) + '</b> · ' + esc(b0.empresa) +
         ' <span class="muted">(' + esc(b0.usuario || '') + ') · ' + FG.fmtDateTime(b0.data) + ' · ' +
         g.itens.length + ' peça' + (g.itens.length > 1 ? 's' : '') + '</span></td></tr>' +
         g.itens.map(linha).join('');
     }).join('');
 
     view.innerHTML =
-      '<div class="adm-card"><div class="c-head">Atualizar e liberar</div><div class="c-body">' +
+      '<div class="adm-card"><div class="c-head">Liberar</div><div class="c-body">' +
       '<p class="muted" style="margin-top:0;">Não há fila: cada black order é atendida à parte. Quando a peça estiver em estoque, ' +
       'clique em <b>Liberar</b>: ela sai da loja, fica guardada para o cliente e ele é avisado para comprar pelo carrinho da black order.</p>' +
       painel + '</div></div>' +
@@ -2188,11 +2176,11 @@
         { k: 'status', rotulo: 'Situação', todos: 'Abertas', opcoes: [
           ['Fila', 'Aguardando chegada'], ['Disponivel', 'Liberada — aguardando o cliente'],
           ['Atendida', 'Concluídas'], ['Cancelada', 'Canceladas'], ['todas', 'Todas']] }
-      ], 'Buscar por artigo, peça, cliente, compra ou situação') +
+      ], 'Buscar por artigo, peça, cliente ou compra') +
       '<div class="tbl-scroll"><table class="tbl bo-tbl"><thead><tr><th></th><th>Peça</th>' +
       '<th class="r">Pedida</th><th class="r">Liberada</th><th class="r">Comprada</th><th class="r">Aguardando</th>' +
-      '<th class="r">Estoque loja</th><th>Status</th><th>Envio</th><th></th></tr></thead><tbody>' +
-      (corpo || vazioFiltro(10, todos.length ? 'Nenhuma black order com esse filtro.' : 'Nenhuma black order ainda.')) +
+      '<th class="r">Estoque loja</th><th>Status</th><th></th></tr></thead><tbody>' +
+      (corpo || vazioFiltro(9, todos.length ? 'Nenhuma black order com esse filtro.' : 'Nenhuma black order ainda.')) +
       '</tbody></table></div></div></div>';
 
     bindFiltro(renderBlackOrderAdm);
@@ -2237,23 +2225,6 @@
       });
       if (!ids.length) { FG.toast('As selecionadas já estão liberadas.', 'erro'); return; }
       liberar(ids.map(function (id) { return { id: id }; }), this);
-    });
-
-    document.getElementById('bo-aplicar').addEventListener('click', function () {
-      var btn = this;
-      var dados = { ids: Object.keys(boSel).map(Number), avisar: document.getElementById('bo-avisar').checked };
-      var sit = document.getElementById('bo-sit').value;
-      var obs = document.getElementById('bo-obs').value.trim();
-      if (sit) dados.situacao = sit;
-      if (obs) dados.observacao = obs;
-      if (!sit && !obs) { FG.toast('Escolha a situação ou escreva uma observação.', 'erro'); return; }
-      btn.disabled = true;
-      FG.boAtualizar(dados).then(function (r) {
-        if (!r.ok) { FG.toast(r.msg, 'erro'); btn.disabled = false; return; }
-        FG.toast(r.alteradas + ' black order(s) atualizada(s)' + (dados.avisar && sit ? ' e clientes avisados.' : '.'));
-        boSel = {};
-        renderBlackOrderAdm();
-      });
     });
 
     // Cancelar: o primeiro clique abre o motivo; o segundo confirma.

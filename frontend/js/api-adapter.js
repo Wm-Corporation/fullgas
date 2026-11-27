@@ -681,12 +681,6 @@
       return recarregarBlackOrders().then(function () { return r; }, function () { return r; });
     });
   };
-  // Admin: { ids, situacao?, observacao?, avisar? }.
-  FG.boAtualizar = function (dados) {
-    return req('PATCH', '/blackorders', dados).then(function (r) {
-      return recarregarBlackOrders().then(function () { return r; }, function () { return r; });
-    });
-  };
   // Admin libera peças que chegaram: [{ id, quantidade? }] → { ok, liberadas, recusadas } | { ok:false, msg }.
   FG.boLiberar = function (itens) {
     return req('POST', '/blackorders/liberar', { itens: itens }).then(function (r) {

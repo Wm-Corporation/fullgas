@@ -551,6 +551,8 @@
     /* ---- util ---- */
     // Valor escondido pela API vira "—".
     fmtMoneyOpt: function (v) { return v == null ? '—' : fmtMoney(v); },
+    // 'Aprovado' é só o nome gravado: desde 27/11/2026 o pedido nasce aprovado e aparece como "Em aberto".
+    rotuloStatusPedido: function (s) { return s === 'Aprovado' ? 'Em aberto' : s; },
     fmtMoney: fmtMoney, fmtDate: fmtDate, fmtDateTime: fmtDateTime, esc: esc, uid: uid, pad: pad,
 
     /* ---- máscaras de formulário (formatam enquanto digita) ---- */

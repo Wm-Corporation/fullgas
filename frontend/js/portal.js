@@ -1294,7 +1294,7 @@
       '<table class="table"><thead><tr><th class="filt">Título</th><th class="filt">Classe de pedido</th>' +
       '<th class="filt">Criado</th><th>Status</th><th class="right">Total</th></tr></thead><tbody id="pd-rows">' +
       (meus.length ? meus.map(function (o, i) {
-        var statusCol = '<span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span>' +
+        var statusCol = '<span class="pill-status ' + esc(o.status) + '">' + esc(FG.rotuloStatusPedido(o.status)) + '</span>' +
           (o.garantia ? ' <span class="pill-status Garantia">Garantia</span>' : '') +
           (o.progresso && o.progresso.parcial && o.status !== 'Parcial' && o.status !== 'Cancelado' ? ' <span class="pill-status Parcial">Parcial</span>' : '') +
           (o.temBackorder ? '<br><span class="muted" style="font-size:11px;">contém pré-venda</span>' : '') +
@@ -1382,7 +1382,7 @@
     // O VOLTAR fica só na trilha (botão padrão) — não se repete aqui dentro.
     var html =
       '<div class="ped-det-head"><h2 style="margin:0;">Pedido ' + esc(d.id) + '</h2>' +
-      '<span class="pill-status ' + esc(d.status) + '">' + esc(d.status) + '</span>' +
+      '<span class="pill-status ' + esc(d.status) + '">' + esc(FG.rotuloStatusPedido(d.status)) + '</span>' +
       (d.garantia ? ' <span class="pill-status Garantia">Garantia — reposição sem cobrança</span>' : '') +
       (pg.parcial && d.status !== 'Parcial' && !cancelado ? ' <span class="pill-status Parcial">Parcial</span>' : '') + '</div>' +
       '<p class="muted">' + FG.fmtDateTime(d.data) + ' · ' + esc(d.empresa) + ' · Total ' + FG.fmtMoneyOpt(d.total) + '</p>' +
@@ -1497,10 +1497,8 @@
           return '<a href="#pedido/' + esc(a.pedido) + '">' + esc(a.pedido) + '</a>';
         }).join(', ') + ')</span>' : '')) +
       (b.descartada ? dado('Não comprada / cancelada', b.descartada + ' un.') : '') +
-      dado('Situação do envio', esc(b.situacao || (boAberta(b) ? 'Aguardando atualização da Fullgas' : '—'))) +
       (b.preco !== undefined ? dado('Preço hoje', FG.fmtMoney(b.preco) + ' <span class="muted">/un.</span>') : '') +
       '</div>' +
-      (b.observacao ? '<div class="bo-obs"><b>Observação da Fullgas:</b> ' + esc(b.observacao) + '</div>' : '') +
       (boAberta(b)
         ? '<div class="bo-acoes"><button class="btn bo-desistir" data-id="' + b.id + '">Desistir desta peça</button></div>'
         : '') +
